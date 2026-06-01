@@ -81,7 +81,8 @@ can be overwritten, contradictions creep in, and meaning drifts. Instead:
 ## 2. Non-goals
 
 - **No HTTP / network interface *exposed* by `wiki/`.** It *uses* the Durable Streams client to
-  reach storage but exposes no network surface. (See `wiki-api/` future package.)
+  reach storage but exposes no network surface. The durable host it *connects to* is a separate
+  package, `wiki-server/` — a stream host, **not** an API over the engine (`wiki-server/DESIGN.md`).
 - **No CLI in `wiki/`.** (See `wiki-cli/` future package.)
 - **No free-form rich text.** Content is structured fields and typed items; prose lives inside
   *typed* fields (e.g. a `summary` string), never an opaque body.
@@ -206,7 +207,7 @@ exists) are **invariants** checked in command handlers, not status transitions.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│ Consumers:   wiki-cli (commander)      wiki-api (http)      LLM agent  │
+│ Consumers:   wiki-cli (commander)      LLM agent                       │
 └───────────────────────────────▲────────────────────────────────────────┘
                                  │  typed TS interface: createWiki(), IWorkspaceHandle, IPageView
 ┌────────────────────────────────┴───────────────────────────────────────┐
@@ -1337,8 +1338,9 @@ contention, so plain optimistic concurrency suffices — **no single-writer acto
 
 ## 16. Structure: folders, files, and module boundaries
 
-A pnpm/npm workspaces monorepo. `wiki/` is this package (transport-free core); `wiki-cli/` and
-`wiki-api/` are future siblings that consume it.
+A pnpm/npm workspaces monorepo. `wiki/` is this package (transport-free core); `wiki-cli/` is a
+future sibling that *consumes* it, and `wiki-server/` is the Durable Streams **host** the engine
+points at for storage — it imports neither `wiki` nor its types (`wiki-server/DESIGN.md`).
 
 ```
 .
@@ -1377,7 +1379,7 @@ A pnpm/npm workspaces monorepo. `wiki/` is this package (transport-free core); `
 │       │       └─ items.ts                    # shared item types: question, component, constraint, commit, step, task, case
 │       └─ testing.ts           # dev-only: start an in-memory DurableStreamTestServer + a wired IWiki
 ├─ wiki-cli/                    # FUTURE — commander CLI over `wiki`, generated from describeMutations()
-└─ wiki-api/                    # FUTURE — HTTP/RPC + SSE over `wiki`
+└─ wiki-server/                 # the durable Durable Streams HOST the engine points at (wiki-server/DESIGN.md)
 ```
 
 ### 16.1 What each file owns
@@ -1463,8 +1465,9 @@ The boundaries that keep the architecture honest:
 
 - **`wiki-cli/`** — `commander` CLI driven by `describeMutations()` (largely generated):
   `wiki ws create`, `wiki ws <id> page create`, `wiki ws <id> reparent`, `wiki ws <id> render`.
-- **`wiki-api/`** — HTTP exposing the command catalog as RPC + SSE for live workspace updates
-  (pairs with the DS tail).
+- **`wiki-server/`** — the durable Durable Streams **host** the engine connects to for shared,
+  multi-process deployments; specified separately in [`wiki-server/DESIGN.md`](../wiki-server/DESIGN.md).
+  (Replaces the former `wiki-api/` idea — the engine needs a stream *host*, not an API wrapper.)
 - **Projections / read models** across workspaces — "all open questions," search, dashboards.
 - **Branching / forking** a workspace (the event log makes "fork at version N" natural).
 - **Soft delete / archival** flows; **access control** (actor-scoped command permissions above
