@@ -24,14 +24,13 @@
 10. [Public TypeScript API](#10-public-typescript-api)
 11. [Deterministic Markdown rendering](#11-deterministic-markdown-rendering)
 12. [Designed for LLMs](#12-designed-for-llms)
-13. [Worked example: a workspace of Goals](#13-worked-example-a-workspace-of-goals)
+13. [Worked example: an LLM plans and ships a feature](#13-worked-example-an-llm-plans-and-ships-a-feature)
 14. [Errors & validation](#14-errors--validation)
 15. [Concurrency, idempotency & ordering](#15-concurrency-idempotency--ordering)
-16. [Package & repo layout](#16-package--repo-layout)
+16. [Structure: folders, files, and module boundaries](#16-structure-folders-files-and-module-boundaries)
 17. [Testing strategy](#17-testing-strategy)
-18. [Open questions](#18-open-questions)
-19. [Future work](#19-future-work)
-20. [References](#20-references)
+18. [Future work](#18-future-work)
+19. [References](#19-references)
 - [Appendix A: Decision records](#appendix-a-decision-records)
 
 ---
@@ -42,10 +41,10 @@ We want a wiki that an LLM agent (and a handful of collaborating humans) can aut
 **safely and reproducibly**. Free-text wikis are a poor fit for autonomous agents: anything
 can be overwritten, contradictions creep in, and meaning drifts. Instead:
 
-- **The shape of every page is known.** Pages are typed documents (a "Goal", a "Decision
-  Record", a "Spec"), not blobs of prose.
+- **The shape of every page is known.** Pages are typed documents (a "Feature brief", an
+  "Implementation plan", a "Testing plan"), not blobs of prose.
 - **Pages change only through named operations** with **typed arguments and return values** —
-  `addRequirement({ text, priority })`, `answerQuestion({ questionId, answer })` — never a
+  `addConstraint({ text })`, `answerQuestion({ questionId, answer })` — never a
   `setBody(markdown)`.
 - **Lifecycle is enforced, not suggested.** Each page and certain sub-entities have a
   **status** governed by an explicit **finite state machine**; a mutation is legal only where
@@ -90,7 +89,7 @@ can be overwritten, contradictions creep in, and meaning drifts. Instead:
   between workspaces is a non-atomic export/import (a saga), accepted as rare. *Within* a
   workspace, everything is atomic.
 - **No general-purpose query language** in v1. Reads are "open a workspace," "load a page,"
-  "walk the tree." Richer cross-workspace projections are [future work](#19-future-work).
+  "walk the tree." Richer cross-workspace projections are [future work](#18-future-work).
 - **Not a CRDT / not offline-merge.** We assume one logical writer per workspace at a time and
   resolve the occasional concurrent write with optimistic concurrency
   ([§15](#15-concurrency-idempotency--ordering)).
@@ -148,7 +147,7 @@ primitive for the agent loop."**
   testing, CI, and embedding in a Node.js application"; production via a Caddy plugin or
   Electric Cloud.
 
-Three findings that directly shape this design ([details + sources](#20-references)):
+Three findings that directly shape this design ([details + sources](#19-references)):
 
 1. **Atomicity is per-stream, and a multi-event append is atomic.** Servers "SHOULD commit
    producer state updates and log appends atomically," and a writer can "atomically append a
@@ -165,7 +164,7 @@ Three findings that directly shape this design ([details + sources](#20-referenc
    stream, because we need atomic **cross-page content** moves and a single tail for all
    updates — see [ADR-002](#adr-002--workspace-as-the-aggregate-one-stream-2026-06-01).
 
-**The client (confirmed; uncertain shapes marked in [§18](#18-open-questions)):**
+**The client (illustrative; the `EventLog` mapping lives in [§9.1](#91-one-stream-per-workspace)):**
 
 ```ts
 import { DurableStream, IdempotentProducer, stream } from "@durable-streams/client";
@@ -188,16 +187,16 @@ producer.append(event); await producer.flush(); await producer.close();
 | **Page** | A typed wiki document, modeled as an **entity inside a workspace** (not its own stream). Has a status FSM, typed fields, and items. |
 | **Tree** | The primary hierarchy: each page has one `parentId` (or none = top-level) and an ordered list of children. |
 | **Link** | A typed, non-hierarchical cross-reference between two pages in the workspace (`from`, `to`, `role`), forming the graph beyond the tree. |
-| **Page type** | A reusable definition (e.g. `goal`): fields, item types, status FSM, commands, reducer, renderer. |
+| **Page type** | A reusable definition (e.g. `feature-brief`): fields, item types, status FSM, commands, reducer, renderer. |
 | **Status** | A page's (or item's, or the workspace's) current FSM state. |
-| **Item** | A typed sub-entity inside a page (e.g. a `requirement`, `question`), optionally with its own status FSM. |
+| **Item** | A typed sub-entity inside a page (e.g. a `component`, `constraint`, `question`), optionally with its own status FSM. |
 | **Mutation / Command** | A named, typed operation. **Structural** (workspace-scoped: createPage, reparent, reorder, link, moveItem…) or **content/status** (page-scoped, FSM-gated). |
 | **Event** | An immutable fact appended to the workspace stream; folded to derive state. Carries the `pageId` it affects (if any). |
 | **Reducer / `apply`** | Pure `(workspaceState, event) => workspaceState`. |
 | **EventLog** | The single module that talks to Durable Streams (events↔messages, version↔offset, OCC). |
 
 **Unifying principle (G3):** *every status mutation is an FSM transition* — including
-self-transitions for content edits that don't change status (`draft —addRequirement→ draft`).
+self-transitions for content edits that don't change status (`draft —addConstraint→ draft`).
 **Structural/relational rules** (acyclic tree, parent exists, unique sibling title, link target
 exists) are **invariants** checked in command handlers, not status transitions.
 
@@ -262,7 +261,7 @@ and the operations that must be atomic span multiple pages:
 
 - **Structural:** reparent a page, reorder siblings, add/remove a link — must keep the tree
   acyclic and referentially intact.
-- **Cross-page content:** e.g. *move a requirement from page A to page B* — two pages change
+- **Cross-page content:** e.g. *move an open question from one page to another* — two pages change
   together.
 
 Both require the affected pages to live in the **same stream**, so the **Workspace is the
@@ -309,12 +308,12 @@ interface IWorkspaceState {
 
 interface IPageNode {
   id: PageId;
-  type: string;                  // "goal"
+  type: string;                  // "feature-brief"
   parentId: PageId | null;       // null = top-level (child of @root)
   title: string;                 // denormalized into the node (sibling-uniqueness + nav)
   status: string;                // page-type FSM status
   fields: unknown;               // typed per page type
-  items: Record<string, IItemRecord[]>;  // e.g. { question: [...], requirement: [...] }
+  items: Record<string, IItemRecord[]>;  // e.g. { component: [...], question: [...], commit: [...] }
   createdAt: string; updatedAt: string;
 }
 
@@ -332,7 +331,7 @@ interface IItemRecord { id: string; status?: string; /* + typed fields per item 
 | `setPageTitle` | `{ pageId, title }` | `PageTitleSet` | — |
 | `archivePage` | `{ pageId }` | `PageArchived` | — |
 | `link` / `unlink` | `{ from, to, role }` | `LinkAdded` / `LinkRemoved` | — |
-| `moveItem` | `{ from, to, itemType, itemId }` | `<Item>Removed` + `<Item>Added` (e.g. `RequirementRemoved`+`RequirementAdded`) | — |
+| `moveItem` | `{ from, to, itemType, itemId }` | `<Item>Removed` + `<Item>Added` (e.g. `QuestionRemoved`+`QuestionAdded`) | — |
 | `archiveWorkspace` | `{}` | `WorkspaceArchived` | — |
 
 Every stream's first event is `WorkspaceCreated { name }`.
@@ -352,20 +351,27 @@ Every stream's first event is `WorkspaceCreated { name }`.
 A page is an `IPageNode`; its content and status change only via the **page type's** own commands.
 `definePageType(...)` is the full entity spec:
 
-- **Identity** `PageId`, type-prefixed (e.g. `goal:01J…`).
+- **Identity** `PageId`, type-prefixed (e.g. `feature-brief:01J…`).
 - **Status FSM** — the page lifecycle, with self-transitions for content edits that don't change
   status.
 - **Commands** — page-scoped, FSM-gated; invoked `ws.mutate(pageId, command, args)`.
 - **Events** — carry `pageId`; folded by the page type's `apply` into the node's `fields`/`items`.
 - **Reducer** `apply(node, event) → node` and **Renderer** `render(node, ctx) → markdown`
   (deterministic).
+- **Required children** (optional) — page types in `requiredChildren` are auto-created
+  *atomically* with the page and pinned (can't be reparented out or archived alone); e.g.
+  `feature-brief` mandates an implementation plan, checklist, and testing plan
+  ([§13](#13-worked-example-an-llm-plans-and-ships-a-feature)).
 
 **Registered page types (v1):**
 
 | Page type | Status FSM | Items owned | Full spec |
 |---|---|---|---|
-| `goal` | `draft → inReview → approved → active → completed` (+ `abandoned`) | `requirement`, `question` | [§13](#13-worked-example-a-workspace-of-goals) |
-| *(future)* `adr`, `spec`, `risk`, `experiment`, … | per type | per type | [§19](#19-future-work) |
+| `feature-brief` *(top-level; mandates 3 child pages)* | `draft → planning → building → review → shipped` (+ `abandoned`) | `component`, `constraint`, `question`, `commit` | [§13](#13-worked-example-an-llm-plans-and-ships-a-feature) |
+| `implementation-plan` | `draft → ready` | `step`, `question` | [§13](#13-worked-example-an-llm-plans-and-ships-a-feature) |
+| `implementation-checklist` | `building → complete` | `task` | [§13](#13-worked-example-an-llm-plans-and-ships-a-feature) |
+| `testing-plan` | `draft → ready` | `case` | [§13](#13-worked-example-an-llm-plans-and-ships-a-feature) |
+| *(future)* `adr`, `spec`, `risk`, `experiment`, … | per type | per type | [§18](#18-future-work) |
 
 ### 6.4 Item — an entity inside a page (one spec per item type)
 
@@ -382,8 +388,13 @@ Items are typed sub-entities held in `IPageNode.items[itemType]`. `defineItemTyp
 
 | Item type | Status FSM | Owning page types | Commands |
 |---|---|---|---|
-| `question` | `open → resolved` | `goal` (extensible) | `askQuestion`, `answerQuestion` |
-| `requirement` | _(none — plain typed item)_ | `goal` | `addRequirement`, `removeRequirement`, `moveItem` |
+| `question` | `open → resolved` | feature-brief, implementation-plan | `askQuestion`, `answerQuestion` |
+| `component` | _(none)_ | feature-brief | `addComponent`, `removeComponent` |
+| `constraint` | _(none)_ | feature-brief | `addConstraint`, `removeConstraint` |
+| `commit` | _(none)_ | feature-brief | `recordCommit` |
+| `step` | _(none; ordered)_ | implementation-plan | `addStep`, `removeStep`, `reorderSteps` |
+| `task` | `todo ⇄ done` | implementation-checklist | `addTask`, `checkTask`, `uncheckTask`, `removeTask` |
+| `case` | `planned → passed`/`failed` | testing-plan | `addCase`, `markCasePassed`, `markCaseFailed` |
 
 ### 6.5 Composition & identity
 
@@ -392,7 +403,7 @@ Workspace  (aggregate · 1 stream)                         WorkspaceId
 ├─ children: Map<parent → ordered PageId[]>   ← the tree
 ├─ links:    { from, to, role }[]             ← graph edges beyond the tree
 └─ pages: Map<PageId, IPageNode>
-   └─ Page  (entity · per page type)                      PageId   "goal:01J…"
+   └─ Page  (entity · per page type)                      PageId   "feature-brief:01J…"
       ├─ fields   (typed per page type)
       └─ items: Record<itemType, IItemRecord[]>
          └─ Item (entity · per item type)                 itemId scoped to page  "q:01J…"
@@ -419,7 +430,7 @@ StreamFS hybrid (per-page content streams) — none needed at the target scale.
 | Concern | Mechanism | Examples |
 |---|---|---|
 | Workspace lifecycle | workspace-status FSM | `active → archived` (then most mutations are blocked) |
-| Page lifecycle | page-type status FSM | Goal: `draft → inReview → approved → active → completed` |
+| Page lifecycle | page-type status FSM | feature-brief: `draft → planning → building → review → shipped` |
 | Item lifecycle | item-type FSM | Question: `open → resolved` (no transition answers it twice) |
 | Tree / links | **invariants in handlers** | acyclic, parent-exists, unique sibling title, link-target-exists |
 
@@ -488,6 +499,7 @@ export interface IEventEnvelope<T extends string = string, P = unknown> {
   pageId?: PageId;        // the page this event targets (absent for pure workspace events)
   version: number;        // 0-based per-WORKSPACE sequence; defines fold order
   type: T;                // "QuestionAnswered" | "PageReparented" | ...
+  schemaVersion: number;  // schema version this payload was written under (§8.5)
   payload: P;
   meta: IEventMeta;
 }
@@ -515,17 +527,29 @@ function foldWorkspace(events: IEventEnvelope[], from?: IWorkspaceState): IWorks
 
 `applyWorkspace` handles structural events itself (mutating `pages`/`children`/`links`) and
 delegates content events to the target page type's `apply`. The reducer is **total and pure**
-(no I/O, clock, or randomness) and asserts `version` contiguity (fail fast on a gap).
+(no I/O, clock, or randomness) and asserts `version` contiguity (fail fast on a gap). Before
+`apply` sees an event, the reducer **upcasts** its payload to the current schema
+([§8.5](#85-schema-evolution-upcasting)).
 
 ### 8.3 Snapshots
 
-Because the workspace stream accumulates **all** page + structure activity, snapshots are a
-**recommended optimization** (and become important as a workspace ages). A snapshot records
-`{ version, offset, state }` — the fold result, the workspace `version` it covers, and the
-Durable Streams **offset** to resume from. On load: read the latest snapshot, then `read(from =
-snapshot.offset)` and fold only the tail. Snapshots are written every *N* events (and/or on
-idle) to a **sibling stream** `…/workspace/{id}/snapshot`; they are a cache, never the source of
-truth. Early in a workspace's life, rehydrate-from-zero is fine and snapshots can be skipped.
+Because the workspace stream accumulates **all** page + structure activity, snapshots keep
+rehydration bounded. A snapshot records `{ version, cursor, state }` — the fold result, the
+workspace `version` it covers, and the coarse Durable Streams resume **cursor** (the stream's
+next-offset at that point). On load: read the latest snapshot, `read(from = snapshot.cursor)`, and
+fold the tail, **skipping any event with `version ≤ snapshot.version`** — the cursor is coarse, so
+the fold stays idempotent.
+
+**Cadence:** write a snapshot **every `snapshotEvery` events (default 100) or after
+`snapshotIdleMs` of write-idle (default 5000 ms) — whichever comes first**
+([§10.1](#101-entry-point--configuration)). The event count bounds rehydration under load; the
+idle timer ensures a quiescent workspace still gets a fresh snapshot so reopening is fast.
+
+**Storage:** a **sibling append-only stream** `…/workspace/{id}/snapshot`; readers take the latest
+message. With infinite retention ([§9.1](#91-one-stream-per-workspace)) superseded snapshots
+linger harmlessly (small; optional compaction later). A snapshot is a cache, never the source of
+truth — and a schema bump ([§8.5](#85-schema-evolution-upcasting)) invalidates older snapshots, so
+they're dropped and re-folded.
 
 ### 8.4 Live projection
 
@@ -533,6 +557,36 @@ truth. Early in a workspace's life, rehydrate-from-zero is fine and snapshots ca
 after a local append, and a **live tail** (`subscribe`) that folds in events from other writers.
 So the common path needs no re-read, and a reader's view stays fresh — this is the same tail
 that powers G6.
+
+### 8.5 Schema evolution (upcasting)
+
+The log is immutable, so as a schema changes we **upcast on read** rather than rewrite history.
+Each page/item type carries a current `version`; every event is stamped with the `schemaVersion`
+it was written under ([§8.1](#81-the-event-envelope)). A type supplies **upcasters** keyed by
+from-version — each a pure `(payload) => payload` migrating one step. During fold, before `apply`,
+the reducer composes upcasters from `event.schemaVersion` up to the type's current `version`, so
+`apply`/`render` only ever see the current shape:
+
+```ts
+// in a page type def (§10.5):
+version: 3,
+upcasters: {
+  1: (p) => ({ ...p, priority: "medium" }),                          // v1 → v2: new field w/ default
+  2: ({ owner, ...p }) => ({ ...p, owners: owner ? [owner] : [] }),  // v2 → v3: reshaped
+},
+```
+
+Upcasters are **pure and total**, do no I/O, and never mutate the stored event (they transform a
+copy on the way into the fold). New events are written at the current `version`; structural
+(workspace) events version independently of page types. A payload whose `schemaVersion` exceeds
+the registered `version` (a forward/unknown version) is a hard error (`UnknownPageTypeError`) —
+see below.
+
+> **Unknown page/event types on rehydrate.** Because state is folded from history, opening a
+> workspace whose stream contains a page `type` or event the configured `pageTypes` don't cover
+> has no reducer/renderer to apply. Policy: **fail closed** — `openWorkspace` throws
+> `UnknownPageTypeError` naming the missing type(s) rather than silently dropping events. Register
+> the type (or a compatibility shim) to proceed. This keeps folds total and history honest.
 
 ---
 
@@ -556,6 +610,7 @@ in the wiki ([§3.2](#32-durable-streams-the-persistence-substrate)).
 | our `version` (0..N) | carried in payload; **not** the opaque DS offset |
 | optimistic concurrency | `expectedVersion` → conditional append (`PreconditionFailedError`) |
 | exactly-once / fencing | `Producer-Id` = `workspaceId`, `Producer-Seq` = `version`, `Producer-Epoch` fences a stale writer |
+| retention | **infinite** — no TTL on workspace streams; full history is the source of truth (snapshots are an optimization, not a trim) |
 
 ```ts
 // illustrative — the ONLY module that imports @durable-streams/client
@@ -574,28 +629,42 @@ export class EventLog {
     return { headVersion: events.at(-1)!.version /*, lastOffset from flush */ };
   }
 
-  async read(ws: WorkspaceId, fromOffset?: string): Promise<{ event: IEventEnvelope; offset: string }[]> {
-    const res = await stream<IEventEnvelope>({ url: this.urlFor(ws), offset: fromOffset, live: false });
-    const items = await res.json();
-    return items.map((event, i) => ({ event, offset: /* per-message offset or synth */ String(i) }));
+  /** Read from a coarse cursor; order & dedup are by `event.version`, never the offset. */
+  async read(ws: WorkspaceId, fromCursor?: string): Promise<{ events: IEventEnvelope[]; nextCursor: string }> {
+    const res = await stream<IEventEnvelope>({ url: this.urlFor(ws), offset: fromCursor, live: false });
+    return { events: await res.json(), nextCursor: res.nextOffset };   // batch-level resume cursor
   }
 
-  async subscribe(ws: WorkspaceId, handler: (e: { event: IEventEnvelope; offset: string }) => unknown, opts?: { fromOffset?: string }) {
-    const res = await stream<IEventEnvelope>({ url: this.urlFor(ws), offset: opts?.fromOffset, live: true });
-    return res.subscribeJson(async (batch) => { for (const event of batch.items) await handler({ event, offset: batch.offset ?? "" }); });
+  /** Live tail: hand the consumer each batch's events + the cursor to persist for resume. */
+  async subscribe(ws: WorkspaceId, onBatch: (events: IEventEnvelope[], cursor: string) => unknown, opts?: { fromCursor?: string }) {
+    const res = await stream<IEventEnvelope>({ url: this.urlFor(ws), offset: opts?.fromCursor, live: true });
+    return res.subscribeJson(async (batch) => { await onBatch(batch.items, batch.offset); });
   }
 }
 ```
 
-> The `/* … */` spots are [open questions](#18-open-questions) about offset surfacing; they are
-> contained in this one file. Snapshots ([§8.3](#83-snapshots)) use a sibling
-> `…/workspace/{id}/snapshot` stream through the same `EventLog`.
+> **Offsets.** We never rely on per-message offsets: per-event order and dedup come from our
+> monotonic `version`; the Durable Streams offset is only a coarse resume **cursor** (the
+> response's next-offset / each batch's offset). On resume we read from the saved cursor and skip
+> any event with `version ≤` the last folded version. Snapshots ([§8.3](#83-snapshots)) persist
+> that cursor with the state in a sibling `…/workspace/{id}/snapshot` stream, via the same `EventLog`.
 
 ### 9.2 Why no port / interface?
 
 One backend (Durable Streams); its durability is already a server setting; the in-memory
 `DurableStreamTestServer` is a faithful, fast test store (no hand-rolled fake to drift). Promote
 `EventLog` to an interface only if a real second backend appears. See ADR-001.
+
+### 9.3 The namespace catalog
+
+A namespace owns one extra stream — the **catalog** at `…/{namespace}/_catalog` — recording
+workspace lifecycle (`WorkspaceRegistered { id, name }`, `WorkspaceRenamed`, `WorkspaceArchived`).
+`wiki.listWorkspaces()` folds it; `createWorkspace` / `archive` append to it. It is a **secondary
+index, not a consistency boundary**: creating a workspace writes the workspace stream first, then
+appends a catalog entry (a second stream → not atomic with the first), so the catalog is
+eventually consistent and fully **rebuildable** by enumerating the `…/{namespace}/workspace/`
+streams. The catalog is also where **namespace-level configuration** will live (defaults, access
+policy, the registered page-type set) — *reserved, not yet designed*.
 
 ---
 
@@ -609,8 +678,8 @@ interfaces. Consumers program against the interfaces only — if a symbol isn't 
 
 > Code layout reflects the split: the **interfaces** live in `src/api.ts` (no implementation);
 > the classes that satisfy them live in `core/` and `stores/`; `index.ts` re-exports the public
-> surface ([§16](#16-package--repo-layout)). For a runnable walkthrough see
-> [§13](#13-worked-example-a-workspace-of-goals); this section is the reference.
+> surface ([§16](#16-structure-folders-files-and-module-boundaries)). For a runnable walkthrough see
+> [§13](#13-worked-example-an-llm-plans-and-ships-a-feature); this section is the reference.
 
 ### 10.1 Entry point & configuration
 
@@ -630,8 +699,10 @@ export interface IWikiConfig {
   readonly ids?: () => string;
   /** Default `actor` stamped on event metadata when a call doesn't override it. */
   readonly actor?: string;
-  /** Write a snapshot every N events per workspace; omit or 0 to disable. @see §8.3 */
+  /** Snapshot after this many events per workspace, or 0 to disable count-based snapshots. @default 100 @see §8.3 */
   readonly snapshotEvery?: number;
+  /** Time-based backup: snapshot after this many ms of write-idle. @default 5000 @see §8.3 */
+  readonly snapshotIdleMs?: number;
   /** Bound the in-memory projection cache of open workspaces, or `false` to disable caching. */
   readonly cache?: { readonly maxWorkspaces?: number } | false;
   /** Optional sink invoked for every appended event (logging/metrics). Must not throw. */
@@ -644,7 +715,8 @@ export interface IStreamConfig {
   readonly baseUrl: string;
   /** Namespace/tenant segment: streams live at `{baseUrl}/{namespace}/workspace/{id}`. */
   readonly namespace: string;
-  /** Optional stream TTL (seconds), passed to `DurableStream.create`. */
+  /** Optional stream TTL (seconds). **Omit for infinite retention** (the default) — event sourcing
+   *  needs full history; snapshots are an optimization, not a trimming mechanism (§9.1). */
   readonly ttlSeconds?: number;
 }
 ```
@@ -667,10 +739,11 @@ export interface IWiki {
   /**
    * Open an existing workspace, rehydrating its state (latest snapshot + folded tail).
    * @throws {@link WorkspaceNotFoundError} if no stream exists for `id`.
+   * @throws {@link UnknownPageTypeError} if the history contains an unregistered page/event type (§8.5).
    */
   openWorkspace(id: WorkspaceId): Promise<IWorkspaceHandle>;
 
-  /** List workspaces in the configured namespace. */
+  /** List workspaces in the configured namespace (folded from the namespace catalog, §9.3). */
   listWorkspaces(): Promise<readonly IWorkspaceSummary[]>;
 
   /** Release cached projections and live subscriptions held by this instance. */
@@ -731,7 +804,7 @@ export interface IWorkspaceHandle {
   unlink(from: PageId, to: PageId, role: string): Promise<void>;
 
   /**
-   * Atomically move an item between pages (e.g. a requirement A→B): the item type's
+   * Atomically move an item between pages (e.g. a question A→B): the item type's
    * remove+add events are written in a single append. @throws {@link ItemNotFoundError}
    */
   moveItem(input: { from: PageId; to: PageId; itemType: string; itemId: string }): Promise<void>;
@@ -795,6 +868,8 @@ export interface IPageView<K extends PageTypeName = PageTypeName> {
   parentId(): PageId | null;
   /** Current tree title. */
   title(): string;
+  /** This page's child pages, in tree order. */
+  children(): readonly IPageView[];
   /** Current FSM status. */
   status(): StatusOf<K>;
   /** Deep-readonly typed snapshot of this page's state (fields + items). */
@@ -846,14 +921,22 @@ export function defineItemType<Status extends string = never>(def: IItemTypeDef<
 
 /** Full specification of a page entity (§6.3). */
 export interface IPageTypeDef<State, Status extends string, Cmds extends CommandMap, Ev extends DomainEvent> {
-  /** Stable type tag, also the page-id prefix (e.g. "goal"). */
+  /** Stable type tag, also the page-id prefix (e.g. "feature-brief"). */
   readonly type: string;
   /** Status assigned when a page of this type is created. */
   readonly initialStatus: Status;
+  /** Current schema version for this type's events; new events are stamped with it (§8.5). */
+  readonly version: number;
+  /** Upcasters keyed by from-version, composed on fold to migrate old payloads up to `version` (§8.5). */
+  readonly upcasters?: Readonly<Record<number, (payload: unknown) => unknown>>;
   /** The page lifecycle FSM, built with {@link t} (§7.2). Include self-transitions for content edits. */
   readonly statusTransitions: readonly ITransition<Status, keyof Cmds & string>[];
   /** Item types this page may contain, keyed by item-type tag. */
   readonly items?: Readonly<Record<string, IItemType>>;
+  /** Page types auto-created (atomically) as children whenever a page of this type is created,
+   *  and thereafter pinned — they can't be reparented out or archived independently.
+   *  e.g. `feature-brief` → ["implementation-plan","implementation-checklist","testing-plan"]. */
+  readonly requiredChildren?: readonly string[];
   /** Page-scoped commands, keyed by command name. */
   readonly commands: Cmds;
   /** Pure reducer: fold one event into this page's state. Must be total, no I/O. */
@@ -938,7 +1021,7 @@ export type CommandMap = Readonly<Record<string, ICommandDef<any, any, any, any>
 | Import | Public exports |
 |---|---|
 | `wiki` | `createWiki`; interfaces `IWiki`, `IWorkspaceHandle`, `IPageView`, `IWikiConfig`, `IStreamConfig`; authoring `definePageType`, `defineItemType`, `t` and the `*Def` / `ISchema` / context interfaces; the data types; all error classes. |
-| `wiki/pages/goal` | `GoalPage: IPageType` (the worked example) and its exported `GoalState` / `GoalCommands` types. |
+| `wiki/pages/feature` | the worked-example page types — `FeatureBrief`, `ImplementationPlan`, `ImplementationChecklist`, `TestingPlan` (each `IPageType`) — and their exported state/command types. |
 | `wiki/testing` *(dev only)* | helpers to start an in-memory `DurableStreamTestServer` and an `IWiki` bound to it. |
 
 ---
@@ -990,131 +1073,208 @@ docs.
 
 ---
 
-## 13. Worked example: a workspace of Goals
+## 13. Worked example: an LLM plans and ships a feature
 
-A workspace "Onboarding revamp" holds Goal pages in a tree. Matches the motivating scenario plus
-the structural/cross-page needs.
+The running example: an agent drives a feature from brief → plan → implementation → shipped, in
+one workspace. It exercises a page type that **mandates child pages**, four item types,
+references-as-links, and **cross-page invariants** that are only checkable because the brief and
+its children share one aggregate (§6, ADR-002).
 
-### 13.1 Page (Goal) lifecycle FSM
+### 13.1 The page types
+
+A workspace is a *project* holding many top-level **feature briefs**. A `feature-brief`
+**requires three child pages**, created atomically with it:
+
+| Page type | Role | Status FSM | Items it owns | Required children |
+|---|---|---|---|---|
+| `feature-brief` | brief: components, constraints, open questions, commits | `draft → planning → building → review → shipped` (+ `abandoned`) | `component`, `constraint`, `question`, `commit` | `implementation-plan`, `implementation-checklist`, `testing-plan` |
+| `implementation-plan` | ordered plan of attack | `draft → ready` | `step`, `question` | — |
+| `implementation-checklist` | tracked work items | `building → complete` | `task` | — |
+| `testing-plan` | test cases + results | `draft → ready` | `case` | — |
+
+`createPage("feature-brief", …)` emits, in **one atomic append**, the brief's `PageCreated` plus
+a `PageCreated` for each mandated child — so a brief never exists without its
+plan/checklist/testing-plan, and those children can't be reparented out or archived alone
+(`InvariantViolationError`). **References** to other features/pages are typed **links**
+(`ws.link(brief, other, "depends-on" | "relates-to" | "supersedes")`), rendered as the brief's
+"References" section. The brief's own fields:
+
+```ts
+interface IFeatureBriefFields {
+  summary?: string;
+  components:  { id: string; name: string }[];                                  // affected components (web-app, cli, …)
+  constraints: { id: string; text: string }[];                                  // major design constraints
+  questions:   { id: string; text: string; status: "open" | "resolved"; answer?: string }[];
+  commits:     { id: string; sha: string; message: string; url?: string }[];     // relevant commits
+  // references are links on the workspace graph (not a field) — rendered via ctx.linksOf
+}
+```
+
+### 13.2 The FSMs that matter
+
+The brief lifecycle — the agent iterates planning ⇄ building:
 
 ```mermaid
 stateDiagram-v2
   [*] --> draft
-  draft --> draft: setTitle / setSummary / addRequirement / removeRequirement / askQuestion / answerQuestion
-  draft --> inReview: submitForReview
+  draft --> draft: setSummary / addComponent / addConstraint / askQuestion / answerQuestion
+  draft --> planning: beginPlanning
+  planning --> planning: addConstraint / askQuestion / answerQuestion
+  planning --> building: beginImplementation
+  building --> building: addConstraint / askQuestion / answerQuestion / recordCommit
+  building --> planning: reopenPlanning
+  building --> review: submitForReview
+  review --> building: requestChanges
+  review --> shipped: ship
   draft --> abandoned: abandon
-  inReview --> inReview: askQuestion / answerQuestion
-  inReview --> draft: requestChanges
-  inReview --> approved: approve
-  inReview --> abandoned: abandon
-  approved --> active: activate
-  approved --> abandoned: abandon
-  active --> active: askQuestion / answerQuestion
-  active --> completed: complete
-  active --> abandoned: abandon
-  completed --> [*]
+  planning --> abandoned: abandon
+  building --> abandoned: abandon
+  review --> abandoned: abandon
+  shipped --> [*]
   abandoned --> [*]
 ```
 
-Question item FSM — "can't answer twice" is just the missing transition out of `resolved`:
+The item FSMs — a question can't be answered twice; a checklist task toggles; a test case records
+a run (`component`, `constraint`, and `commit` are plain items, no lifecycle):
 
 ```mermaid
 stateDiagram-v2
-  [*] --> open
-  open --> resolved: answer
-  resolved --> [*]
+  state question {
+    [*] --> open
+    open --> resolved: answerQuestion
+  }
+  state task {
+    [*] --> todo
+    todo --> done: checkTask
+    done --> todo: uncheckTask
+  }
+  state "test case" as testcase {
+    [*] --> planned
+    planned --> passed: markCasePassed
+    planned --> failed: markCaseFailed
+    failed  --> passed: markCasePassed
+  }
 ```
 
-### 13.2 A session (structure + content + cross-page move)
+### 13.3 A session: plan, build, ship
 
 ```ts
-const ws = await wiki.createWorkspace({ name: "Onboarding revamp" });
+const ws = await wiki.createWorkspace({ name: "Acme platform" });
 
-const root = await ws.createPage("goal", { title: "Ship onboarding v2", parentId: null });
-const sso  = await ws.createPage("goal", { title: "SSO", parentId: root });   // child of root
+// One call → brief + its 3 mandated children, atomically (4 PageCreated events in one append).
+const brief = await ws.createPage("feature-brief", { title: "Bulk export", parentId: null });
+const [plan, checklist, testPlan] = ws.page(brief).children().map((c) => c.id);
 
-const { questionId } = await ws.mutate(root, "askQuestion", { text: "Which IdPs?" });
-await ws.mutate(root, "answerQuestion", { questionId, answer: "Okta + Entra" });
-const { requirementId } = await ws.mutate(root, "addRequirement", { text: "SAML login", priority: "high" });
+// ── fill the brief ──
+await ws.mutate(brief, "setSummary", { text: "Let users export their workspace as CSV/JSON." });
+await ws.mutate(brief, "addComponent", { name: "web-app" });
+await ws.mutate(brief, "addComponent", { name: "cli" });
+await ws.mutate(brief, "addConstraint", { text: "Export must stream; never buffer >50MB in memory." });
+const { questionId: q1 } = await ws.mutate(brief, "askQuestion", { text: "Which formats in v1?" });
+await ws.mutate(brief, "answerQuestion", { questionId: q1, answer: "CSV and JSON; Parquet later." });
+await ws.link(brief, "feature-brief:01H…rbac" as PageId, "depends-on");   // reference another feature in this workspace
 
-// structural: SSO is really its own top-level goal → reparent (atomic)
-await ws.reparent(sso, null);
+// ── planning ──
+await ws.mutate(brief, "beginPlanning", {});
+await ws.mutate(plan, "addStep", { text: "Stream a ReadableStream from a new /export endpoint." });
+await ws.mutate(plan, "addStep", { text: "Add `wiki export` CLI wrapping the endpoint." });
+const { caseId: c1 } = await ws.mutate(testPlan, "addCase", { text: "10k-row export < 2s, memory flat." });
 
-// cross-page content: the SAML requirement belongs to SSO now → move it (atomic: 1 append, 2 events)
-await ws.moveItem({ from: root, to: sso, itemType: "requirement", itemId: requirementId });
+// a question that's really a planning detail → move it onto the plan (atomic cross-page move)
+const { questionId: q2 } = await ws.mutate(brief, "askQuestion", { text: "Page size while streaming?" });
+await ws.moveItem({ from: brief, to: plan, itemType: "question", itemId: q2 });
+
+// ── implementation ── (beginImplementation is gated: plan ≥1 step AND testing-plan ≥1 case)
+await ws.mutate(brief, "beginImplementation", {});
+const { taskId: t1 } = await ws.mutate(checklist, "addTask", { text: "Streaming /export endpoint" });
+const { taskId: t2 } = await ws.mutate(checklist, "addTask", { text: "`wiki export` CLI" });
+const { taskId: t3 } = await ws.mutate(checklist, "addTask", { text: "Docs + changelog" });
+
+await ws.mutate(brief, "recordCommit", { sha: "a1b2c3d", message: "feat(api): streaming export endpoint" });
+await ws.mutate(checklist, "checkTask", { taskId: t1 });
+await ws.mutate(brief, "recordCommit", { sha: "e4f5g6h", message: "feat(cli): wiki export" });
+await ws.mutate(checklist, "checkTask", { taskId: t2 });
+await ws.mutate(testPlan, "markCasePassed", { caseId: c1 });
+
+// ── review → ship ── (ship is gated: checklist 100% done, all cases passed, no open questions)
+await ws.mutate(brief, "submitForReview", {});
+await ws.mutate(checklist, "checkTask", { taskId: t3 });   // finish docs after review feedback
+await ws.mutate(brief, "ship", {});
 ```
 
-Resulting workspace tree:
+### 13.4 Cross-page invariants the single aggregate buys us
 
-```
-@root
-├─ Ship onboarding v2   (goal, draft)
-└─ SSO                  (goal, draft)   ← reparented; now owns the SAML requirement
-```
+Because the brief and its children fold from **one stream**, a brief command can read its
+children's state and enforce gates **atomically** — no second fetch, no race:
 
-The `reparent` appends `[PageReparented{pageId: sso, newParentId: null}, ChildrenReordered{…}]`;
-`moveItem` appends `[RequirementRemoved{pageId: root, requirementId}, RequirementAdded{pageId:
-sso, …}]`. Each command is **one atomic POST** — a crash mid-way leaves the workspace in its
-prior consistent state, never half-moved.
+- `beginImplementation` (planning→building) requires the `implementation-plan` to have ≥1 step
+  **and** the `testing-plan` ≥1 case.
+- `ship` (review→shipped) requires the `implementation-checklist` 100% done, every `testing-plan`
+  case `passed`, and **zero open questions** on the brief.
 
-### 13.3 Goal events & per-page state
+A failing gate throws `InvariantViolationError` naming what's missing — an LLM reads it and acts.
+These checks would be racy (or impossible to do atomically) if each page were its own stream.
 
-```ts
-type GoalEvent =
-  | Evt<"GoalCreated",        { title: string }>            // pageId set on every event
-  | Evt<"TitleSet",           { title: string }>
-  | Evt<"SummarySet",         { summary: string }>
-  | Evt<"RequirementAdded",   { requirementId: string; text: string; priority: Priority }>
-  | Evt<"RequirementRemoved", { requirementId: string }>
-  | Evt<"QuestionAsked",      { questionId: string; text: string }>
-  | Evt<"QuestionAnswered",   { questionId: string; answer: string }>
-  | Evt<"SubmittedForReview", {}> | Evt<"ChangesRequested", { note?: string }>
-  | Evt<"Approved", {}> | Evt<"Activated", {}> | Evt<"Completed", { outcome?: string }>
-  | Evt<"Abandoned", { reason: string }>;
+### 13.5 Sample deterministic render + tree
 
-interface IGoalFields {
-  summary?: string;
-  requirements: { id: string; text: string; priority: Priority }[];           // insertion order
-  questions: { id: string; text: string; status: "open" | "resolved"; answer?: string; askedAt: string; resolvedAt?: string }[];
-}
-```
-
-(`title`, `status`, `parentId`, `createdAt/updatedAt` live on the enclosing `IPageNode`;
-`IGoalFields` is the page-type-specific `fields`.)
-
-### 13.4 Sample deterministic page render
+The brief, rendered mid-flight (status `building`; q1 resolved, q2 moved to the plan):
 
 ```markdown
-# Goal: SSO
+# Feature: Bulk export
 
-**Status:** draft · **Parent:** _(top level)_
+**Status:** building
 
 ## Summary
-_No summary yet._
+Let users export their workspace as CSV/JSON.
 
-## Requirements
-1. **[high]** SAML login
+## Components affected
+- web-app
+- cli
+
+## Design constraints
+1. Export must stream; never buffer >50MB in memory.
 
 ## Open questions
 _None._
 
 ## Resolved questions
-_None._
+- **Which formats in v1?** → CSV and JSON; Parquet later.
+
+## References
+- depends-on → Access control (RBAC)
+
+## Child pages
+- Implementation plan
+- Implementation checklist
+- Testing plan
+
+## Commits
+- `a1b2c3d` feat(api): streaming export endpoint
+- `e4f5g6h` feat(cli): wiki export
 ```
 
-### 13.5 Available mutations by Goal status (what an LLM is offered)
+```
+@root
+└─ Bulk export                 (feature-brief, building)
+   ├─ Implementation plan      (implementation-plan, draft)
+   ├─ Implementation checklist (implementation-checklist, building)
+   └─ Testing plan             (testing-plan, draft)
+```
 
-| Status | Offered (page-scoped) mutations |
+### 13.6 Available mutations by feature-brief status (what the LLM is offered)
+
+| Status | Offered (page-scoped) mutations on the brief |
 |---|---|
-| `draft` | setTitle, setSummary, addRequirement, removeRequirement, askQuestion, answerQuestion\*, submitForReview, abandon |
-| `inReview` | askQuestion, answerQuestion\*, requestChanges, approve, abandon |
-| `approved` | activate, abandon |
-| `active` | askQuestion, answerQuestion\*, complete, abandon |
-| `completed` / `abandoned` | _(none — terminal)_ |
+| `draft` | setSummary, addComponent, removeComponent, addConstraint, removeConstraint, askQuestion, answerQuestion\*, beginPlanning, abandon |
+| `planning` | addConstraint, removeConstraint, askQuestion, answerQuestion\*, beginImplementation†, abandon |
+| `building` | addConstraint, askQuestion, answerQuestion\*, recordCommit, reopenPlanning, submitForReview, abandon |
+| `review` | recordCommit, requestChanges, ship†, abandon |
+| `shipped` / `abandoned` | _(none — terminal)_ |
 
-Structural mutations (reparent, reorder, link, moveItem, archivePage) are available whenever the
-workspace is `active` and the target page isn't `archived`. \* `answerQuestion` is effective only
-for an `open` question.
+\* effective only for an `open` question. † additionally gated by a cross-page invariant (§13.4).
+Structural commands (createPage, reparent, reorder, link, moveItem, archivePage) and each child
+page's own commands (`addStep`; `addTask`/`checkTask`; `addCase`/`markCasePassed`; …) are offered
+per their own FSMs.
 
 ---
 
@@ -1134,6 +1294,7 @@ class DuplicateTitleError     extends WikiError { parentId: string | null; title
 class LinkTargetNotFoundError extends WikiError { target: string; }
 class ConcurrencyError        extends WikiError { expected: number; actual: number; }      // rebase retries exhausted
 class InvariantViolationError extends WikiError { detail: string; }
+class UnknownPageTypeError    extends WikiError { types: string[]; }   // rehydrate hit an unregistered page/event type (§8.5)
 ```
 
 - **Validation** uses each command's runtime schema (**Zod**: `z.infer` for static types,
@@ -1174,50 +1335,103 @@ contention, so plain optimistic concurrency suffices — **no single-writer acto
 
 ---
 
-## 16. Package & repo layout
+## 16. Structure: folders, files, and module boundaries
 
-The repo is currently empty; proposed structure (a pnpm/npm workspaces monorepo):
+A pnpm/npm workspaces monorepo. `wiki/` is this package (transport-free core); `wiki-cli/` and
+`wiki-api/` are future siblings that consume it.
 
 ```
 .
-├─ package.json                 # workspaces root
-├─ tsconfig.base.json
-├─ wiki/                        # ← THIS package (core, no exposed transport)
-│   ├─ package.json
+├─ package.json                 # workspaces root (pnpm-workspace.yaml / "workspaces" field)
+├─ tsconfig.base.json           # shared compiler options; each package extends it
+├─ wiki/                        # ← THIS package — the core engine; exposes only a TS interface
+│   ├─ package.json             # name "wiki"; exports map → "." , "./pages/feature" , "./testing"
 │   ├─ DESIGN.md                # ← this document
 │   └─ src/
-│       ├─ index.ts             # re-exports the public surface (api + errors + bundled page types)
-│       ├─ api.ts               # PUBLIC INTERFACES ONLY — IWiki, IWorkspaceHandle, IPageView, IWikiConfig, *Def, ISchema (no impl)
-│       ├─ core/
-│       │   ├─ types.ts         # public data types: IEventEnvelope, IWorkspaceState, IPageNode, IItemRecord
-│       │   ├─ wiki.ts          # IMPLEMENTATIONS of IWiki / IWorkspaceHandle / IPageView (satisfy api.ts)
-│       │   ├─ workspace.ts      # the aggregate root: foldWorkspace + applyWorkspace router
-│       │   ├─ structure.ts      # tree + links + invariants (reparent/reorder/link/moveItem)
-│       │   ├─ define.ts         # definePageType / defineItemType
-│       │   ├─ guard.ts          # in-house transition-table guard (typescript-fsm-inspired; no dep)
-│       │   ├─ command-bus.ts    # validate → guard → decide → atomic append → fold (+ rebase-retry)
-│       │   ├─ snapshot.ts       # write/read snapshots (sibling stream)
-│       │   └─ errors.ts
+│       ├─ index.ts             # PUBLIC BARREL — re-exports the entire public surface (§10.7)
+│       ├─ api.ts               # PUBLIC TYPES ONLY — every I* interface + data shape + id + helper; no runtime code
+│       ├─ core/                # IMPLEMENTATIONS (internal; satisfy api.ts, never re-exported raw)
+│       │   ├─ wiki.ts          #   createWiki + IWiki / IWorkspaceHandle / IPageView impls; wires the rest
+│       │   ├─ command-bus.ts   #   validate → guard → decide → atomic append → fold; rebase-retry; per-ws serialize
+│       │   ├─ workspace.ts     #   the aggregate root: foldWorkspace + applyWorkspace (the event router)
+│       │   ├─ structure.ts     #   tree + links ops & invariants (createPage/reparent/reorder/link/moveItem…)
+│       │   ├─ registry.ts      #   page/item `type` → { fsm, commands, apply, render }: the per-type dispatch hub
+│       │   ├─ guard.ts         #   in-house FSM: makeGuard, t, ITransition, renderMermaid (zero dependency)
+│       │   ├─ snapshot.ts      #   write/read snapshots (sibling stream); load = snapshot + folded tail
+│       │   ├─ define.ts        #   definePageType / defineItemType (build the registration objects)
+│       │   ├─ types.ts         #   INTERNAL types only (command envelope, projection-cache entry, journal)
+│       │   └─ errors.ts        #   exported error classes (WikiError + subclasses)
 │       ├─ stores/
-│       │   └─ event-log.ts      # the ONLY place @durable-streams/client is used (per-workspace stream)
+│       │   └─ event-log.ts     #   the ONLY module that imports @durable-streams/client
 │       ├─ render/
-│       │   ├─ markdown.ts       # default deterministic renderer + registry (page & workspace)
-│       │   └─ determinism.ts    # canonicalization helpers
+│       │   ├─ markdown.ts      #   registry dispatch + default fallback renderer + whole-workspace tree render
+│       │   └─ determinism.ts   #   canonicalization helpers (stable sort, fixed formatting)
 │       ├─ schema/
-│       │   └─ zod-adapter.ts     # ISchema<T> + JSON-Schema export
-│       └─ pages/
-│           └─ goal/             # the worked-example page type (an ENTITY type)
-│               ├─ index.ts      # GoalPage = definePageType({...})
-│               ├─ commands.ts  ├─ events.ts  └─ render.ts
-├─ wiki-cli/                    # FUTURE — commander over `wiki`
-└─ wiki-api/                    # FUTURE — http over `wiki`
+│       │   └─ zod-adapter.ts   #   ISchema<T> over Zod + toJsonSchema()
+│       ├─ pages/
+│       │   └─ feature/         #   worked-example page types (entity types — pluggable, §13)
+│       │       ├─ feature-brief.ts            # FeatureBrief = definePageType({ requiredChildren: […] })
+│       │       ├─ implementation-plan.ts
+│       │       ├─ implementation-checklist.ts
+│       │       ├─ testing-plan.ts
+│       │       └─ items.ts                    # shared item types: question, component, constraint, commit, step, task, case
+│       └─ testing.ts           # dev-only: start an in-memory DurableStreamTestServer + a wired IWiki
+├─ wiki-cli/                    # FUTURE — commander CLI over `wiki`, generated from describeMutations()
+└─ wiki-api/                    # FUTURE — HTTP/RPC + SSE over `wiki`
 ```
 
+### 16.1 What each file owns
+
+| File | Owns | Key exports | May import |
+|---|---|---|---|
+| `api.ts` | the entire **public type surface** | all `I*` interfaces, data shapes, branded ids, type-level helpers | nothing (pure types) |
+| `index.ts` | the **public barrel** | re-exports of `api`, `core/errors`, bundled page types | api, core/errors, pages/* |
+| `core/wiki.ts` | engine entry + handle impls | `createWiki` | command-bus, registry, event-log, snapshot, api |
+| `core/command-bus.ts` | the command hot path (§5) | `CommandBus` *(internal)* | guard, registry, workspace, event-log |
+| `core/workspace.ts` | fold/apply (the reducer) | `foldWorkspace`, `applyWorkspace` | registry, structure, api |
+| `core/structure.ts` | tree/link ops + invariants | structural command handlers | api, errors |
+| `core/registry.ts` | **per-type dispatch** | `Registry` resolving `type → def` | api |
+| `core/guard.ts` | the in-house FSM | `makeGuard`, `t`, `ITransition`, `renderMermaid` | *(none)* |
+| `core/snapshot.ts` | snapshot read/write | `loadSnapshot`, `writeSnapshot` | event-log, api |
+| `core/define.ts` | the authoring API | `definePageType`, `defineItemType` | guard, api |
+| `core/errors.ts` | typed errors | `WikiError` + subclasses | *(none)* |
+| `stores/event-log.ts` | Durable Streams I/O | `EventLog` | **`@durable-streams/client`**, api |
+| `render/markdown.ts` | render dispatch | `renderPage`, `renderWorkspace` | registry, determinism, api |
+| `schema/zod-adapter.ts` | runtime validation | `zodSchema(...)` → `ISchema<T>` | zod, zod-to-json-schema |
+| `pages/feature/*` | the example page/item types | `FeatureBrief`, … (each `IPageType`) | define, guard (`t`), schema, api |
+
+### 16.2 Dependency direction (a DAG pointing at `api.ts`)
+
+The boundaries that keep the architecture honest:
+
+- **`api.ts` depends on nothing**, and everything depends on it — interfaces split from
+  implementations (§10). Implementations live under `core/` and `stores/`.
+- **`stores/event-log.ts` is the sole importer of `@durable-streams/client`** — upgrading or
+  swapping the storage client touches exactly one file ([ADR-001](#adr-001--use-durable-streams-directly-no-storage-port-2026-06-01)).
+- **Page types are plugins.** `pages/*` import only the *authoring API* (`define.ts`, `t` from
+  `guard.ts`, `schema/`) and `api.ts` types — **never** `core/wiki.ts`, `command-bus.ts`, or
+  `event-log.ts`. A page type is self-contained and could ship from its own package.
+- **The core is type-agnostic.** `command-bus.ts`, `workspace.ts`, and `render/markdown.ts` reach
+  page-type behaviour **only** through `registry.ts`; they never name a concrete page type. Adding
+  a page type touches only its own folder plus the `pageTypes` array passed to `createWiki` ([§13](#13-worked-example-an-llm-plans-and-ships-a-feature)).
+- **Pure modules import no I/O** (`guard.ts`, the reducers in `workspace.ts`, the renderers,
+  `determinism.ts`) — clock and id generation arrive via `ICommandContext`, upholding §11 determinism.
+- **No cycles;** `index.ts` is a leaf that nothing imports internally.
+
+### 16.3 Conventions
+
+- **Interfaces** are `I`-prefixed; type aliases, classes, and functions are not.
+- **One page type per file** under `pages/<area>/`; file names kebab-case, matching the `type` tag.
+- **Events** are PascalCase past-tense (`PageCreated`, `QuestionAnswered`); **commands** are
+  camelCase imperative (`addConstraint`, `beginImplementation`).
+- A page's **id prefix equals its `type`** (`feature-brief:01J…`) — the type is recoverable from any id.
+
+### 16.4 Dependencies
+
 `wiki/` runtime deps: **`zod`** (+ `zod-to-json-schema`) and **`@durable-streams/client`**
-(fetch-based; runs in Node/browser/edge). **No FSM dependency** — the guard is ~20 lines of
-pure transition-table logic in `core/guard.ts`; `typescript-fsm` is a *design reference only*.
-**`@durable-streams/server`** is a **devDependency** (in-memory `DurableStreamTestServer` for
-tests/examples).
+(fetch-based; runs in Node/browser/edge). **No FSM dependency** — the guard is ~20 lines in
+`core/guard.ts`; `typescript-fsm` is a *design reference only*. **`@durable-streams/server`** is a
+**devDependency** (the in-memory `DurableStreamTestServer` used by `testing.ts` and the test suite).
 
 ---
 
@@ -1229,8 +1443,10 @@ tests/examples).
 - **FSM coverage:** for every status, `available()` matches the intended table; property test
   that no command is legal from a status it shouldn't be.
 - **Workspace script tests:** a sequence of structural + content mutations produces an expected
-  event log *and* expected tree + Markdown. The motivating scenario (create → ask → answer →
-  answer-again-fails; reparent; cross-page moveItem) is one script.
+  event log *and* expected tree + Markdown. The motivating scenario (create a `feature-brief` → its
+  3 children appear atomically → plan/checklist/testing-plan filled → `beginImplementation` blocked
+  until the plan has steps → `ship` blocked until the checklist is done, cases pass, and no
+  questions are open; plus an atomic cross-page question move) is one script.
 - **Concurrency / rebase:** simulate two writers; assert different-page commands both land via
   rebase, and same-page conflicts are correctly rejected by the FSM after rebase.
 - **Snapshot round-trip:** fold-from-zero == fold-from-snapshot+tail (byte-identical state).
@@ -1243,37 +1459,7 @@ tests/examples).
 
 ---
 
-## 18. Open questions
-
-Remaining unknowns are confined to the single `EventLog` module and don't block core work.
-
-1. **Per-message offsets on read.** Does `stream().json()` expose each message's offset or only a
-   batch/next offset? If batch-only, use `jsonStream()`/`subscribeJson` or synthesize from
-   `version`. *Resolve via client source / PROTOCOL.md.*
-2. **`subscribeJson` batch shape.** Confirm `batch.items` and `batch.offset` for resume.
-3. **~~Conditional append~~ — RESOLVED.** Native: stale-write detection via
-   `PreconditionFailedError` + producer epoch/seq. `expectedVersion` maps onto it; this is what
-   makes rebase-and-retry ([§15](#15-concurrency-idempotency--ordering)) work.
-4. **Producer epoch/seq exact API.** How `IdempotentProducer` exposes epoch/seq and preconditions
-   — needed to wire `version → seq`, `expectedVersion → precondition`, and epoch fencing precisely.
-5. **~~Aggregate streams? / local server for CI~~ — RESOLVED.** No cross-stream transactions →
-   one stream per workspace ([ADR-002](#adr-002--workspace-as-the-aggregate-one-stream-2026-06-01)).
-   `DurableStreamTestServer` (in-memory default) covers CI/embedding.
-6. **Snapshot cadence & storage.** Default `snapshotEvery`, and whether the sibling-stream
-   snapshot ([§8.3](#83-snapshots)) or an external KV is better; retention interplay.
-7. **Workspace discovery / multi-tenancy.** Is a workspace catalog a dedicated stream, or derived
-   by listing streams under `…/{namespace}/workspace/`? Confirm the namespacing scheme.
-8. **Retention vs. permanence.** DS may drop old offsets (`410 Gone`). Wikis likely want
-   effectively-infinite retention or mandatory pre-trim snapshots — decide (server config vs app).
-9. **Schema evolution.** Versioning event payloads as page types evolve (upcasters) — sketch
-   before the first breaking change.
-10. **Items as entities vs. own pages.** Items (questions/requirements) are in-page now; some uses
-    may want first-class, linkable question pages. Revisit if cross-page reuse is needed (cheap
-    now that everything is one stream).
-
----
-
-## 19. Future work
+## 18. Future work
 
 - **`wiki-cli/`** — `commander` CLI driven by `describeMutations()` (largely generated):
   `wiki ws create`, `wiki ws <id> page create`, `wiki ws <id> reparent`, `wiki ws <id> render`.
@@ -1288,7 +1474,7 @@ Remaining unknowns are confined to the single `EventLog` module and don't block 
 
 ---
 
-## 20. References
+## 19. References
 
 - Durable Streams — Concepts: <https://durablestreams.com/concepts>
 - Durable Streams — JSON mode: <https://durablestreams.com/json-mode>
@@ -1337,7 +1523,7 @@ The StreamFS precedent uses a *hybrid* (structure stream + per-file content stre
 *structural* ops atomic but **not cross-page content** ops.
 
 **Requirements gathered.** Atomic operations needed: structural (reparent/reorder/link) **and**
-cross-page **content** moves (e.g. move a requirement A→B). Scale: *gentle* multi-writer (~5
+cross-page **content** moves (e.g. move an open question onto a page's implementation plan). Scale: *gentle* multi-writer (~5
 concurrent writers, mostly different pages); a key desired benefit is **one stream everyone tails
 for all updates**.
 
