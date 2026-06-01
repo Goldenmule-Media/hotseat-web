@@ -1,0 +1,19 @@
+{
+  "name": "structured-wiki-monorepo",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "wiki"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck -w wiki",
+    "test": "npm run test -w wiki",
+    "build": "npm run build -w wiki"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5",
+    "tsx": "^4.19.2",
+    "@types/node": "^24.0.0"
+  }
+}

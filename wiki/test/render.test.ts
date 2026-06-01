@@ -1,0 +1,209 @@
+/**
+ * Renderer unit tests (BUILD_NOTES §9, DESIGN §17).
+ *
+ * The feature-brief renderer is deterministic: equal state → byte-identical output.
+ * We drive a live (in-memory) wiki through the §13.3 script to the §13.5 mid-flight
+ * snapshot (status `building`, q1 resolved, q2 moved off, two commits, one reference),
+ * then assert:
+ *   - the rendered Markdown matches the §13.5 shape EXACTLY (byte-for-byte),
+ *   - rendering the SAME state twice is byte-identical (no wall clock / RNG leak),
+ *   - an independently-built wiki with the SAME script renders identically.
+ *
+ * One server per file (beforeAll/afterAll).
+ */
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import type { IWorkspaceHandle, PageId } from "../src/api";
+import { featurePageTypes } from "../src/pages/feature";
+import { createTestWiki, type ITestWiki } from "../src/testing";
+
+/**
+ * Build the §13.5 "Bulk export" brief at status `building` and return the handle +
+ * the brief's page id. `rbacTitle` is the title of a sibling brief used as the
+ * `depends-on` reference target.
+ */
+async function buildBuildingBrief(
+  ws: IWorkspaceHandle,
+): Promise<{ brief: PageId; plan: PageId; checklist: PageId; testPlan: PageId }> {
+  // A sibling brief to reference (the §13.5 "Access control (RBAC)").
+  const rbac = await ws.createPage("feature-brief", {
+    title: "Access control (RBAC)",
+    parentId: null,
+  });
+
+  const brief = await ws.createPage("feature-brief", { title: "Bulk export", parentId: null });
+  const [plan, checklist, testPlan] = ws.page(brief).children().map((c) => c.id);
+
+  // Give the mandated children the display titles used in §13.5.
+  await ws.setPageTitle(plan, "Implementation plan");
+  await ws.setPageTitle(checklist, "Implementation checklist");
+  await ws.setPageTitle(testPlan, "Testing plan");
+
+  // ── fill the brief (draft) ──
+  await ws.mutate(brief, "setSummary", {
+    text: "Let users export their workspace as CSV/JSON.",
+  });
+  await ws.mutate(brief, "addComponent", { name: "web-app" });
+  await ws.mutate(brief, "addComponent", { name: "cli" });
+  await ws.mutate(brief, "addConstraint", {
+    text: "Export must stream; never buffer >50MB in memory.",
+  });
+  const { questionId: q1 } = (await ws.mutate(brief, "askQuestion", {
+    text: "Which formats in v1?",
+  })) as { questionId: string };
+  await ws.mutate(brief, "answerQuestion", {
+    questionId: q1,
+    answer: "CSV and JSON; Parquet later.",
+  });
+  await ws.link(brief, rbac, "depends-on");
+
+  // ── planning ──
+  await ws.mutate(brief, "beginPlanning", {});
+  await ws.mutate(plan, "addStep", { text: "Stream a ReadableStream from a new /export endpoint." });
+  await ws.mutate(testPlan, "addCase", { text: "10k-row export < 2s, memory flat." });
+
+  // A planning-detail question moved off the brief onto the plan (atomic cross-page move).
+  const { questionId: q2 } = (await ws.mutate(brief, "askQuestion", {
+    text: "Page size while streaming?",
+  })) as { questionId: string };
+  await ws.moveItem({ from: brief, to: plan, itemType: "question", itemId: q2 });
+
+  // ── implementation (gated) ──
+  await ws.mutate(brief, "beginImplementation", {});
+  await ws.mutate(brief, "recordCommit", {
+    sha: "a1b2c3d",
+    message: "feat(api): streaming export endpoint",
+  });
+  await ws.mutate(brief, "recordCommit", { sha: "e4f5g6h", message: "feat(cli): wiki export" });
+
+  return { brief, plan, checklist, testPlan };
+}
+
+const EXPECTED_BRIEF = `# Feature: Bulk export
+
+**Status:** building
+
+## Summary
+Let users export their workspace as CSV/JSON.
+
+## Components affected
+- web-app
+- cli
+
+## Design constraints
+1. Export must stream; never buffer >50MB in memory.
+
+## Open questions
+_None._
+
+## Resolved questions
+- **Which formats in v1?** → CSV and JSON; Parquet later.
+
+## References
+- depends-on → Access control (RBAC)
+
+## Child pages
+- Implementation plan
+- Implementation checklist
+- Testing plan
+
+## Commits
+- \`a1b2c3d\` feat(api): streaming export endpoint
+- \`e4f5g6h\` feat(cli): wiki export
+`;
+
+describe("feature-brief render — byte-stable + §13.5 shape", () => {
+  let tw: ITestWiki;
+  let ws: IWorkspaceHandle;
+  let brief: PageId;
+
+  beforeAll(async () => {
+    tw = await createTestWiki(featurePageTypes);
+    ws = await tw.wiki.createWorkspace({ name: "Acme platform" });
+    ({ brief } = await buildBuildingBrief(ws));
+  });
+
+  afterAll(async () => {
+    await tw.stop();
+  });
+
+  it("matches the §13.5 mid-flight Markdown byte-for-byte", () => {
+    expect(ws.toMarkdown(brief)).toBe(EXPECTED_BRIEF);
+  });
+
+  it("ends with exactly one trailing newline and uses \\n line endings", () => {
+    const md = ws.toMarkdown(brief);
+    expect(md.endsWith("\n")).toBe(true);
+    expect(md.endsWith("\n\n")).toBe(false);
+    expect(md.includes("\r")).toBe(false);
+  });
+
+  it("renders every §13.5 section heading exactly once, in order", () => {
+    const md = ws.toMarkdown(brief);
+    const headings = md.split("\n").filter((l) => l.startsWith("## "));
+    expect(headings).toEqual([
+      "## Summary",
+      "## Components affected",
+      "## Design constraints",
+      "## Open questions",
+      "## Resolved questions",
+      "## References",
+      "## Child pages",
+      "## Commits",
+    ]);
+  });
+
+  it("is byte-identical when rendered repeatedly from the SAME state (no clock/RNG leak)", () => {
+    const a = ws.toMarkdown(brief);
+    const b = ws.toMarkdown(brief);
+    const c = ws.page(brief).toMarkdown();
+    expect(b).toBe(a);
+    expect(c).toBe(a);
+  });
+});
+
+describe("feature-brief render — equal state ⇒ identical output (across independent wikis)", () => {
+  it("two independently-built wikis running the same script render byte-identically", async () => {
+    const tw1 = await createTestWiki(featurePageTypes);
+    const tw2 = await createTestWiki(featurePageTypes);
+    try {
+      const ws1 = await tw1.wiki.createWorkspace({ name: "Acme platform" });
+      const ws2 = await tw2.wiki.createWorkspace({ name: "Acme platform" });
+      const { brief: b1 } = await buildBuildingBrief(ws1);
+      const { brief: b2 } = await buildBuildingBrief(ws2);
+      expect(ws1.toMarkdown(b1)).toBe(ws2.toMarkdown(b2));
+      // And both equal the canonical §13.5 expectation.
+      expect(ws1.toMarkdown(b1)).toBe(EXPECTED_BRIEF);
+    } finally {
+      await tw1.stop();
+      await tw2.stop();
+    }
+  });
+});
+
+describe("workspace render — deterministic tree", () => {
+  let tw: ITestWiki;
+  let ws: IWorkspaceHandle;
+
+  beforeAll(async () => {
+    tw = await createTestWiki(featurePageTypes);
+    ws = await tw.wiki.createWorkspace({ name: "Acme platform" });
+    await buildBuildingBrief(ws);
+  });
+
+  afterAll(async () => {
+    await tw.stop();
+  });
+
+  it("renders the workspace tree with type+status annotations, byte-stable", () => {
+    const a = ws.toMarkdown();
+    const b = ws.toMarkdown();
+    expect(b).toBe(a);
+    // The H1 is the workspace name; the building brief and its three children appear.
+    expect(a.startsWith("# Acme platform\n")).toBe(true);
+    expect(a).toContain("Bulk export (feature-brief, building)");
+    expect(a).toContain("Implementation plan (implementation-plan, draft)");
+    expect(a).toContain("Implementation checklist (implementation-checklist, building)");
+    expect(a).toContain("Testing plan (testing-plan, draft)");
+  });
+});
