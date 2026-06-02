@@ -150,6 +150,17 @@ export async function startWikiServer(
     mcpUrl,
   });
 
+  // Load boot-time model bundles (ADR-M6) so the engine gains its page types via dynamic
+  // import; `mcp.models.load` awaits the rebind + reproject. (Absent when a test stubs the
+  // hosted module out.)
+  const models = mcp?.models;
+  if (models !== undefined) {
+    for (const m of cfg.models) {
+      await models.load(m.id, m.specifier);
+      serverLog.info("model bundle loaded", { id: m.id, specifier: m.specifier });
+    }
+  }
+
   // ── 4. start the control listener (DESIGN §8.5) ──
   const control: ControlServer = await startControlServer({
     host: cfg.host,
@@ -157,6 +168,7 @@ export async function startWikiServer(
     logger,
     info: { version: serverVersion(), storage: cfg.storage, baseUrl, mcpUrl },
     startedAt,
+    models,
   });
   serverLog.info("control listener up", { url: control.url });
 

@@ -40,6 +40,12 @@ export interface WikiServerConfig {
    * recent N records the consolidating logger retains for replay. Default 1000.
    */
   readonly logBuffer: number;
+  /**
+   * Initial model bundles to load at boot (ADR-M6): comma-separated `id=specifier`
+   * entries (a bare specifier derives its id from the file basename). Loaded after the
+   * embedded `wiki-mcp` starts, so the engine gains its page types via dynamic import.
+   */
+  readonly models: { readonly id: string; readonly specifier: string }[];
 }
 
 /** Loopback hosts that need no reverse proxy / auth to stay private. */
@@ -80,6 +86,23 @@ function toInt(value: string, name: string): number {
     throw new Error(`invalid ${name}: "${value}" (expected a non-negative integer)`);
   }
   return n;
+}
+
+/**
+ * Parse `--models` / `WIKI_SERVER_MODELS` (ADR-M6): comma-separated `id=specifier`
+ * entries. A bare specifier (no `=`) derives its id from the file basename, sans extension.
+ */
+function parseModels(raw: string): { id: string; specifier: string }[] {
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+    .map((entry) => {
+      const eq = entry.indexOf("=");
+      if (eq >= 0) return { id: entry.slice(0, eq), specifier: entry.slice(eq + 1) };
+      const base = entry.split("/").pop() ?? entry;
+      return { id: base.replace(/\.[^.]+$/, ""), specifier: entry };
+    });
 }
 
 /**
@@ -129,8 +152,9 @@ export function resolveConfig(
   // port + 2 so it never collides with the stream host (+0) or the control listener (+1).
   const mcpPort = toInt(pick("mcp-port", "WIKI_SERVER_MCP_PORT", String(port + 2)), "--mcp-port");
   const logBuffer = toInt(pick("log-buffer", "WIKI_SERVER_LOG_BUFFER", "1000"), "--log-buffer");
+  const models = parseModels(pick("models", "WIKI_SERVER_MODELS", ""));
 
-  return { host, port, storage, dataDir, longPollTimeout, logFormat, controlPort, mcpPort, logBuffer };
+  return { host, port, storage, dataDir, longPollTimeout, logFormat, controlPort, mcpPort, models, logBuffer };
 }
 
 /**
