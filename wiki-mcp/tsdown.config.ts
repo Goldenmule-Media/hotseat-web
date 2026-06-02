@@ -1,7 +1,7 @@
 import { defineConfig } from "tsdown";
 
 /**
- * Build a SELF-CONTAINED, runnable `dist/main.js` (DESIGN §10). `wiki-mcp` embeds the
+ * Build a SELF-CONTAINED, runnable `dist/bin.js` (DESIGN §10). `wiki-mcp` embeds the
  * `wiki` engine, which is consumed as TS *source* with extensionless relative imports
  * (the engine's `Bundler`-style convention), so a plain `tsc` emit would NOT run under
  * raw Node ESM. tsdown (Rolldown) **bundles the workspace lib in from source** —
@@ -9,7 +9,7 @@ import { defineConfig } from "tsdown";
  * **external** so the native/WASM ones (PGlite, pg, the lmdb-backed `@durable-streams`
  * server) load from `node_modules` at runtime. Dev (typecheck/test) is unchanged: it
  * still resolves the workspace packages to source via `Bundler` resolution / vitest.
- * The entry's `#!` shebang is preserved (the package `bin` is `dist/main.js`).
+ * The entry's `#!` shebang is preserved (the package `bin` is `dist/bin.js`).
  */
 export default defineConfig({
   // The `bin` wrapper is the entry; it pulls in `./main` (the library) and the engine.

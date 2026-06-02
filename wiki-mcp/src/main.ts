@@ -1,7 +1,7 @@
 /**
  * The `wiki-mcp` library API (DESIGN §6, §7, §8, ADR-M5). The standalone `bin`
  * wrapper lives in `./bin` — kept SEPARATE so a host that bundles this module
- * (`wiki-server` inlines it from source, DESIGN §3.1) does not drag in a self-exec
+ * (`wiki-server` inlines it from source, DESIGN §10) does not drag in a self-exec
  * guard that would auto-boot a second, rogue server.
  *
  * `createWikiMcp(config)` assembles the whole runtime: the embedded write-side
@@ -168,7 +168,7 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
  * stdio. Invoked by the `./bin` entry; production runs through a host that supplies
  * its page-type set via {@link createWikiMcp}. NOTE: there is intentionally no
  * `import.meta.url` self-exec guard here — it lives in `./bin`, so bundling this
- * library into a host never auto-starts it (DESIGN §3.1).
+ * library into a host never auto-starts it (DESIGN §10).
  */
 export async function main(argv = process.argv.slice(2), env = process.env): Promise<void> {
   const config = resolveConfig(argv, env);

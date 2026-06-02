@@ -272,7 +272,9 @@ are **plugged together**.
   self-corrects on. A `describeMutations`-style tool reports the *currently* legal set per page; dynamic
   per-resource tool lists are a refinement ([§12](#12-future-work)).
 - **Transport.** **stdio** for a local agent; **HTTP/SSE** (streamable HTTP) when networked/embedded in
-  `wiki-server`. (MCP SDK specifics confirmed at build — [§10](#10-package-structure).)
+  `wiki-server`. The transport is a `CreateWikiMcpOptions.transport` field the **embedding host chooses**:
+  the standalone `bin` defaults to stdio, while `wiki-server` passes the http transport. (MCP SDK specifics
+  confirmed at build — [§10](#10-package-structure).)
 
 ### 6.2 Token management (automatic read-your-writes)
 
@@ -318,7 +320,15 @@ The answer to "rehydration per call is a non-starter":
 `wiki-mcp` is the **module that holds the engine and the logic**; `wiki-server` is the **process that hosts
 streams and hosts `wiki-mcp`**. There are **no modes** — one process does both. `wiki-server` stays a thin
 host: it boots the Durable Streams host, then starts `wiki-mcp`, passing the local stream `baseUrl`/namespace
-and the DB config. The projection tailer reads **localhost** streams (cheap); MCP is served alongside.
+and the DB config. The projection tailer reads **localhost** streams (cheap). The MCP surface is served over
+**streamable HTTP** on its **own** listener: `wiki-server` runs a third `http.createServer` (beside the stream
+host on `port` and the control/log listener on `port`+1) on `--mcp-port` (env `WIKI_SERVER_MCP_PORT`, default
+`port`+2, e.g. `4439`), exposing the endpoint at `http://<host>:<mcpPort>/mcp`. It builds the
+`{ kind: "http", host, port: mcpPort, path: "/mcp" }` transport and passes it into `createWikiMcp` — an
+embedded host **cannot** use stdio, which binds the host process's own terminal and is unreachable by a
+separate MCP client ([§6.1](#61-tools--resources)). `wiki-server` logs `mcpUrl` on boot and surfaces it on
+`GET /_server/info` (and on its `RunningWikiServer` handle), so a client can discover where to connect (see
+[`wiki-server/DESIGN.md` §8.5](../wiki-server/DESIGN.md)).
 
 The split is about *where logic lives*, not deployment shape: **the engine, read model, projection, token
 management, and MCP surface all live in `wiki-mcp`** ([ADR-M5](#adr-m5--wiki-mcp-holds-the-logic-wiki-server-hosts-it-2026-06-02)).
@@ -374,10 +384,11 @@ A consumer sibling. **New dependencies** (none currently in the repo — version
 ├─ wiki/                         # engine (library dependency)
 ├─ wiki-server/                  # stream host: hosts wiki-mcp (§8)
 └─ wiki-mcp/                     # ← THIS package
-    ├─ package.json             # bin: wiki-mcp → dist/main.js; deps above
+    ├─ package.json             # bin: wiki-mcp → dist/bin.js; deps above
     ├─ DESIGN.md
     └─ src/
-        ├─ main.ts              # bin entry: config → createWikiMcp({ …, logger }) → start (stdio|http)
+        ├─ main.ts              # LIBRARY (side-effect-free): exports createWikiMcp/main/types; config → createWikiMcp({ …, logger }) → start (stdio|http). No shebang, no self-exec guard.
+        ├─ bin.ts               # bin entry: #!/usr/bin/env node; runs main() over stdio; holds the self-exec guard (kept out of the library so a host bundling wiki-mcp from source can't auto-boot a rogue server)
         ├─ config.ts            # namespace, stream baseUrl, db (pglite|pg), timeouts, injected Logger (§9)
         ├─ engine.ts            # build the embedded IWiki (write side), hot-handle LRU, token surface
         ├─ readmodel/
@@ -396,7 +407,15 @@ A consumer sibling. **New dependencies** (none currently in the repo — version
 
 Like `wiki-server`, it is **compiled and run as Node** (`bin`), so relative imports use **`.js`
 extensions** (raw Node ESM needs them; the engine's extensionless `Bundler` style is for source-consumed
-packages). Add `wiki-mcp` to the root `workspaces`. It imports `wiki`'s **public** surface only.
+packages). The **bin is split from the library**: `bin.ts` holds the `#!/usr/bin/env node` shebang and the
+`import.meta.url` self-exec guard and runs `main()` over stdio, while `main.ts` stays side-effect-free —
+because a host that bundles `wiki-mcp` **from source** inlines every module under one shared
+`import.meta.url`, so a guard living in the library would fire under the host's argv and boot a rogue second
+server. tsdown's `entry` is
+`src/bin.ts` (output `dist/bin.js`, the package `bin`), and its `deps.alwaysBundle` must use a **regex**
+(`/^wiki(\/|$)/`) so the `wiki/registry` **subpath** export is bundled too — a bare-string match leaves it
+external and Node crashes at runtime loading the engine's extensionless TS source (`ERR_MODULE_NOT_FOUND`).
+Add `wiki-mcp` to the root `workspaces`. It imports `wiki`'s **public** surface only.
 
 ---
 

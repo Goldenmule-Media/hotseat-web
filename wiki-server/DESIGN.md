@@ -121,8 +121,12 @@ hosted `wiki-mcp` ([§3.1](#31-hosting-wiki-mcp)). `wiki-server`'s own code is j
 `wiki-server`'s entrypoint boots the stream host, then starts `wiki-mcp` **in-process**, passing it the
 **localhost** stream `baseUrl`/namespace and the read-model DB config. From there `wiki-mcp` owns
 everything engine-facing: it opens the engine as a library, tails the local streams to project them into
-its SQL read model (PGlite locally, Postgres in prod), and serves the MCP surface to agents — all
-detailed in [wiki-mcp/DESIGN.md](../wiki-mcp/DESIGN.md). `wiki-server` neither imports `wiki` nor
+its SQL read model (PGlite locally, Postgres in prod), and serves the MCP surface to agents over
+**streamable HTTP** at `mcpUrl` (`http://{host}:{mcpPort}/mcp`, [§8.5](#85-logging--the-log-api)) — all
+detailed in [wiki-mcp/DESIGN.md](../wiki-mcp/DESIGN.md). The embedded host serves MCP over HTTP rather
+than stdio because an in-process, long-lived host has no usable stdio — that binds the host process's
+own terminal and is unreachable by a separate MCP client; `wiki-server` builds the HTTP transport and
+threads it into `wiki-mcp`. `wiki-server` neither imports `wiki` nor
 implements any of that; it just supplies the durable streams and the process to run `wiki-mcp` in. The
 two halves share one lifecycle: a single `start`, a single graceful `stop` ([§8.1](#81-local--embedded-dev)).
 It also hands `wiki-mcp` its **logger** ([§8.5](#85-logging--the-log-api)), so engine/projection telemetry
@@ -148,8 +152,10 @@ and `src/server.ts`), consistent with [wiki/BUILD_NOTES.md §1](../wiki/BUILD_NO
   `handleRequest` is private and there is **no middleware hook, no body-size option, and no
   request-level auth** for stream traffic (the only `authorization` reference is a CORS allow-header).
   So **auth, TLS, and body caps are a front layer's job** ([§9](#9-security)); and since the wrapped
-  server hosts **no extra paths**, `wiki-server` runs its **own small control listener** for the
-  log/health API ([§8.5](#85-logging--the-log-api)) — its only non-trivial code beyond wiring.
+  server hosts **no extra paths**, `wiki-server` runs **two more listeners of its own** beside the
+  stream host: a **small control listener** for the log/health API ([§8.5](#85-logging--the-log-api))
+  and the embedded **`wiki-mcp` streamable-HTTP endpoint** ([§8.5](#85-logging--the-log-api)) — its only
+  non-trivial code beyond wiring.
 - **The wire behavior the engine depends on is native:** one `append()` stores exactly one
   message (arrays are *not* split); `Stream-Seq` gives strict-greater OCC (a stale seq → **HTTP
   409**); offsets are opaque resume cursors; live tailing is long-poll/SSE
@@ -229,6 +235,8 @@ export interface WikiServerConfig {
   readonly logFormat: "pretty" | "json";
   /** Port for the control listener (log/health API, §8.5). Default port+1 (4438). */
   readonly controlPort: number;
+  /** Port for the embedded `wiki-mcp` server, served over streamable HTTP at `/mcp` (§8.5). A THIRD listener, separate from the stream host and control listener. Default port+2 (4439). */
+  readonly mcpPort: number;
   /** History ring-buffer size for `GET /_server/logs` (§8.5). Default 1000 records. */
   readonly logBuffer: number;
 }
@@ -243,6 +251,7 @@ export interface WikiServerConfig {
 | `--long-poll-ms` | `WIKI_SERVER_LONG_POLL_MS` | `30000` | Pass-through to the server. |
 | `--log-format` | `WIKI_SERVER_LOG_FORMAT` | auto | `pretty` \| `json`. |
 | `--control-port` | `WIKI_SERVER_CONTROL_PORT` | `4438` | The log/health API listener ([§8.5](#85-logging--the-log-api)); behind the proxy when shared. |
+| `--mcp-port` | `WIKI_SERVER_MCP_PORT` | `4439` | The embedded `wiki-mcp` streamable-HTTP endpoint (`/mcp`, [§8.5](#85-logging--the-log-api)); behind the proxy when shared. |
 | `--log-buffer` | `WIKI_SERVER_LOG_BUFFER` | `1000` | Records retained for `GET /_server/logs` history. |
 
 `baseUrl` is **derived, not configured**: read it back from `server.url` after `start()` (robust
@@ -302,27 +311,22 @@ npx wiki-server                      # file storage in ./.wiki-data on 127.0.0.1
 # client: createWiki({ stream: { baseUrl: "http://127.0.0.1:4437", namespace: "dev" }, … })
 ```
 
-The entrypoint is intentionally tiny — boot the server, read back its URL, trap signals:
+The entrypoint is intentionally tiny — resolve config, boot the whole wiring (stream host + embedded
+`wiki-mcp` over HTTP + control listener) via `startWikiServer`, read back its URLs, trap signals:
 
 ```ts
-// src/main.ts  (sketch)
-import { DurableStreamTestServer } from "@durable-streams/server";
-import { loadConfig } from "./config";
+// src/main.ts  (sketch) — the bin resolves config and boots the wiring
+import { resolveConfig } from "./config";
 
-const cfg = loadConfig(process.argv, process.env);
-const server = new DurableStreamTestServer({
-  host: cfg.host,
-  port: cfg.port,
-  longPollTimeout: cfg.longPollTimeout,
-  ...(cfg.storage === "file" ? { dataDir: cfg.dataDir } : {}),   // file vs in-memory = dataDir presence
-});
-await server.start();
-console.log(JSON.stringify({ msg: "wiki-server up", baseUrl: server.url, storage: cfg.storage }));
+const cfg = resolveConfig(process.argv.slice(2), process.env);
+const running = await startWikiServer(cfg);   // logger → stream host → wiki-mcp (HTTP) → control listener
+// `running` exposes baseUrl (streams), controlUrl (log/health/info), and mcpUrl (the MCP endpoint) —
+// all already emitted on the "wiki-server ready" line by the consolidating logger.
 
 const shutdown = () =>
-  server.stop().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });
+  running.stop().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });
 for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, shutdown);
-// stop(): drains connections, cancels long-polls/SSE, closes the store. (Each append is already
+// stop(): drains wiki-mcp, the control listener, and the stream host as a unit. (Each append is already
 // fsynced in file mode, so there is no final-flush window to lose.)
 ```
 
@@ -393,20 +397,29 @@ stdout — it accepts no logger — so those lines aren't in the buffer; everyth
 **This is not a Durable Stream.** Logs are **ephemeral operational data**, deliberately kept off the
 durable, event-sourced stream plane — a bounded ring buffer, not a retained log.
 
-**The control listener.** The wrapped `DurableStreamTestServer` can host no extra paths
-([§4](#4-the-durable-streamsserver-it-wraps)), so `wiki-server` runs its **own** `http.createServer` on
-`--control-port` (default `4438` = stream port + 1), serving:
+**The extra listeners.** The wrapped `DurableStreamTestServer` can host no extra paths
+([§4](#4-the-durable-streamsserver-it-wraps)), so `wiki-server` runs **two more `http.createServer`
+listeners** of its own beside the stream host (`port`, default `4437`): a **control listener** on
+`--control-port` (default `4438` = stream port + 1) and the embedded **`wiki-mcp`** listener on
+`--mcp-port` (default `4439` = stream port + 2). The control listener serves:
 
 | Method · path | Purpose | Response |
 |---|---|---|
 | `GET /_server/logs?since=<seq>&boot=<id>&limit=<n>&level=<lvl>&source=<src>` | log **history** from the ring buffer | `200` JSON `{ boot, records: LogRecord[], next: seq, truncated?: bool }` |
 | `GET /_server/logs?follow=1&since=<seq>&boot=<id>` | log **tail** (backlog then live) | `200 text/event-stream` (SSE), one `LogRecord` per event |
 | `GET /_server/health` | liveness/readiness (closes the old gap) | `200 {status:"ok"}` / `503` |
-| `GET /_server/info` | server facts | `200 { version, boot, storage, baseUrl, pid, uptimeMs }` |
+| `GET /_server/info` | server facts | `200 { version, boot, storage, baseUrl, mcpUrl, pid, uptimeMs }` |
 
-The control listener has **no built-in auth** either, so for a shared deploy it sits **loopback-only
-behind the same reverse proxy**, which routes `/_server/*` to the control port and stream traffic to the
-stream port — both behind one bearer-token check ([§9](#9-security)).
+The embedded **`wiki-mcp` listener** serves a single streamable-HTTP MCP endpoint at `POST/GET /mcp`
+(`mcpUrl` = `http://{host}:{mcpPort}/mcp`) that networked agents connect to. It is served over HTTP
+rather than stdio because an in-process, long-lived host cannot use stdio — stdio binds the host
+process's own terminal and is unreachable by a separate MCP client; `wiki-server` builds the HTTP
+transport (`{ kind: "http", host, port: mcpPort, path: "/mcp" }`) and hands it to `wiki-mcp`.
+
+Neither the control listener **nor the embedded `wiki-mcp` listener** has any built-in auth, so for a
+shared deploy both sit **loopback-only behind the same reverse proxy**, which routes `/_server/*` to the
+control port, `/mcp` to the MCP port, and stream traffic to the stream port — all behind one
+bearer-token check ([§9](#9-security)).
 
 ---
 
@@ -429,20 +442,22 @@ wiki.example.com {
   @unauth not header Authorization "Bearer {env.WIKI_TOKEN}"
   respond @unauth 401
   handle_path /_server/* { reverse_proxy 127.0.0.1:4438 }   # log/health control API (§8.5)
+  handle /mcp* { reverse_proxy 127.0.0.1:4439 }             # embedded wiki-mcp (streamable HTTP, §8.5) — no built-in auth either
   reverse_proxy 127.0.0.1:4437                               # stream traffic
 }
 ```
 
-The **control listener** ([§8.5](#85-logging--the-log-api)) has no built-in auth either, so it binds
-**loopback-only** and the proxy routes `/_server/*` to it — same token, same edge.
+The **control listener** and the embedded **`wiki-mcp` listener** ([§8.5](#85-logging--the-log-api))
+have no built-in auth either, so both bind **loopback-only** and the proxy routes `/_server/*` to the
+control port and `/mcp` to the MCP port — same token, same edge.
 
 **Deliberately deferred** ([§12](#12-future-work)): per-namespace tokens, per-actor identity, and
 read-vs-write scopes. The guiding rule mirrors the engine — **authorization lives above the
 substrate**, here literally in front of it.
 
 > ⚠️ Binding to `0.0.0.0` **without** a proxy publishes every stream to anyone who can reach the
-> port. `loadConfig` logs a prominent warning when `host` is non-loopback, since the host itself
-> cannot authenticate.
+> port. `configWarnings(cfg)` returns a prominent warning when `host` is non-loopback, which `main.ts`
+> logs via the consolidating logger at startup, since the host itself cannot authenticate.
 
 ---
 
@@ -462,8 +477,8 @@ module). It does **not** depend on `wiki` *directly* — it reaches the engine o
     ├─ DESIGN.md                # ← this document
     ├─ Dockerfile
     └─ src/
-        ├─ main.ts              # config → logger → start stream host → start wiki-mcp(logger) → control listener → signals
-        ├─ config.ts            # WikiServerConfig (+ wiki-mcp namespace/db knobs, control-port, log-buffer)
+        ├─ main.ts              # config → logger → start stream host → start wiki-mcp(logger, http transport) → control listener → signals
+        ├─ config.ts            # WikiServerConfig (+ wiki-mcp namespace/db knobs, control-port, mcp-port, log-buffer)
         ├─ logger.ts            # consolidating Logger: stdout + ring buffer + subscribers (§8.5)
         └─ control.ts           # control HTTP listener: /_server/logs · /_server/health · /_server/info (§8.5)
 ```
@@ -477,6 +492,11 @@ module). It does **not** depend on `wiki` *directly* — it reaches the engine o
   engine's client (`wiki/src/stores/event-log.ts`, [§5](#5-the-client-contract)); the stream host just
   serves arbitrary stream URLs.
 - Add `wiki-server` to the root `workspaces` array; it extends `tsconfig.base.json` like the engine.
+- **Build:** `tsdown` bundles `wiki` + `wiki-mcp` in **from source** (they're consumed extensionlessly)
+  and keeps the npm deps external; `deps.alwaysBundle` must use **regex** patterns (`/^wiki(\/|$)/`,
+  `/^wiki-mcp(\/|$)/`) that also match **subpath** exports like `wiki/registry` — a bare-string match
+  leaves the subpath external and Node crashes at runtime loading the engine's extensionless TS source
+  (`ERR_MODULE_NOT_FOUND`).
 
 ---
 
