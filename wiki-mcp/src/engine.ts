@@ -67,7 +67,7 @@ export interface EngineConfig {
  * engine's {@link Committed} token (DESIGN §3.2).
  */
 export class EmbeddedEngine {
-  private readonly wiki: IWiki;
+  private wiki: IWiki;
   private readonly maxHot: number;
   /** Hot handles in LRU order (most-recently-used last). Bounded by {@link maxHot}. */
   private readonly hot = new Map<WorkspaceId, IWorkspaceHandle>();
@@ -116,6 +116,20 @@ export class EmbeddedEngine {
   async close(): Promise<void> {
     this.hot.clear();
     await this.wiki.close();
+  }
+
+  /**
+   * Rebind the write side to a NEW page-type set (ADR-M6 hot-reload): rebuild the engine
+   * from `pageTypes`, drop every hot handle (they were folded by the old registry), and
+   * close the old engine. Subsequent `open`/`create` fold with the new types. Pair with
+   * {@link ProjectionService.rebind} + `reproject` so the read side catches up.
+   */
+  async rebind(pageTypes: EngineConfig["pageTypes"]): Promise<void> {
+    const old = this.wiki;
+    this.hot.clear();
+    this.wiki = createWiki(toWikiConfig({ ...this.config, pageTypes }));
+    await old.close();
+    this.logger.info("engine rebound to a new page-type set", { pageTypes: pageTypes.length });
   }
 
   /** Insert a handle at MRU, evicting the LRU entry past the bound (DESIGN §7). */

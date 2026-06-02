@@ -71,8 +71,8 @@ interface Attached {
 
 /** A projection service bound to a store, registry, and read model. */
 export class ProjectionService {
-  private readonly registry: Registry;
-  private readonly fingerprint: string;
+  private registry: Registry;
+  private fingerprint: string;
   /** Live-tail state — set by {@link start}, cleared by {@link stopLive}. */
   private live:
     | {
@@ -144,6 +144,46 @@ export class ProjectionService {
     for (const workspace of await source.listWorkspaces()) {
       await this.projectWorkspace(source, workspace);
     }
+  }
+
+  // ── model hot-reload (ADR-M6) ────────────────────────────────────────────────────
+
+  /**
+   * Rebind the fold to a NEW registry (ADR-M6 hot-reload) — call when the model set
+   * changes, then {@link reproject} to rebuild SQL with it. Subsequent applies fold with
+   * the new registry and stamp the new `fingerprint`.
+   */
+  rebind(registry: Registry): void {
+    this.registry = registry;
+    this.fingerprint = registry.fingerprint();
+  }
+
+  /**
+   * Re-fold the read model with the CURRENT registry (ADR-M6). Resets every projected
+   * workspace's offset — so {@link applyCommit}'s idempotency guard (`headApplied <=
+   * applied`) doesn't skip the re-fold — and clears any halt (a freshly-loaded bundle may
+   * now cover a previously-poison type), then re-projects from scratch. A workspace the
+   * new registry STILL can't fold simply re-halts (its stale rows linger); the reproject
+   * never throws so one bad workspace can't abort the rest.
+   */
+  async reproject(source: EventSource): Promise<void> {
+    const projected = (
+      await this.db.selectFrom("projection_offsets").select("workspace_id").execute()
+    ).map((r) => r.workspace_id as WorkspaceId);
+    for (const ws of projected) {
+      this.readModel.resume(ws);
+      await this.db.deleteFrom("projection_offsets").where("workspace_id", "=", ws).execute();
+    }
+    const all = new Set<WorkspaceId>([...projected, ...(await source.listWorkspaces())]);
+    let halted = 0;
+    for (const ws of all) {
+      try {
+        await this.projectWorkspace(source, ws);
+      } catch {
+        halted++; // project() already logged it; a still-unfoldable workspace stays halted.
+      }
+    }
+    this.logger.info("reprojected read model", { workspaces: all.size, halted, fingerprint: this.fingerprint });
   }
 
   // ── live tail (DESIGN §5.1) ─────────────────────────────────────────────────────

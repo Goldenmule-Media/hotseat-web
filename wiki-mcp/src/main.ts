@@ -23,6 +23,7 @@ import { openStore, type ReadModelStore } from "./readmodel/store.js";
 import { SqlReadModel } from "./readmodel/readmodel.js";
 import { ProjectionService } from "./tail/projection.js";
 import { engineEventSource } from "./tail/engine-source.js";
+import { ModelRegistry } from "./models/registry.js";
 import { WikiMcpServer, type McpTransport } from "./mcp/server.js";
 
 export type { Logger } from "./logger.js";
@@ -30,6 +31,8 @@ export { consoleLogger, silentLogger } from "./logger.js";
 export type { WikiMcpConfig, DbConfig } from "./config.js";
 export { resolveConfig, resolveRuntime } from "./config.js";
 export type { McpTransport } from "./mcp/server.js";
+export { ModelRegistry } from "./models/registry.js";
+export type { ModelRegistryEvent, BundleInfo } from "./models/registry.js";
 
 /**
  * Everything `createWikiMcp` needs: the resolved wire {@link WikiMcpConfig}, the
@@ -65,6 +68,8 @@ export interface WikiMcp {
   readonly engine: EmbeddedEngine;
   readonly readModel: SqlReadModel;
   readonly projection: ProjectionService;
+  /** The live model registry (ADR-M6) — load/reload/unregister page-type bundles at runtime. */
+  readonly models: ModelRegistry;
   readonly server: WikiMcpServer;
   /** Drain the projection once now (await read-your-writes before a read in tests). */
   drainOnce(): Promise<void>;
@@ -83,6 +88,12 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
   const logger = options.logger ?? consoleLogger();
   const transport: McpTransport = options.transport ?? { kind: "stdio" };
 
+  // ── model registry (live page-type set, ADR-M6) ──
+  // Seed the host-supplied page types as the initial bundle BEFORE wiring `onChange`,
+  // so the seed itself does not trigger a reproject (engine/projection don't exist yet).
+  const models = new ModelRegistry();
+  await models.register("default", pageTypes);
+
   // ── read model (durable SQL) ──
   const store: ReadModelStore = await openStore(config.db, logger.child?.({ subsystem: "readmodel" }) ?? logger);
   const readModel = new SqlReadModel(store.db, {
@@ -95,7 +106,7 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
     {
       streamBaseUrl: config.streamBaseUrl,
       namespace: config.namespace,
-      pageTypes,
+      pageTypes: models.pageTypes(),
       readConsistencyTimeoutMs: config.readConsistencyTimeoutMs,
       ...(options.clock !== undefined ? { clock: options.clock } : {}),
       ...(options.ids !== undefined ? { ids: options.ids } : {}),
@@ -108,7 +119,7 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
   // ── projection tailer (engine-backed source) ──
   const projection = new ProjectionService(
     store.db,
-    pageTypes,
+    models.pageTypes(),
     readModel,
     logger.child?.({ subsystem: "projection" }) ?? logger,
   );
@@ -127,9 +138,26 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
   // Start the EVENT-DRIVEN live tail (DESIGN §5.1): per-workspace `subscribe` for
   // external events + the host's `notify` for local writes (wired into the MCP server
   // below) + a low-frequency catalog discovery poll. `start` does the initial catch-up.
-  const stopTail = await projection.start(source, {
-    ...(options.discoverPollMs !== undefined ? { discoverPollMs: options.discoverPollMs } : {}),
-  });
+  const discoverOpts = options.discoverPollMs !== undefined ? { discoverPollMs: options.discoverPollMs } : {};
+  const stopTail = await projection.start(source, discoverOpts);
+
+  // ── model hot-reload (ADR-M6) ──
+  // On a registry change, rebind the engine + the projection's registry, reproject the
+  // read model, and RE-ATTACH the live tail (the old engine's stream subscriptions died
+  // with its handles). `models.load/reload/unregister` await this whole reaction.
+  const modelLogger = logger.child?.({ subsystem: "models" }) ?? logger;
+  models.onChange = async (event) => {
+    modelLogger.info("model registry changed", {
+      reason: event.reason,
+      bundleId: event.bundleId,
+      generation: event.generation,
+    });
+    await engine.rebind(models.pageTypes());
+    projection.rebind(models.current());
+    await projection.reproject(source);
+    projection.stopLive();
+    await projection.start(source, discoverOpts);
+  };
 
   // ── MCP server ──
   const server = new WikiMcpServer({
@@ -147,6 +175,7 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
     engine,
     readModel,
     projection,
+    models,
     server,
     drainOnce,
     async close(): Promise<void> {

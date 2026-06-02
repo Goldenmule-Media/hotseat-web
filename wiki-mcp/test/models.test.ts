@@ -41,7 +41,7 @@ describe("ModelRegistry + loader (ADR-M6)", () => {
 
   it("load → reload → unregister bump the generation and fire onChange", async () => {
     const events: string[] = [];
-    const reg = new ModelRegistry({ onChange: (e) => events.push(`${e.reason}@${e.generation}`) });
+    const reg = new ModelRegistry({ onChange: (e) => void events.push(`${e.reason}@${e.generation}`) });
     const path = tmpModule(`export default [];`);
 
     const e1 = await reg.load("feature", path);
@@ -51,10 +51,10 @@ describe("ModelRegistry + loader (ADR-M6)", () => {
     const e2 = await reg.reload("feature");
     expect([e2.reason, e2.generation]).toEqual(["reload", 2]);
 
-    const e3 = reg.unregister("feature");
+    const e3 = await reg.unregister("feature");
     expect([e3.reason, e3.generation]).toEqual(["unregister", 3]);
     expect(reg.list()).toEqual([]);
-    expect(() => reg.unregister("feature")).toThrow(/unknown model bundle/);
+    await expect(reg.unregister("feature")).rejects.toThrow(/unknown model bundle/);
 
     expect(events).toEqual(["load@1", "reload@2", "unregister@3"]);
   });
