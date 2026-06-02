@@ -1,0 +1,189 @@
+/**
+ * The `wiki-mcp` library API + `bin` entry (DESIGN §6, §7, §8, ADR-M5).
+ *
+ * `createWikiMcp(config)` assembles the whole runtime: the embedded write-side
+ * engine (hot-handle LRU, DESIGN §7), the durable SQL read model + its migrations
+ * (DESIGN §5), the projection tailer that keeps SQL current off the engine's live
+ * tail (DESIGN §5.1), and the MCP server (tools + resources + per-session token
+ * management, DESIGN §6). The host (`wiki-server`) calls this and injects its
+ * consolidating {@link Logger} (DESIGN §8/§9); a `child` scope is used per subsystem
+ * so logs are attributable.
+ *
+ * The default `main()` resolves config from flags/env (a console logger) and starts
+ * over stdio — the standalone path. A host normally builds {@link WikiMcpConfig} +
+ * page types itself and chooses the transport.
+ */
+import { consoleLogger, type Logger } from "./logger.js";
+import { resolveConfig, type WikiMcpConfig } from "./config.js";
+import { EmbeddedEngine, type EngineConfig } from "./engine.js";
+import { openStore, type ReadModelStore } from "./readmodel/store.js";
+import { SqlReadModel } from "./readmodel/readmodel.js";
+import { ProjectionService } from "./tail/projection.js";
+import { engineEventSource } from "./tail/engine-source.js";
+import { WikiMcpServer, type McpTransport } from "./mcp/server.js";
+
+export type { Logger } from "./logger.js";
+export { consoleLogger, silentLogger } from "./logger.js";
+export type { WikiMcpConfig, DbConfig } from "./config.js";
+export { resolveConfig, resolveRuntime } from "./config.js";
+export type { McpTransport } from "./mcp/server.js";
+
+/**
+ * Everything `createWikiMcp` needs: the resolved wire {@link WikiMcpConfig}, the
+ * engine-shaped extras the host supplies directly (page types + deterministic
+ * services), the injected {@link Logger}, and the MCP transport (DESIGN §6.1).
+ */
+export interface CreateWikiMcpOptions {
+  readonly config: WikiMcpConfig;
+  /** The page types this instance understands (DESIGN §5.1, ADR-M3). */
+  readonly pageTypes: EngineConfig["pageTypes"];
+  /** Injected ISO-8601 clock (determinism/testing); engine-defaulted otherwise. */
+  readonly clock?: () => string;
+  /** Injected id factory (determinism/testing); engine-defaulted otherwise. */
+  readonly ids?: () => string;
+  /** Default `actor` stamped on event metadata. */
+  readonly actor?: string;
+  /** Hot-handle LRU bound (`IWikiConfig.cache.maxWorkspaces`, DESIGN §7). */
+  readonly cache?: EngineConfig["cache"];
+  /** The injected host logger (DESIGN §9); defaults to a console logger standalone. */
+  readonly logger?: Logger;
+  /** Where the MCP server listens (DESIGN §6.1). @default stdio */
+  readonly transport?: McpTransport;
+  /**
+   * Projection poll interval (ms): the tailer re-drains every workspace's history on
+   * this cadence so SQL converges to the live stream (DESIGN §5.2 poll backstop).
+   * @default 250
+   */
+  readonly projectionPollMs?: number;
+}
+
+/** A running wiki-mcp instance — its parts, plus a `close()` that tears everything down. */
+export interface WikiMcp {
+  readonly engine: EmbeddedEngine;
+  readonly readModel: SqlReadModel;
+  readonly projection: ProjectionService;
+  readonly server: WikiMcpServer;
+  /** Drain the projection once now (await read-your-writes before a read in tests). */
+  drainOnce(): Promise<void>;
+  /** Stop the tailer + MCP server and close the engine + store. */
+  close(): Promise<void>;
+}
+
+const DEFAULT_PROJECTION_POLL_MS = 250;
+
+/**
+ * Assemble and start a wiki-mcp runtime (DESIGN §7): open + migrate the SQL store,
+ * build the read model, build the embedded engine, start the projection tailer
+ * (initial drain + poll loop), and start the MCP server on the chosen transport.
+ */
+export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<WikiMcp> {
+  const { config, pageTypes } = options;
+  const logger = options.logger ?? consoleLogger();
+  const transport: McpTransport = options.transport ?? { kind: "stdio" };
+
+  // ── read model (durable SQL) ──
+  const store: ReadModelStore = await openStore(config.db, logger.child?.({ subsystem: "readmodel" }) ?? logger);
+  const readModel = new SqlReadModel(store.db, {
+    defaultTimeoutMs: config.readConsistencyTimeoutMs,
+    pollMs: config.waitForPollMs,
+  });
+
+  // ── write-side engine (hot LRU) ──
+  const engine = new EmbeddedEngine(
+    {
+      streamBaseUrl: config.streamBaseUrl,
+      namespace: config.namespace,
+      pageTypes,
+      readConsistencyTimeoutMs: config.readConsistencyTimeoutMs,
+      ...(options.clock !== undefined ? { clock: options.clock } : {}),
+      ...(options.ids !== undefined ? { ids: options.ids } : {}),
+      ...(options.actor !== undefined ? { actor: options.actor } : {}),
+      ...(options.cache !== undefined ? { cache: options.cache } : {}),
+    },
+    logger.child?.({ subsystem: "engine" }) ?? logger,
+  );
+
+  // ── projection tailer (engine-backed source) ──
+  const projection = new ProjectionService(
+    store.db,
+    pageTypes,
+    readModel,
+    logger.child?.({ subsystem: "projection" }) ?? logger,
+  );
+  const source = engineEventSource(engine);
+  const drainOnce = async (): Promise<void> => {
+    try {
+      await projection.drain(source);
+    } catch (err) {
+      // A halted workspace (UnknownPageTypeError) is already logged by the service;
+      // the loop continues so other workspaces still project (DESIGN §9).
+      logger.warn("projection drain reported an error", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  // Initial drain so SQL reflects existing history before serving reads.
+  await drainOnce();
+
+  // Poll loop: re-drain on a cadence so SQL converges to the live stream. The timer
+  // is unref'd so it never keeps the process alive on its own.
+  const pollMs = options.projectionPollMs ?? DEFAULT_PROJECTION_POLL_MS;
+  const timer = setInterval(() => void drainOnce(), pollMs);
+  (timer as { unref?: () => void }).unref?.();
+
+  // ── MCP server ──
+  const server = new WikiMcpServer({
+    engine,
+    readModel,
+    namespace: config.namespace,
+    logger: logger.child?.({ subsystem: "mcp" }) ?? logger,
+  });
+  await server.start(transport);
+
+  return {
+    engine,
+    readModel,
+    projection,
+    server,
+    drainOnce,
+    async close(): Promise<void> {
+      clearInterval(timer);
+      await server.stop();
+      await engine.close();
+      await store.close();
+    },
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// bin entry (standalone)
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Standalone `bin` entry: resolve config from `process.argv`/`process.env`, build a
+ * runtime with NO page types registered (a host injects real ones), and serve over
+ * stdio. Useful for smoke-testing the wiring; production runs through a host that
+ * supplies its page-type set via {@link createWikiMcp}.
+ */
+export async function main(argv = process.argv.slice(2), env = process.env): Promise<void> {
+  const config = resolveConfig(argv, env);
+  const logger = consoleLogger();
+  const mcp = await createWikiMcp({ config, pageTypes: [], logger });
+
+  const shutdown = (): void => {
+    void mcp.close().finally(() => process.exit(0));
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+  logger.info("wiki-mcp started", { namespace: config.namespace });
+}
+
+// Run when invoked directly as the bin (not when imported as a library).
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err: unknown) => {
+    // eslint-disable-next-line no-console
+    console.error(err);
+    process.exit(1);
+  });
+}

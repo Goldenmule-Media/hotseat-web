@@ -1,0 +1,36 @@
+{
+  "name": "wiki-mcp",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Long-lived CQRS read model + MCP server for the wiki engine. Embeds `wiki`, keeps it hydrated, and maintains a durable SQL read model (Kysely · PGlite/pg). Hosted by wiki-server.",
+  "exports": {
+    ".": "./src/main.ts"
+  },
+  "bin": {
+    "wiki-mcp": "dist/main.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "tsx src/main.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "wiki": "*",
+    "kysely": "^0.27.5",
+    "@electric-sql/pglite": "^0.2.17",
+    "pg": "^8.13.1",
+    "@modelcontextprotocol/sdk": "^1.12.0"
+  },
+  "devDependencies": {
+    "@durable-streams/client": "^0.2.6",
+    "@types/pg": "^8.11.10"
+  }
+}
