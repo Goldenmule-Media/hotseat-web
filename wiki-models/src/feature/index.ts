@@ -20,3 +20,10 @@ export const featurePageTypes = [
   ImplementationChecklist,
   TestingPlan,
 ] as const;
+
+/**
+ * Default export = the bundle's page-type array, the contract the `ModelRegistry` loader
+ * expects (wiki-mcp ADR-M6). Keeping the named `featurePageTypes` too is convenient for
+ * source consumers (the engine tests).
+ */
+export default featurePageTypes;
