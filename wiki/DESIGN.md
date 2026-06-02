@@ -19,7 +19,7 @@
 5. [Architecture overview](#5-architecture-overview)
 6. [Domain model: the workspace aggregate & its entities](#6-domain-model-the-workspace-aggregate--its-entities)
 7. [The guarded-mutation model (FSM)](#7-the-guarded-mutation-model-fsm)
-8. [Event sourcing design](#8-event-sourcing-design)
+8. [Event sourcing & CQRS](#8-event-sourcing--cqrs)
 9. [Persistence with Durable Streams](#9-persistence-with-durable-streams)
 10. [Public TypeScript API](#10-public-typescript-api)
 11. [Deterministic Markdown rendering](#11-deterministic-markdown-rendering)
@@ -214,12 +214,12 @@ exists) are **invariants** checked in command handlers, not status transitions.
 │ wiki/  (core library — exposes only a TypeScript interface)              │
 │                                                                          │
 │   ┌───────────────┐   ┌────────────────────────────┐  ┌──────────────┐  │
-│   │  Page Types   │   │        Command Bus          │  │   Markdown   │  │
-│   │ schema + FSM  │─▶ │ validate → guard (FSM /     │  │   Renderer   │  │
-│   │ + reducer +   │   │ invariants) → decide →      │  │ deterministic│  │
+│   │  Page Types   │   │        Command Bus          │  │  Read Model  │  │
+│   │ schema + FSM  │─▶ │ validate → guard (FSM /     │  │ (IReadModel) │  │
+│   │ + reducer +   │   │ invariants) → decide →      │  │ token-gated  │  │
 │   │ renderer      │   │ atomic append → fold → result│ └──────────────┘  │
 │   └───────────────┘   └───────────────┬─────────────┘                    │
-│        Workspace aggregate (fold of one stream → { pages, tree, links }) │
+│   Write side: decide-aggregate (fold) ⟂ Read model: live-tail-fed (§8.6) │
 │                          ┌─────────────▼──────────────┐                  │
 │                          │ EventLog (thin wrapper):    │                  │
 │                          │ events↔messages,            │                  │
@@ -234,9 +234,15 @@ exists) are **invariants** checked in command handlers, not status transitions.
                                 └──────────────────────────────┘
 ```
 
+*Strict CQRS: the **Command Bus** drives the write-side **decide-aggregate** (fold → `Committed<T>`);
+a **separate Read Model** (default in-memory `IReadModel`, fed by the live tail, token-gated —
+[§8.4](#84-live-projection)/[§8.6](#86-consistency-tokens-read-models--cqrs)) serves all reads and
+the Markdown renderer.*
+
 **Command lifecycle (the hot path):**
 
-1. **Resolve** the workspace state (from snapshot + folded tail, or a live-maintained projection).
+1. **Resolve** the write-side decide-aggregate (from snapshot + folded tail, or a live-maintained
+   cache); reads instead come from the read model ([§8.6](#86-consistency-tokens-read-models--cqrs)).
 2. **Validate** the command's arguments against its schema (runtime).
 3. **Guard:** status commands → ask the target entity's FSM `can(status, command)`; structural
    commands → check invariants (parent exists, no cycle, link target exists, …). Failure →
@@ -245,9 +251,16 @@ exists) are **invariants** checked in command handlers, not status transitions.
    **result**.
 5. **Append** the events as **one atomic POST** with `expectedVersion = foldedHead`. On
    `PreconditionFailedError` → **rebase-and-retry** ([§15](#15-concurrency-idempotency--ordering)).
-6. **Fold** the events into workspace state, update the cache, **return the result**.
+6. **Fold** the events into the write-side decide-aggregate, update the cache, and **return
+   `Committed<T>` — the result *plus* a `ConsistencyToken`** for the committed head `version`
+   (after the append **and** any OCC rebase-retry; an idempotent/zero-event write returns the
+   current head). Every write returns `Committed<T>` — including the structural commands that
+   were `void` ([§6.2](#62-workspace--the-aggregate-stream-root), [§10.3](#103-the-iworkspacehandle-interface-one-workspace--the-aggregate)).
 
-Steps 2–4 are pure; only step 5 touches the outside world.
+Steps 2–4 are pure; only step 5 touches the outside world. The fold above maintains the **write
+side** (FSM/invariants/OCC); **reads are served from a separate, token-gated read model** fed by
+the live tail ([§8.6](#86-consistency-tokens-read-models--cqrs)), not from this fold — strict
+CQRS, eventual consistency. A read may carry the returned token to wait for read-your-writes.
 
 ---
 
@@ -322,7 +335,10 @@ interface IItemRecord { id: string; status?: string; /* + typed fields per item 
 ```
 
 **Structural commands** (workspace-scoped; guarded by invariants + "workspace active?" +
-"target page not archived?"):
+"target page not archived?"). **Every command also yields a `ConsistencyToken`** for the
+committed head: the `Result` column below is the `value` carried inside `Committed<value>`, and
+the `—` rows return `Committed<void>` (the token still names where the events landed, so an agent
+can read the mutated graph back — [§8.6](#86-consistency-tokens-read-models--cqrs)):
 
 | Command | Args | Events (one atomic append) | Result |
 |---|---|---|---|
@@ -333,7 +349,7 @@ interface IItemRecord { id: string; status?: string; /* + typed fields per item 
 | `archivePage` | `{ pageId }` | `PageArchived` | — |
 | `link` / `unlink` | `{ from, to, role }` | `LinkAdded` / `LinkRemoved` | — |
 | `moveItem` | `{ from, to, itemType, itemId }` | `<Item>Removed` + `<Item>Added` (e.g. `QuestionRemoved`+`QuestionAdded`) | — |
-| `archiveWorkspace` | `{}` | `WorkspaceArchived` | — |
+| `archiveWorkspace` *(handle: `archive()`)* | `{}` | `WorkspaceArchived` | — |
 
 Every stream's first event is `WorkspaceCreated { name }`.
 
@@ -489,7 +505,7 @@ structural events update `children` / `links` / `pages` directly.
 
 ---
 
-## 8. Event sourcing design
+## 8. Event sourcing & CQRS
 
 ### 8.1 The event envelope
 
@@ -554,10 +570,20 @@ they're dropped and re-folded.
 
 ### 8.4 Live projection
 
-`createWiki` keeps an in-memory projection per open workspace, updated two ways: **write-through**
-after a local append, and a **live tail** (`subscribe`) that folds in events from other writers.
-So the common path needs no re-read, and a reader's view stays fresh — this is the same tail
-that powers G6.
+The engine is **strict CQRS** (§8.6): a write-side **decide-aggregate** validates and appends, and a
+**separate read model** serves reads. The decide-aggregate is the state the command bus folds to run the
+FSM guard / invariants / OCC on the hot path (§5, §15); it is *not* what reads see.
+
+`createWiki` ships a **default in-memory read model** — an `IReadModel` (§8.6) maintained per open
+workspace, updated two ways: **write-through** after a local append, and a **live tail** (`subscribe`)
+that folds in events from other writers. It tracks the highest `version` it has applied as its
+**applied token** (§8.6), so `appliedToken()` / `waitFor()` are answered locally. The common path needs
+no re-read, and a reader's view stays fresh — this is the same tail that powers G6.
+
+The split is real even in-process: the decide-aggregate is advanced synchronously by the append, while
+the read model catches up off the tail, so a read is **eventually consistent** unless gated by a token
+(§8.6). An external read model (e.g. a SQL projection) plugs into the same `IReadModel` seam and is fed
+by the same tail.
 
 ### 8.5 Schema evolution (upcasting)
 
@@ -588,6 +614,53 @@ see below.
 > has no reducer/renderer to apply. Policy: **fail closed** — `openWorkspace` throws
 > `UnknownPageTypeError` naming the missing type(s) rather than silently dropping events. Register
 > the type (or a compatibility shim) to proceed. This keeps folds total and history honest.
+
+### 8.6 Consistency tokens, read models & CQRS
+
+The engine is **strict CQRS with eventual consistency** ([ADR-003](#adr-003--cqrs-with-consistency-tokens-2026-06-02)): the write side (commands → events) and the read side (queryable projections) are **separate**, and the read side trails the write side. Every write returns a **consistency token**; reads may pass a token to **wait** until the read side has caught up. This is what lets a caller convert "eventually consistent" into "consistent with my last write" on demand.
+
+**The consistency token.** A `ConsistencyToken` is an **opaque, comparable string** encoding `{ workspaceId, version }` — `version` being the per-workspace 0-based sequence (== stream length; drives fold order & OCC, §8.1). Tokens are compared **within a single workspace only**; cross-workspace tokens are independent.
+
+```ts
+/** Opaque; encodes { workspaceId, version }. Compare WITHIN a workspace only. */
+export type ConsistencyToken = string;
+```
+
+**Every write returns `Committed<T>`.** A successful command returns its value *and* the token marking where its events landed — the **committed head `version` after the append and any OCC rebase-retry** (§15), not a pre-rebase guess. An idempotent or zero-event write (a deduplicated `commandId`) returns the **current** head. Writes **do not** block on the read model.
+
+```ts
+export interface Committed<T> {
+  readonly value: T;
+  readonly token: ConsistencyToken;
+}
+```
+
+This wraps **every** write, including the eight currently-`Promise<void>` structural commands — `reparent`, `reorder`, `setPageTitle`, `archivePage`, `link`, `unlink`, `moveItem`, and `archive()` (§10.3) — which become `Promise<Committed<void>>`: they mutate graph state a caller reads back, so they carry a token too. (A breaking API change — see [ADR-003](#adr-003--cqrs-with-consistency-tokens-2026-06-02).)
+
+**The read-model interface.** Any projection — the default in-memory one (§8.4) or an external one — implements `IReadModel`:
+
+```ts
+export interface IReadModel {
+  /** How far this read model has applied, for a workspace (the zero token if unknown). */
+  appliedToken(workspace: WorkspaceId): Promise<ConsistencyToken>;
+  /** Resolve once applied ≥ token; reject with ConsistencyTimeoutError after timeoutMs. */
+  waitFor(token: ConsistencyToken, opts?: { timeoutMs?: number }): Promise<void>;
+}
+```
+
+**Token-aware, async reads.** Because a read may have to wait for the read side to catch up, the handle's reads (`tree`/`page`/`toMarkdown`/`status`/`history`, §10.3) take an **optional** token and return a `Promise`:
+
+```ts
+read(query, { consistentWith?: ConsistencyToken; timeoutMs?: number }): Promise<…>
+//   token present → waitFor(token) then serve  (read-your-writes / monotonic)
+//   token absent  → serve current state         (eventually consistent; may be stale)
+```
+
+With a token present, the read calls `waitFor(token)` then serves — giving **read-your-writes** by threading the token from a prior `Committed<T>`. With no token it serves the current projection — fast, but possibly stale. A `waitFor` that exceeds `timeoutMs` rejects with **`ConsistencyTimeoutError`** (a `WikiError` subclass, §14); the default timeout is `IWikiConfig.readConsistencyTimeoutMs` (default 5000, §10.1).
+
+**The write-side / read-side split.** The command bus folds a **write-side decide-aggregate** purely to validate the FSM, invariants, and OCC and to append (§5, §15). A **separate read model** — fed by the live tail, token-gated — serves reads (§8.4). The default in-memory read model makes the engine CQRS-correct standalone, with no database; external read models implement the same `IReadModel` against this seam.
+
+**A public, pure fold is exported.** External read models apply each commit by folding it with the engine's own reducer (so they can never *semantically* diverge — same upcasting, same unknown-type policy), then serializing the resulting `IWorkspaceState`. The fold (`foldWorkspace`/`applyWorkspace`, internal today, §16.1) is therefore **exported** as a public, pure, read-only function for that purpose ([ADR-003](#adr-003--cqrs-with-consistency-tokens-2026-06-02)).
 
 ---
 
@@ -704,6 +777,9 @@ export interface IWikiConfig {
   readonly snapshotEvery?: number;
   /** Time-based backup: snapshot after this many ms of write-idle. @default 5000 @see §8.3 */
   readonly snapshotIdleMs?: number;
+  /** Default timeout (ms) for a token-gated read's `waitFor` before it throws
+   *  {@link ConsistencyTimeoutError}; a per-read `timeoutMs` overrides it. @default 5000 @see §8.6 */
+  readonly readConsistencyTimeoutMs?: number;
   /** Bound the in-memory projection cache of open workspaces, or `false` to disable caching. */
   readonly cache?: { readonly maxWorkspaces?: number } | false;
   /** Optional sink invoked for every appended event (logging/metrics). Must not throw. */
@@ -765,8 +841,11 @@ export interface IWorkspaceSummary {
 /**
  * A live handle to one workspace aggregate. Structural commands mutate the page graph; `mutate`
  * applies a page-scoped, FSM-gated command. Every command appends atomically to the single
- * workspace stream (§6, §15). Reads are served from an in-memory projection kept fresh by a live
- * tail.
+ * workspace stream (§6, §15) and resolves to a {@link Committed} value carrying the workspace's
+ * **committed head {@link ConsistencyToken}** — the position after the append *and* any OCC
+ * rebase-retry (§8.6). Reads are served by the workspace's read model (default in-memory, §8.4),
+ * eventually consistent: pass `consistentWith` a write's token to read-your-writes (the read
+ * `waitFor`s the read model before serving), or omit it to serve current (possibly stale) state.
  */
 export interface IWorkspaceHandle {
   /** The workspace id (== stream id). */
@@ -775,49 +854,51 @@ export interface IWorkspaceHandle {
   // ── structural commands (atomic; guarded by invariants + workspace/page status) ──
 
   /**
-   * Create a page of `type` under `parentId` (`null` = top level). Returns the new page id.
+   * Create a page of `type` under `parentId` (`null` = top level). Returns the new page id and the
+   * committed token (§8.6).
    * @throws {@link ParentNotFoundError} | {@link DuplicateTitleError} | {@link WorkspaceArchivedError}
    */
   createPage<K extends PageTypeName>(
     type: K,
     input: { title: string; parentId: PageId | null } & CreateArgs<K>,
-  ): Promise<PageId>;
+  ): Promise<Committed<PageId>>;
 
   /**
    * Move `pageId` under `newParentId` (`null` = top level), optionally at `position`.
    * @throws {@link CycleError} if `newParentId` is `pageId` or one of its descendants.
    * @throws {@link PageNotFoundError} | {@link ParentNotFoundError}
    */
-  reparent(pageId: PageId, newParentId: PageId | null, position?: number): Promise<void>;
+  reparent(pageId: PageId, newParentId: PageId | null, position?: number): Promise<Committed<void>>;
 
   /** Set the exact order of a parent's children. */
-  reorder(parentId: PageId | null, orderedChildIds: readonly PageId[]): Promise<void>;
+  reorder(parentId: PageId | null, orderedChildIds: readonly PageId[]): Promise<Committed<void>>;
 
   /** Rename a page's tree title. @throws {@link DuplicateTitleError} */
-  setPageTitle(pageId: PageId, title: string): Promise<void>;
+  setPageTitle(pageId: PageId, title: string): Promise<Committed<void>>;
 
   /** Archive a page (terminal; blocks further mutations of that page). */
-  archivePage(pageId: PageId): Promise<void>;
+  archivePage(pageId: PageId): Promise<Committed<void>>;
 
   /** Add a typed link between two pages. @throws {@link LinkTargetNotFoundError} */
-  link(from: PageId, to: PageId, role: string): Promise<void>;
+  link(from: PageId, to: PageId, role: string): Promise<Committed<void>>;
   /** Remove a typed link. */
-  unlink(from: PageId, to: PageId, role: string): Promise<void>;
+  unlink(from: PageId, to: PageId, role: string): Promise<Committed<void>>;
 
   /**
    * Atomically move an item between pages (e.g. a question A→B): the item type's
    * remove+add events are written in a single append. @throws {@link ItemNotFoundError}
    */
-  moveItem(input: { from: PageId; to: PageId; itemType: string; itemId: string }): Promise<void>;
+  moveItem(input: { from: PageId; to: PageId; itemType: string; itemId: string }): Promise<Committed<void>>;
 
   /** Archive the whole workspace (terminal). */
-  archive(): Promise<void>;
+  archive(): Promise<Committed<void>>;
 
   // ── page-scoped content/status command ──
 
   /**
    * Apply a page-scoped command. `command` is constrained to the addressed page type's command
-   * names; `args` and the return value are inferred from that command's definition.
+   * names; `args` and the inner result value are inferred from that command's definition. The
+   * result is wrapped in {@link Committed} so the caller gets the committed token (§8.6).
    * @throws {@link ValidationError} if `args` fail the schema.
    * @throws {@link MutationNotAllowedError} if the FSM forbids `command` in the current status.
    * @throws {@link ConcurrencyError} if optimistic-concurrency retries are exhausted.
@@ -826,25 +907,37 @@ export interface IWorkspaceHandle {
     pageId: PageId,
     command: C,
     args: CommandArgs<K, C>,
-  ): Promise<CommandResult<K, C>>;
+  ): Promise<Committed<CommandResult<K, C>>>;
 
-  // ── reads ──
+  // ── reads (token-gated; async — §8.6) ──
+  // Pass `consistentWith` a write's token to read-your-writes (waits up to `timeoutMs`,
+  // default IWikiConfig.readConsistencyTimeoutMs); omit it for current/eventually-consistent state.
 
   /** Current workspace status. */
-  status(): "active" | "archived";
-  /** The page graph as an ordered tree. */
-  tree(): ITreeNode;
-  /** A view scoped to one page. @throws {@link PageNotFoundError} */
-  page(pageId: PageId): IPageView;
-  /** Deterministic Markdown for one page, or the whole workspace tree if `pageId` is omitted. */
-  toMarkdown(pageId?: PageId): string;
-  /** The full ordered event log for this workspace. */
-  history(): readonly IEventEnvelope[];
+  status(opts?: IReadOpts): Promise<"active" | "archived">;
+  /** The page graph as an ordered tree. @throws {@link ConsistencyTimeoutError} if a waited token doesn't apply in time. */
+  tree(opts?: IReadOpts): Promise<ITreeNode>;
+  /** A view scoped to one page. @throws {@link PageNotFoundError} | {@link ConsistencyTimeoutError} */
+  page(pageId: PageId, opts?: IReadOpts): Promise<IPageView>;
+  /** Deterministic Markdown for one page, or the whole workspace tree if `pageId` is omitted.
+   *  @throws {@link ConsistencyTimeoutError} if a waited token doesn't apply in time. */
+  toMarkdown(pageId?: PageId, opts?: IReadOpts): Promise<string>;
+  /** The full ordered event log for this workspace.
+   *  @throws {@link ConsistencyTimeoutError} if a waited token doesn't apply in time. */
+  history(opts?: IReadOpts): Promise<readonly IEventEnvelope[]>;
 
   // ── live updates (G6) ──
 
   /** Subscribe to every event appended to this workspace, in order. */
   subscribe(handler: (event: IEventEnvelope) => void): Promise<Unsubscribe>;
+}
+
+/** Optional read consistency for a token-gated read (§8.6). */
+export interface IReadOpts {
+  /** A token from a prior write: `waitFor` the read model to apply it before serving (read-your-writes). */
+  readonly consistentWith?: ConsistencyToken;
+  /** Override the default `waitFor` timeout (`IWikiConfig.readConsistencyTimeoutMs`, default 5000 ms). */
+  readonly timeoutMs?: number;
 }
 
 /** An ordered node in the page tree. The root uses the sentinel id `"@root"`. */
@@ -861,28 +954,36 @@ export type Unsubscribe = () => void;
 ### 10.4 The `IPageView` interface (one page, scoped)
 
 ```ts
-/** A read view of a single page plus a `mutate` bound to it. */
+/**
+ * A read view of a single page plus a `mutate` bound to it. Reads are token-gated and async
+ * (§8.6): pass `consistentWith` a write's token to read-your-writes, or omit it for current state.
+ * The view is captured at construction time ({@link IWorkspaceHandle.page}); its read methods serve
+ * from the read model at the consistency they're given.
+ */
 export interface IPageView<K extends PageTypeName = PageTypeName> {
   readonly id: PageId;
   readonly type: K;
-  /** Current parent (`null` = top level). */
-  parentId(): PageId | null;
-  /** Current tree title. */
-  title(): string;
-  /** This page's child pages, in tree order. */
-  children(): readonly IPageView[];
-  /** Current FSM status. */
-  status(): StatusOf<K>;
-  /** Deep-readonly typed snapshot of this page's state (fields + items). */
-  state(): DeepReadonly<PageState<K>>;
-  /** Command names legal from the current status (derived from the FSM). */
-  availableMutations(): readonly CommandName<K>[];
-  /** Currently-available commands as tool descriptors for LLM function-calling. */
-  describeMutations(): readonly IMutationDescriptor[];
-  /** Deterministic Markdown for this page. */
-  toMarkdown(): string;
-  /** Sugar for {@link IWorkspaceHandle.mutate} bound to this page. */
-  mutate<C extends CommandName<K>>(command: C, args: CommandArgs<K, C>): Promise<CommandResult<K, C>>;
+  /** Current parent (`null` = top level). @throws {@link ConsistencyTimeoutError} if a waited token doesn't apply in time. */
+  parentId(opts?: IReadOpts): Promise<PageId | null>;
+  /** Current tree title. @throws {@link ConsistencyTimeoutError} if a waited token doesn't apply in time. */
+  title(opts?: IReadOpts): Promise<string>;
+  /** This page's child pages, in tree order. @throws {@link ConsistencyTimeoutError} if a waited token doesn't apply in time. */
+  children(opts?: IReadOpts): Promise<readonly IPageView[]>;
+  /** Current FSM status. @throws {@link ConsistencyTimeoutError} if a waited token doesn't apply in time. */
+  status(opts?: IReadOpts): Promise<StatusOf<K>>;
+  /** Deep-readonly typed snapshot of this page's state (fields + items).
+   *  @throws {@link ConsistencyTimeoutError} if a waited token doesn't apply in time. */
+  state(opts?: IReadOpts): Promise<DeepReadonly<PageState<K>>>;
+  /** Command names legal from the current status (derived from the FSM).
+   *  @throws {@link ConsistencyTimeoutError} if a waited token doesn't apply in time. */
+  availableMutations(opts?: IReadOpts): Promise<readonly CommandName<K>[]>;
+  /** Currently-available commands as tool descriptors for LLM function-calling.
+   *  @throws {@link ConsistencyTimeoutError} if a waited token doesn't apply in time. */
+  describeMutations(opts?: IReadOpts): Promise<readonly IMutationDescriptor[]>;
+  /** Deterministic Markdown for this page. @throws {@link ConsistencyTimeoutError} if a waited token doesn't apply in time. */
+  toMarkdown(opts?: IReadOpts): Promise<string>;
+  /** Sugar for {@link IWorkspaceHandle.mutate} bound to this page; resolves to a {@link Committed} result (§8.6). */
+  mutate<C extends CommandName<K>>(command: C, args: CommandArgs<K, C>): Promise<Committed<CommandResult<K, C>>>;
 }
 
 /** One command described for tool/function-calling (`describeMutations`). */
@@ -1013,9 +1114,17 @@ export type CommandMap = Readonly<Record<string, ICommandDef<any, any, any, any>
   `IWorkspaceState`, `IPageNode`, `IItemRecord` ([§6.2](#62-workspace--the-aggregate-stream-root));
   `ITreeNode`, `IMutationDescriptor`, `IWorkspaceSummary` (above). `DomainEvent` is the base event
   union (`{ type: string; pageId?: PageId; payload: unknown }`).
+- **CQRS consistency types** ([§8.6](#86-consistency-tokens-read-models--cqrs)):
+  `ConsistencyToken` (opaque, comparable `string` encoding `{ workspaceId, version }`; compared
+  *within* a workspace only); `Committed<T>` = `{ readonly value: T; readonly token: ConsistencyToken }`,
+  the return shape of **every** write; `IReadOpts` (the optional `{ consistentWith?, timeoutMs? }`
+  reads take, above); and `IReadModel` (`appliedToken(workspace)` / `waitFor(token, opts?)`), the
+  read-side seam an external read model implements.
 - **Branded ids:** `WorkspaceId`, `PageId` (opaque `string` brands).
 - **Errors:** every error class is exported and documented in [§14](#14-errors--validation) — all
-  extend `WikiError`, so a consumer can catch the base or narrow on `code`/`instanceof`.
+  extend `WikiError`, so a consumer can catch the base or narrow on `code`/`instanceof`. This now
+  includes `ConsistencyTimeoutError` (thrown when a token-gated read's `waitFor` exceeds its
+  timeout — added in [§14](#14-errors--validation)).
 
 ### 10.7 Package entry points
 
@@ -1159,37 +1268,45 @@ stateDiagram-v2
 
 ### 13.3 A session: plan, build, ship
 
+Every write returns `Committed<T>` — its `value` plus the `token` (the committed head `version`
+after the append and any OCC rebase-retry, §8.6); even the void structural commands carry a token,
+since they change the graph the agent reads back. Reads are `async` and take an optional
+`{ consistentWith?: token }` to convert eventual consistency into read-your-writes (§10.3, §10.4).
+Unused tokens are simply ignored here; we keep the last one to read against in §13.5.
+
 ```ts
 const ws = await wiki.createWorkspace({ name: "Acme platform" });
 
 // One call → brief + its 3 mandated children, atomically (4 PageCreated events in one append).
-const brief = await ws.createPage("feature-brief", { title: "Bulk export", parentId: null });
-const [plan, checklist, testPlan] = ws.page(brief).children().map((c) => c.id);
+// createPage returns Committed<PageId>: the new id + a token naming where the events landed.
+const { value: brief, token: tCreated } = await ws.createPage("feature-brief", { title: "Bulk export", parentId: null });
+const page = await ws.page(brief, { consistentWith: tCreated });
+const [plan, checklist, testPlan] = (await page.children()).map((c) => c.id);
 
-// ── fill the brief ──
+// ── fill the brief ── (mutate returns Committed<CommandResult>; destructure value when there is one)
 await ws.mutate(brief, "setSummary", { text: "Let users export their workspace as CSV/JSON." });
 await ws.mutate(brief, "addComponent", { name: "web-app" });
 await ws.mutate(brief, "addComponent", { name: "cli" });
 await ws.mutate(brief, "addConstraint", { text: "Export must stream; never buffer >50MB in memory." });
-const { questionId: q1 } = await ws.mutate(brief, "askQuestion", { text: "Which formats in v1?" });
+const { value: { questionId: q1 } } = await ws.mutate(brief, "askQuestion", { text: "Which formats in v1?" });
 await ws.mutate(brief, "answerQuestion", { questionId: q1, answer: "CSV and JSON; Parquet later." });
-await ws.link(brief, "feature-brief:01H…rbac" as PageId, "depends-on");   // reference another feature in this workspace
+await ws.link(brief, "feature-brief:01H…rbac" as PageId, "depends-on");   // Committed<void> — reference another feature in this workspace
 
 // ── planning ──
 await ws.mutate(brief, "beginPlanning", {});
 await ws.mutate(plan, "addStep", { text: "Stream a ReadableStream from a new /export endpoint." });
 await ws.mutate(plan, "addStep", { text: "Add `wiki export` CLI wrapping the endpoint." });
-const { caseId: c1 } = await ws.mutate(testPlan, "addCase", { text: "10k-row export < 2s, memory flat." });
+const { value: { caseId: c1 } } = await ws.mutate(testPlan, "addCase", { text: "10k-row export < 2s, memory flat." });
 
 // a question that's really a planning detail → move it onto the plan (atomic cross-page move)
-const { questionId: q2 } = await ws.mutate(brief, "askQuestion", { text: "Page size while streaming?" });
-await ws.moveItem({ from: brief, to: plan, itemType: "question", itemId: q2 });
+const { value: { questionId: q2 } } = await ws.mutate(brief, "askQuestion", { text: "Page size while streaming?" });
+await ws.moveItem({ from: brief, to: plan, itemType: "question", itemId: q2 });   // Committed<void>
 
 // ── implementation ── (beginImplementation is gated: plan ≥1 step AND testing-plan ≥1 case)
 await ws.mutate(brief, "beginImplementation", {});
-const { taskId: t1 } = await ws.mutate(checklist, "addTask", { text: "Streaming /export endpoint" });
-const { taskId: t2 } = await ws.mutate(checklist, "addTask", { text: "`wiki export` CLI" });
-const { taskId: t3 } = await ws.mutate(checklist, "addTask", { text: "Docs + changelog" });
+const { value: { taskId: t1 } } = await ws.mutate(checklist, "addTask", { text: "Streaming /export endpoint" });
+const { value: { taskId: t2 } } = await ws.mutate(checklist, "addTask", { text: "`wiki export` CLI" });
+const { value: { taskId: t3 } } = await ws.mutate(checklist, "addTask", { text: "Docs + changelog" });
 
 await ws.mutate(brief, "recordCommit", { sha: "a1b2c3d", message: "feat(api): streaming export endpoint" });
 await ws.mutate(checklist, "checkTask", { taskId: t1 });
@@ -1200,7 +1317,7 @@ await ws.mutate(testPlan, "markCasePassed", { caseId: c1 });
 // ── review → ship ── (ship is gated: checklist 100% done, all cases passed, no open questions)
 await ws.mutate(brief, "submitForReview", {});
 await ws.mutate(checklist, "checkTask", { taskId: t3 });   // finish docs after review feedback
-await ws.mutate(brief, "ship", {});
+const { token: tShipped } = await ws.mutate(brief, "ship", {});   // keep the head token to read against (§13.5)
 ```
 
 ### 13.4 Cross-page invariants the single aggregate buys us
@@ -1217,6 +1334,16 @@ A failing gate throws `InvariantViolationError` naming what's missing — an LLM
 These checks would be racy (or impossible to do atomically) if each page were its own stream.
 
 ### 13.5 Sample deterministic render + tree
+
+Reads are `async` now; passing the ship token as `consistentWith` waits for the read model to
+catch up so the render reflects every write above (read-your-writes, §10.3) before serving:
+
+```ts
+// token-gated read → guaranteed to see the just-shipped state (not an eventually-consistent stale view)
+const view = await ws.page(brief, { consistentWith: tShipped });
+const kids = await view.children();     // [implementation-plan, implementation-checklist, testing-plan]
+const md   = await ws.toMarkdown(brief, { consistentWith: tShipped });
+```
 
 The brief, rendered mid-flight (status `building`; q1 resolved, q2 moved to the plan):
 
@@ -1296,6 +1423,7 @@ class LinkTargetNotFoundError extends WikiError { target: string; }
 class ConcurrencyError        extends WikiError { expected: number; actual: number; }      // rebase retries exhausted
 class InvariantViolationError extends WikiError { detail: string; }
 class UnknownPageTypeError    extends WikiError { types: string[]; }   // rehydrate hit an unregistered page/event type (§8.5)
+class ConsistencyTimeoutError extends WikiError { token: ConsistencyToken; timeoutMs: number; } // a token-gated read's waitFor timed out (§8.6)
 ```
 
 - **Validation** uses each command's runtime schema (**Zod**: `z.infer` for static types,
@@ -1303,6 +1431,11 @@ class UnknownPageTypeError    extends WikiError { types: string[]; }   // rehydr
   args are *always* validated.
 - Errors carry enough structure for an agent to recover (status + allowed set; the cycle's two
   ids; the missing parent id).
+- **`ConsistencyTimeoutError`** is thrown when a token-gated read's `waitFor` exceeds `timeoutMs`
+  (the call's override or `IWikiConfig.readConsistencyTimeoutMs`, default 5000) — the read model
+  hasn't applied the requested `ConsistencyToken` in time ([§8.6](#86-consistency-tokens-read-models--cqrs)).
+  It carries the awaited `token` + `timeoutMs` so a caller can retry or fall back to an
+  eventually-consistent read (omit the token).
 
 ---
 
@@ -1355,7 +1488,8 @@ points at for storage — it imports neither `wiki` nor its types (`wiki-server/
 │       ├─ core/                # IMPLEMENTATIONS (internal; satisfy api.ts, never re-exported raw)
 │       │   ├─ wiki.ts          #   createWiki + IWiki / IWorkspaceHandle / IPageView impls; wires the rest
 │       │   ├─ command-bus.ts   #   validate → guard → decide → atomic append → fold; rebase-retry; per-ws serialize
-│       │   ├─ workspace.ts     #   the aggregate root: foldWorkspace + applyWorkspace (the event router)
+│       │   ├─ workspace.ts     #   the aggregate root: PUBLIC pure fold — foldWorkspace + applyWorkspace (the event router; §8.6)
+│       │   ├─ readmodel.ts     #   default in-memory IReadModel: appliedToken / waitFor + token-gated reads, fed by the live tail (§8.6)
 │       │   ├─ structure.ts     #   tree + links ops & invariants (createPage/reparent/reorder/link/moveItem…)
 │       │   ├─ registry.ts      #   page/item `type` → { fsm, commands, apply, render }: the per-type dispatch hub
 │       │   ├─ guard.ts         #   in-house FSM: makeGuard, t, ITransition, renderMermaid (zero dependency)
@@ -1387,10 +1521,11 @@ points at for storage — it imports neither `wiki` nor its types (`wiki-server/
 | File | Owns | Key exports | May import |
 |---|---|---|---|
 | `api.ts` | the entire **public type surface** | all `I*` interfaces, data shapes, branded ids, type-level helpers | nothing (pure types) |
-| `index.ts` | the **public barrel** | re-exports of `api`, `core/errors`, bundled page types | api, core/errors, pages/* |
+| `index.ts` | the **public barrel** | re-exports of `api`, `core/errors`, the public `foldWorkspace`/`applyWorkspace` (§8.6), bundled page types | api, core/errors, core/workspace, pages/* |
 | `core/wiki.ts` | engine entry + handle impls | `createWiki` | command-bus, registry, event-log, snapshot, api |
 | `core/command-bus.ts` | the command hot path (§5) | `CommandBus` *(internal)* | guard, registry, workspace, event-log |
-| `core/workspace.ts` | fold/apply (the reducer) | `foldWorkspace`, `applyWorkspace` | registry, structure, api |
+| `core/workspace.ts` | fold/apply (the reducer) — a **public, pure** fold | `foldWorkspace`, `applyWorkspace` *(exported for external read models, §8.6)* | registry, structure, api |
+| `core/readmodel.ts` | the default in-memory `IReadModel` | `InMemoryReadModel` *(internal)*; `IReadModel`/`ConsistencyToken` live in `api.ts` | workspace, event-log, api |
 | `core/structure.ts` | tree/link ops + invariants | structural command handlers | api, errors |
 | `core/registry.ts` | **per-type dispatch** | `Registry` resolving `type → def` | api |
 | `core/guard.ts` | the in-house FSM | `makeGuard`, `t`, `ITransition`, `renderMermaid` | *(none)* |
@@ -1416,6 +1551,12 @@ The boundaries that keep the architecture honest:
 - **The core is type-agnostic.** `command-bus.ts`, `workspace.ts`, and `render/markdown.ts` reach
   page-type behaviour **only** through `registry.ts`; they never name a concrete page type. Adding
   a page type touches only its own folder plus the `pageTypes` array passed to `createWiki` ([§13](#13-worked-example-an-llm-plans-and-ships-a-feature)).
+- **CQRS seam — write side ⟂ read model.** `workspace.ts` exports a **public, pure** fold
+  (`foldWorkspace`/`applyWorkspace`) so an **external read model** can replay the same way the
+  engine does (identical upcasting + unknown-type policy); the default `core/readmodel.ts`
+  consumes that fold off the live tail and exposes `IReadModel` (`appliedToken`/`waitFor` +
+  token-gated reads). The command bus drives only the **write-side** decide-aggregate; handle
+  reads delegate to the read model — neither side imports the other ([§8.6](#86-consistency-tokens-read-models--cqrs)).
 - **Pure modules import no I/O** (`guard.ts`, the reducers in `workspace.ts`, the renderers,
   `determinism.ts`) — clock and id generation arrive via `ICommandContext`, upholding §11 determinism.
 - **No cycles;** `index.ts` is a leaf that nothing imports internally.
@@ -1431,7 +1572,10 @@ The boundaries that keep the architecture honest:
 ### 16.4 Dependencies
 
 `wiki/` runtime deps: **`zod`** (+ `zod-to-json-schema`) and **`@durable-streams/client`**
-(fetch-based; runs in Node/browser/edge). **No FSM dependency** — the guard is ~20 lines in
+(fetch-based; runs in Node/browser/edge). The default in-memory `IReadModel` (`core/readmodel.ts`,
+[§8.6](#86-consistency-tokens-read-models--cqrs)) adds **no** dependency — it folds the live
+tail in process; durable/external read models (e.g. a SQL one) live in downstream packages against
+the exported `IReadModel` seam. **No FSM dependency** — the guard is ~20 lines in
 `core/guard.ts`; `typescript-fsm` is a *design reference only*. **`@durable-streams/server`** is a
 **devDependency** (the in-memory `DurableStreamTestServer` used by `testing.ts` and the test suite).
 
@@ -1491,6 +1635,7 @@ The boundaries that keep the architecture honest:
 - Zod: <https://zod.dev> · `zod-to-json-schema`: <https://github.com/StefanTerdell/zod-to-json-schema>
 - Vernon, *Effective Aggregate Design* (aggregate boundaries): <https://www.dddcommunity.org/library/vernon_2011/>
 - Fowler, *Event Sourcing*: <https://martinfowler.com/eaaDev/EventSourcing.html>
+- Fowler, *CQRS* (command/query separation, read models): <https://martinfowler.com/bliki/CQRS.html>
 
 ---
 
@@ -1544,4 +1689,29 @@ rebase-and-retry — **no actor/routing system**.
 per-workspace; cross-*workspace* moves are a non-atomic saga (a non-goal). Escape hatch if a
 workspace gets write-hot: single epoch-fenced owner, split the workspace, or adopt the StreamFS
 hybrid.
+
+### ADR-003 — CQRS with consistency tokens (2026-06-02)
+
+**Context.** A stateless consumer (open → act → close) pays a full rehydrate per call ([§8.3](#83-snapshots)) — a non-starter once a long-lived host (`wiki-mcp`, the embedding read-model + MCP server) wants to serve reads from a durable, queryable projection (SQL) rather than re-fold history. That host must keep its read store **separate** from the write path, yet an agent must still be able to **read its own writes**. Today the engine keeps a *single* in-memory projection ([§8.4](#84-live-projection)) and the handle's reads (`tree`/`page`/`toMarkdown` — [§10.3](#103-the-iworkspacehandle-interface-one-workspace--the-aggregate)) are **synchronous and token-free**, conflating the write-side fold with the read view. The contract is specified in [`wiki-mcp/DESIGN.md`](../wiki-mcp/DESIGN.md) §3; per the owner's directive it must live in the **core engine**, not just the host.
+
+**Findings.** The engine already owns the right quantity to name a position in history: the per-workspace `version` (0-based, monotonic, `== stream length`, drives fold order **and** OCC — [§8.1](#81-the-event-envelope)). So a consistency token is just `{ workspaceId, version }`, surfaced as an opaque, comparable string — compared **within** a workspace only (cross-workspace tokens are independent). Synchronously writing both stores would couple the write path and span two non-atomic stores; waiting on a token after the append converts "eventual" into "after my write" without that coupling. The reducer that validates a command is already a fold; reusing a *public* fold lets an external read model never semantically diverge from the write model.
+
+**Decision.** Adopt **strict CQRS with eventual consistency** as a **core engine property**:
+
+- **Split the single projection ([§8.4](#84-live-projection)) in two.** A write-side **decide-aggregate** — the fold the command bus maintains to validate the FSM / invariants / OCC — and a **separate read model** (a default **in-memory `IReadModel`**, fed by the live tail and token-gated). The engine is CQRS-correct standalone; external read models (e.g. `wiki-mcp`'s SQL projection) implement the same `IReadModel`.
+- **Every write returns `Committed<T>`** — `{ readonly value: T; readonly token: ConsistencyToken }`. The token is the **committed head `version` after the append *and* any OCC rebase-retry** ([§15](#15-concurrency-idempotency--ordering)), so it names where the events *actually* landed; an idempotent / zero-event write returns the **current** head. This includes the **eight currently-`void` structural commands** (`reparent`, `reorder`, `setPageTitle`, `archivePage`, `link`, `unlink`, `moveItem`, `archive()`) ([§10.3](#103-the-iworkspacehandle-interface-one-workspace--the-aggregate)) — they mutate a graph the agent reads back, so they carry a token too (→ `Committed<void>`). Writes **do not** block on the read model; they return as soon as the append commits.
+- **Reads optionally take a token and `waitFor`.** Read methods gain `{ consistentWith?: ConsistencyToken; timeoutMs?: number }` and become **async** (return a `Promise`): a token present → `waitFor(token)` then serve (read-your-writes / monotonic); absent → serve current state (eventually consistent, possibly stale). The `IReadModel` interface is:
+
+```ts
+interface IReadModel {
+  /** How far this read model has applied, for a workspace. */
+  appliedToken(workspace: WorkspaceId): Promise<ConsistencyToken>;
+  /** Resolve once applied ≥ token; reject after timeoutMs (default from config). */
+  waitFor(token: ConsistencyToken, opts?: { timeoutMs?: number }): Promise<void>;
+}
 ```
+
+- **Export a public, pure `fold`.** `foldWorkspace` / `applyWorkspace` are internal today ([§16.1](#161-what-each-file-owns)); a read-only fold is exported so external read models reuse exact write-model semantics (upcasting, unknown-type policy, item/FSM effects) and only own the state→storage mapping.
+- **A new `ConsistencyTimeoutError`** (a `WikiError` subclass, [§14](#14-errors--validation)) when `waitFor` exceeds `timeoutMs`, so a caller can retry or read stale-with-a-flag. `IWikiConfig` gains a default read-consistency timeout (`readConsistencyTimeoutMs`, default 5000).
+
+**Consequences (a real, breaking API change — not small).** Both write *and* read surfaces change. **Writes:** every return becomes `Committed<T>` (including the eight `Promise<void>` structural commands and `archive()`), so every caller unwraps `.value`/`.token`. **Reads:** the handle's synchronous, token-free `tree`/`page`/`toMarkdown` become **token-aware and `async`**, served from the new read model rather than the write-side fold. §8 (event sourcing) and §10 (API) both change; the in-memory `IReadModel` keeps the engine CQRS-correct with no database. The payoff: fast writes, eventually-consistent reads, and a token to demand read-your-writes on demand — and a public fold that lets `wiki-mcp`'s SQL read model stay semantically identical to the engine. (See [`wiki-mcp/DESIGN.md`](../wiki-mcp/DESIGN.md) §3 / ADR-M1.)
