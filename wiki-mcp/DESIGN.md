@@ -455,6 +455,7 @@ Tests target the **CQRS seam** and the **projection**, using an in-memory `Durab
 
 - Engine (embedded; the CQRS contract must land here): [`wiki/DESIGN.md`](../wiki/DESIGN.md) — §8 (event sourcing), §8.4 (live projection), §10 (API), §12 (LLM), §14 (errors).
 - Stream host (hosts wiki-mcp): [`wiki-server/DESIGN.md`](../wiki-server/DESIGN.md).
+- Schema layer (runtime-loaded page-type bundles): [`wiki-models/DESIGN.md`](../wiki-models/DESIGN.md) — the `ModelRegistry` loads these ([ADR-M6](#adr-m6--live-modelregistry-with-cache-busted-hot-reload-2026-06-02)).
 - Kysely: <https://kysely.dev> · PGlite: <https://pglite.dev> · node-postgres: <https://node-postgres.com>
 - Model Context Protocol: <https://modelcontextprotocol.io> · TS SDK: `@modelcontextprotocol/sdk`.
 - CQRS / read models: Fowler, <https://martinfowler.com/bliki/CQRS.html>.
@@ -543,3 +544,44 @@ stays small and comprehensible. The host *knowing* it has an engine is fine; *ow
 its original "imports neither `wiki` nor anything" stance ([wiki-server/DESIGN.md §1/§2](../wiki-server/DESIGN.md)),
 which must be amended to record that it hosts `wiki-mcp`. `wiki-mcp` still imports only the engine (library)
 + the stream client — never `wiki-server` code.
+
+### ADR-M6 — Live ModelRegistry with cache-busted hot-reload (2026-06-02)
+
+**Context.** Page-type schema must be **swappable at runtime** so a model can be edited, rebuilt, and
+reloaded into a running server (the local *edit → build → reload* loop, driven from a build pipeline — never
+by an agent). Today `createWikiMcp` takes a fixed `pageTypes` set and builds an **immutable** `Registry`
+once; the projection captures `registry`/`fingerprint` at construction and `EmbeddedEngine` binds the set
+per hot handle. Page types are authored in **`wiki-models`** and loaded **by reference**, and the engine is
+already version-aware (upcast-to-latest, [wiki-models ADR-W1](../wiki-models/DESIGN.md)).
+
+**Decision.** Replace the construct-once `Registry` with a mutable, **generation-counted `ModelRegistry`**
+that wraps the engine's immutable `Registry`. Bundles are loaded by **dynamic `import()` of a module
+specifier**. Operations: `load(spec)`, `reload(id)` (a **hard replace**), `unregister(id)`. On any change the
+generation + `fingerprint` bump, and:
+
+- `reload` re-imports the rebuilt bundle **under a cache-busting URL** — `import(fileURL + '?v=' + buildHash)`.
+  Plain `import()` of the same path returns Node's **cached** module, so the query string is the whole trick
+  that makes a code change actually take effect;
+- the engine `Registry` is rebuilt from the new def set, `EmbeddedEngine` **evicts its hot handles** so new
+  writes bind the new code, and affected workspaces **reproject** from the stream via the fingerprint-rebuild
+  path ([§5.3](#53-pglite-local-postgres-prod), [ADR-M3](#adr-m3--projection--engine-fold--serialize-to-sql-2026-06-02)).
+
+Control is the **`wiki-server` control listener** — `GET/POST/DELETE /_server/models[/<id>]`
+([wiki-server/DESIGN.md §8.5](../wiki-server/DESIGN.md)) — pipeline-driven, **not** an MCP tool. `wiki-server`
+proxies the call into `wiki-mcp`'s `ModelRegistry` and stays schema-agnostic (the request names a specifier;
+`wiki-mcp` does the import).
+
+**Why.** The live part belongs at the layer that owns the engine + projection (`wiki-mcp`), so `wiki` and
+`wiki-server` need **no change** and stay schema-agnostic. Reusing the fingerprint-rebuild path means reload
+correctness rides ADR-M3's fold (upcasting, unknown-type halt) for free. Cache-busting is the minimal
+mechanism that defeats the ESM module cache without a worker/`vm`.
+
+**Consequences.** Cache-busting **leaks** the old module instances until GC — acceptable for a local/dev
+reload loop; a long-running production hot-swap is a non-goal. A reload that drops a live type or lowers a
+version **halts** affected workspaces loudly ([wiki-models §4](../wiki-models/DESIGN.md)). The bundle must
+exist as built ESM **on disk at runtime** — it cannot be pre-bundled into the tsdown server image, so models
+ship **alongside** the server, not inside it. Loading a bundle is arbitrary code execution (first-party
+trusted). Per-namespace model selection + persistence stay reserved ([wiki/DESIGN.md §8](../wiki/DESIGN.md)).
+Implementation note: the `projection_offsets.fingerprint` column is already persisted per workspace
+([§5.3](#53-pglite-local-postgres-prod)), but the **compare-stored-vs-current** check that drives the rebuild
+is not yet wired — it is part of this work, not an existing path.
