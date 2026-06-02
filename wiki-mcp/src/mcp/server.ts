@@ -33,9 +33,9 @@ import {
   type ListToolsResult,
   type ReadResourceResult,
 } from "@modelcontextprotocol/sdk/types.js";
-import { WikiError } from "wiki";
+import { WikiError, decodeToken, type WorkspaceId } from "wiki";
 
-import type { EmbeddedEngine } from "../engine.js";
+import { asWorkspaceId, type EmbeddedEngine } from "../engine.js";
 import type { Logger } from "../logger.js";
 import type { SqlReadModel } from "../readmodel/readmodel.js";
 import { listResources, readResource, type WikiResourceContext } from "./resources.js";
@@ -51,6 +51,12 @@ export interface McpServerDeps {
   readonly readModel: SqlReadModel;
   readonly namespace: string;
   readonly logger: Logger;
+  /**
+   * Push the just-written workspace to the projection tailer (DESIGN §5.1): a local
+   * commit does NOT fan out to its own handle's stream subscribers, so the host wires
+   * this to `ProjectionService.notify` to project THIS process's writes promptly.
+   */
+  readonly onWrite?: (workspace: WorkspaceId) => void;
 }
 
 /** The transport to listen on (DESIGN §6.1). */
@@ -102,6 +108,20 @@ export class WikiMcpServer {
     }
   }
 
+  /**
+   * After a successful write tool, push its workspace to the projection tailer
+   * (DESIGN §5.1) so SQL catches up promptly. The workspace is read from the tool's
+   * echoed `token` (decoded) or its `workspaceId`.
+   */
+  private afterWrite(data: unknown): void {
+    if (this.deps.onWrite === undefined) return;
+    const d = data as { token?: unknown; workspaceId?: unknown } | undefined;
+    let ws: string | undefined;
+    if (typeof d?.token === "string") ws = decodeToken(d.token).workspaceId;
+    else if (typeof d?.workspaceId === "string") ws = d.workspaceId;
+    if (ws !== undefined) this.deps.onWrite(asWorkspaceId(ws));
+  }
+
   // ── request handlers ──────────────────────────────────────────────────────────
 
   private registerHandlers(): void {
@@ -130,6 +150,7 @@ export class WikiMcpServer {
       };
       try {
         const result = await tool.handle(request.params.arguments ?? {}, ctx);
+        if (tool.write) this.afterWrite(result.data);
         return successResult(result.text, result.data);
       } catch (err) {
         return this.toToolError(err, tool.name);

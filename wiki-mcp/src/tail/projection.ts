@@ -1,26 +1,42 @@
 /**
- * The projection service / tailer (DESIGN §5.1, §7). Discovers workspaces (via the
- * namespace catalog) and holds a live tail of each workspace's stream; for every
- * commit it drives {@link applyCommit} (fold → serialize → SQL), advancing
- * `applied_version` and notifying the {@link SqlReadModel} so `waitFor`s wake.
+ * The projection service / tailer (DESIGN §5.1, §7). Keeps the SQL read model
+ * current by projecting each workspace's events; for every commit it drives
+ * {@link applyCommit} (fold → serialize → SQL), advancing `applied_version` and
+ * notifying the {@link SqlReadModel} so parked `waitFor`s wake.
  *
- * The raw Durable Streams wire format (catalog discovery + per-workspace event
- * envelopes) is engine-internal, so this module takes an injected
- * {@link EventSource} seam: anything that yields each workspace's contiguous event
- * history drives the same apply path. The v1 wiring connects it to localhost
- * streams (§8); tests connect it to a hand-built history. A poison event the
- * configured page types can't fold **halts** that workspace's projection (§9)
- * rather than corrupting SQL.
+ * The live tail ({@link start}) is **event-driven** (DESIGN §5.1), not a hot poll.
+ * Each workspace is fed by THREE signals:
+ *
+ *  1. **subscribe** — the engine handle's stream tail fans out EXTERNAL events
+ *     (writes by *other* clients, §8.4), which schedule a (coalesced) re-projection;
+ *  2. **{@link notify}** — a local commit does NOT fan out to its own handle's
+ *     subscribers, so THIS process pushes its own writes in explicitly (the host
+ *     calls `notify(workspace)` after each write tool);
+ *  3. a low-frequency **discovery** poll — the namespace catalog is not publicly
+ *     subscribable (§9.3), so we periodically list workspaces and attach any new
+ *     ones; per-workspace DATA flows via (1)/(2), so the poll only discovers.
+ *
+ * The raw Durable Streams wire format is engine-internal, so this takes an injected
+ * {@link EventSource} seam: anything that yields a workspace's contiguous history
+ * (and optionally a live `subscribe`) drives the same apply path. A poison event the
+ * configured page types can't fold **halts** that workspace's projection (§9) rather
+ * than corrupting SQL.
  */
 import { UnknownPageTypeError } from "wiki";
 import { Registry } from "wiki/registry";
-import type { IEventEnvelope, WorkspaceId } from "wiki";
+import type { IEventEnvelope, Unsubscribe, WorkspaceId } from "wiki";
 import type { Kysely } from "kysely";
 
 import type { Logger } from "../logger.js";
 import { applyCommit, type Commit } from "../readmodel/project.js";
 import type { SqlReadModel } from "../readmodel/readmodel.js";
 import type { ReadModelDatabase } from "../readmodel/schema.js";
+
+/**
+ * Default cadence (ms) for the catalog DISCOVERY poll — only lists + attaches NEW
+ * workspaces (cheap); per-workspace data flows via subscribe/notify, not this timer.
+ */
+const DEFAULT_DISCOVER_POLL_MS = 1000;
 
 /**
  * A source of workspace commits to project. A real implementation tails the
@@ -37,12 +53,35 @@ export interface EventSource {
    * skip make apply idempotent, §5.1).
    */
   readHistory(workspace: WorkspaceId, sinceVersion: number): Promise<readonly IEventEnvelope[]>;
+  /**
+   * Live tail (§5.1): invoke `onChange` whenever NEW external events land for
+   * `workspace`, returning an unsubscribe. Optional — a source without it (a scripted
+   * test source) is driven by {@link ProjectionService.drain}/`notify` alone.
+   */
+  subscribe?(workspace: WorkspaceId, onChange: () => void): Promise<Unsubscribe>;
+}
+
+/** One attached workspace in the live tail: its coalesced scheduler + its unsubscribe. */
+interface Attached {
+  /** Schedule a coalesced re-projection of this workspace. */
+  readonly schedule: () => void;
+  /** Tear down this workspace's stream subscription. */
+  readonly unsub: Unsubscribe;
 }
 
 /** A projection service bound to a store, registry, and read model. */
 export class ProjectionService {
   private readonly registry: Registry;
   private readonly fingerprint: string;
+  /** Live-tail state — set by {@link start}, cleared by {@link stopLive}. */
+  private live:
+    | {
+        readonly source: EventSource;
+        readonly attached: Map<WorkspaceId, Attached>;
+        timer: ReturnType<typeof setInterval> | undefined;
+        stopped: boolean;
+      }
+    | undefined;
 
   constructor(
     private readonly db: Kysely<ReadModelDatabase>,
@@ -85,20 +124,148 @@ export class ProjectionService {
   }
 
   /**
-   * Pull each known workspace's history from the {@link EventSource} and project it
-   * once (resuming from each workspace's `applied_version`). The single drain used
-   * at startup and as the body of the live-tail loop; idempotent re-delivery is a
-   * no-op (events `<= applied_version` are skipped, §5.1).
+   * Project one workspace from its `applied_version` to head — the body of
+   * {@link drain} and of the live tail. Idempotent: events `<= applied_version` are
+   * skipped (§5.1), so a re-run with no new events is a no-op.
+   */
+  async projectWorkspace(source: EventSource, workspace: WorkspaceId): Promise<void> {
+    const since = await this.appliedVersionOf(workspace);
+    const history = await source.readHistory(workspace, since);
+    if (history.length === 0) return;
+    await this.project({ workspaceId: workspace, events: history, cursor: undefined });
+  }
+
+  /**
+   * One-shot drain: project every known workspace once (resuming from each
+   * `applied_version`). Used at startup/catch-up and by tests; a halt throws to the
+   * caller. The live tail ({@link start}) drives the same path event-by-event.
    */
   async drain(source: EventSource): Promise<void> {
-    const workspaces = await source.listWorkspaces();
-    for (const workspace of workspaces) {
-      const since = await this.appliedVersionOf(workspace);
-      const history = await source.readHistory(workspace, since);
-      if (history.length === 0) continue;
-      const head = history[history.length - 1];
-      await this.project({ workspaceId: workspace, events: history, cursor: undefined });
-      void head;
+    for (const workspace of await source.listWorkspaces()) {
+      await this.projectWorkspace(source, workspace);
+    }
+  }
+
+  // ── live tail (DESIGN §5.1) ─────────────────────────────────────────────────────
+
+  /**
+   * Start the **event-driven** live tail. Discovers + attaches every current
+   * workspace (subscribe for external events; an initial catch-up project), then
+   * polls the catalog at `discoverPollMs` to attach workspaces created later by other
+   * clients. Returns an unsubscribe; idempotent (a second call returns the same stop).
+   * The host also calls {@link notify} after its own writes (local commits don't fan
+   * out to subscribers).
+   */
+  async start(source: EventSource, opts?: { discoverPollMs?: number }): Promise<Unsubscribe> {
+    if (this.live !== undefined) return () => this.stopLive();
+    const attached = new Map<WorkspaceId, Attached>();
+    const live = { source, attached, timer: undefined as ReturnType<typeof setInterval> | undefined, stopped: false };
+    this.live = live;
+
+    await this.discover(source, attached, () => live.stopped);
+
+    const pollMs = opts?.discoverPollMs ?? DEFAULT_DISCOVER_POLL_MS;
+    const timer = setInterval(() => void this.discover(source, attached, () => live.stopped), pollMs);
+    (timer as { unref?: () => void }).unref?.();
+    live.timer = timer;
+
+    return () => this.stopLive();
+  }
+
+  /**
+   * Push a (coalesced) projection of `workspace` — called for THIS process's own
+   * writes, which a local commit does not fan out to stream subscribers (§8.4).
+   * Attaches the workspace first if the tail hasn't seen it yet. No-op before
+   * {@link start}.
+   */
+  notify(workspace: WorkspaceId): void {
+    const live = this.live;
+    if (live === undefined || live.stopped) return;
+    const entry = live.attached.get(workspace);
+    if (entry !== undefined) {
+      entry.schedule();
+      return;
+    }
+    void this.attach(live.source, live.attached, workspace, () => live.stopped);
+  }
+
+  /** Stop the live tail: unsubscribe every workspace and clear the discovery poll. */
+  stopLive(): void {
+    const live = this.live;
+    if (live === undefined) return;
+    live.stopped = true;
+    if (live.timer !== undefined) clearInterval(live.timer);
+    for (const { unsub } of live.attached.values()) unsub();
+    live.attached.clear();
+    this.live = undefined;
+  }
+
+  /**
+   * Attach a workspace to the live tail: subscribe to its stream (external events),
+   * then schedule an initial catch-up project. Subscribing BEFORE the first project
+   * means an event arriving during catch-up is not lost — the re-projection reads to
+   * head anyway. Each workspace gets a **coalesced** runner: at most one projection in
+   * flight + one queued re-run, so a burst (or a multi-event commit) collapses to a
+   * single up-to-head serialization. A halt/error is logged by {@link project} and
+   * swallowed here so it never crashes the tailer.
+   */
+  private async attach(
+    source: EventSource,
+    attached: Map<WorkspaceId, Attached>,
+    workspace: WorkspaceId,
+    stopped: () => boolean,
+  ): Promise<void> {
+    if (stopped() || attached.has(workspace)) return;
+
+    let running = false;
+    let pending = false;
+    const run = (): void => {
+      if (stopped()) return;
+      if (running) {
+        pending = true;
+        return;
+      }
+      running = true;
+      void (async () => {
+        try {
+          do {
+            pending = false;
+            try {
+              await this.projectWorkspace(source, workspace);
+            } catch {
+              // project() already logged (halt/error); waitFors were rejected on halt.
+              // Don't crash the tailer — a later event/notify retries.
+            }
+          } while (pending && !stopped());
+        } finally {
+          running = false;
+        }
+      })();
+    };
+
+    let unsub: Unsubscribe = () => {};
+    if (source.subscribe !== undefined) {
+      unsub = await source.subscribe(workspace, run);
+    }
+    attached.set(workspace, { schedule: run, unsub });
+    run(); // initial catch-up to head
+  }
+
+  /** List the catalog and attach any not-yet-attached workspace (discovery only). */
+  private async discover(
+    source: EventSource,
+    attached: Map<WorkspaceId, Attached>,
+    stopped: () => boolean,
+  ): Promise<void> {
+    if (stopped()) return;
+    try {
+      for (const ws of await source.listWorkspaces()) {
+        await this.attach(source, attached, ws, stopped);
+      }
+    } catch (err) {
+      this.logger.warn("workspace discovery failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 

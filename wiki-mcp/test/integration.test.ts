@@ -137,6 +137,7 @@ describe("wiki-mcp integration: token semantics + read-your-writes + resume", ()
   });
 
   afterEach(async () => {
+    projection.stopLive();
     await engine.close();
     await store.close();
     await server.stop();
@@ -435,6 +436,67 @@ describe("wiki-mcp integration: token semantics + read-your-writes + resume", ()
     // re-appending the prefix events on the second drain.
     const events = await readModel.events(wsId);
     expect(events.map((e) => e.version)).toEqual([...Array(fullHistory.length).keys()]);
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // (d) Live tail (DESIGN §5.1): event-driven projection — NO manual drain.
+  //     Local writes arrive via `notify` (a local commit doesn't fan out to its
+  //     own subscribers); external writes arrive via the handle's `subscribe`.
+  // ──────────────────────────────────────────────────────────────────────────
+
+  it("the live tail projects LOCAL writes via notify — no manual drain", async () => {
+    // Discovery poll set high so `notify` (the local-write push), not the poll, is
+    // what drives the projection here.
+    await projection.start(engineEventSource(engine), { discoverPollMs: 10_000 });
+
+    const ws = await engine.createWorkspace({ name: "Live" });
+    const { value: pageId, token } = await ws.createPage("note", { title: "Pushed", parentId: null });
+    projection.notify(ws.id); // the runtime calls this after each write tool
+
+    // No manual drain(): notify attaches the workspace + projects to head.
+    await readModel.waitFor(token, { timeoutMs: 2000 });
+    expect((await readModel.getPage(ws.id, pageId))?.title).toBe("Pushed");
+
+    // A subsequent local write also propagates after its notify.
+    const { token: t2 } = await ws.mutate(pageId, "setBody", { text: "live" });
+    projection.notify(ws.id);
+    await readModel.waitFor(t2, { timeoutMs: 2000 });
+    expect((await readModel.getPage(ws.id, pageId))?.fields).toEqual({ body: "live" });
+  });
+
+  it("the live tail projects EXTERNAL writes via subscribe — no notify, no manual drain", async () => {
+    await projection.start(engineEventSource(engine), { discoverPollMs: 20 });
+
+    // A SECOND engine (another client) writes to the SAME streams. Its appends are
+    // EXTERNAL to engine #1's handle tail, so engine #1's `subscribe` fans them out.
+    let n = 0;
+    const engine2 = new EmbeddedEngine(
+      {
+        streamBaseUrl: url,
+        namespace: NAMESPACE,
+        pageTypes: PAGE_TYPES,
+        clock: deterministicClock(),
+        ids: () => `ext-${++n}`, // distinct prefix so ids never collide with engine #1
+        readConsistencyTimeoutMs: 2000,
+      },
+      silentLogger,
+    );
+    try {
+      const ws2 = await engine2.createWorkspace({ name: "External" });
+      const { value: pageId, token } = await ws2.createPage("note", { title: "FromOther", parentId: null });
+
+      // engine #1's tailer catches up with NO notify on its side: the discovery poll
+      // finds the new workspace, then its events flow via subscribe.
+      await readModel.waitFor(token, { timeoutMs: 4000 });
+      expect((await readModel.getPage(ws2.id, pageId))?.title).toBe("FromOther");
+
+      // A further external write propagates via subscribe (now attached), no notify.
+      const { token: t2 } = await ws2.mutate(pageId, "setBody", { text: "external-body" });
+      await readModel.waitFor(t2, { timeoutMs: 4000 });
+      expect((await readModel.getPage(ws2.id, pageId))?.fields).toEqual({ body: "external-body" });
+    } finally {
+      await engine2.close();
+    }
   });
 });
 

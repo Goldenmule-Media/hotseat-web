@@ -50,11 +50,11 @@ export interface CreateWikiMcpOptions {
   /** Where the MCP server listens (DESIGN §6.1). @default stdio */
   readonly transport?: McpTransport;
   /**
-   * Projection poll interval (ms): the tailer re-drains every workspace's history on
-   * this cadence so SQL converges to the live stream (DESIGN §5.2 poll backstop).
-   * @default 250
+   * Catalog discovery poll interval (ms): the live tail subscribes per workspace for
+   * data, and polls the catalog at this cadence only to attach workspaces created
+   * later by other clients (DESIGN §5.1, §9.3). @default 1000
    */
-  readonly projectionPollMs?: number;
+  readonly discoverPollMs?: number;
 }
 
 /** A running wiki-mcp instance — its parts, plus a `close()` that tears everything down. */
@@ -69,12 +69,11 @@ export interface WikiMcp {
   close(): Promise<void>;
 }
 
-const DEFAULT_PROJECTION_POLL_MS = 250;
-
 /**
  * Assemble and start a wiki-mcp runtime (DESIGN §7): open + migrate the SQL store,
  * build the read model, build the embedded engine, start the projection tailer
- * (initial drain + poll loop), and start the MCP server on the chosen transport.
+ * (event-driven live tail — subscribe + notify + discovery poll), and start the MCP
+ * server on the chosen transport.
  */
 export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<WikiMcp> {
   const { config, pageTypes } = options;
@@ -115,22 +114,19 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
     try {
       await projection.drain(source);
     } catch (err) {
-      // A halted workspace (UnknownPageTypeError) is already logged by the service;
-      // the loop continues so other workspaces still project (DESIGN §9).
+      // A halted workspace (UnknownPageTypeError) is already logged by the service.
       logger.warn("projection drain reported an error", {
         error: err instanceof Error ? err.message : String(err),
       });
     }
   };
 
-  // Initial drain so SQL reflects existing history before serving reads.
-  await drainOnce();
-
-  // Poll loop: re-drain on a cadence so SQL converges to the live stream. The timer
-  // is unref'd so it never keeps the process alive on its own.
-  const pollMs = options.projectionPollMs ?? DEFAULT_PROJECTION_POLL_MS;
-  const timer = setInterval(() => void drainOnce(), pollMs);
-  (timer as { unref?: () => void }).unref?.();
+  // Start the EVENT-DRIVEN live tail (DESIGN §5.1): per-workspace `subscribe` for
+  // external events + the host's `notify` for local writes (wired into the MCP server
+  // below) + a low-frequency catalog discovery poll. `start` does the initial catch-up.
+  const stopTail = await projection.start(source, {
+    ...(options.discoverPollMs !== undefined ? { discoverPollMs: options.discoverPollMs } : {}),
+  });
 
   // ── MCP server ──
   const server = new WikiMcpServer({
@@ -138,6 +134,9 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
     readModel,
     namespace: config.namespace,
     logger: logger.child?.({ subsystem: "mcp" }) ?? logger,
+    // A local commit doesn't fan out to its own handle's subscribers, so push each
+    // write tool's workspace to the tailer for prompt read-your-writes (DESIGN §5.1/§6.2).
+    onWrite: (workspace) => projection.notify(workspace),
   });
   await server.start(transport);
 
@@ -148,7 +147,7 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
     server,
     drainOnce,
     async close(): Promise<void> {
-      clearInterval(timer);
+      stopTail();
       await server.stop();
       await engine.close();
       await store.close();
