@@ -535,9 +535,13 @@ concurrency. The Durable Streams opaque offset is used only for resuming reads/s
 ### 8.2 Rehydration and the reducer
 
 ```ts
-function foldWorkspace(events: IEventEnvelope[], from?: IWorkspaceState): IWorkspaceState {
-  let s = from ?? emptyWorkspace(events[0]);     // events[0] = WorkspaceCreated when from is undefined
-  for (const e of events) s = applyWorkspace(s, e);   // routes by e.type / e.pageId
+function foldWorkspace(
+  events: IEventEnvelope[],
+  registry: Registry,                                       // routes content events to the page type's apply (§10.5)
+  from?: { state: IWorkspaceState; fromVersion: number },   // resume from a snapshot (§8.3)
+): IWorkspaceState {
+  let s = from?.state ?? emptyWorkspace(events[0]);   // events[0] = WorkspaceCreated when from is undefined
+  for (const e of events) s = applyWorkspace(s, e, registry);   // routes by e.type / e.pageId
   return s;
 }
 ```
@@ -660,7 +664,7 @@ With a token present, the read calls `waitFor(token)` then serves — giving **r
 
 **The write-side / read-side split.** The command bus folds a **write-side decide-aggregate** purely to validate the FSM, invariants, and OCC and to append (§5, §15). A **separate read model** — fed by the live tail, token-gated — serves reads (§8.4). The default in-memory read model makes the engine CQRS-correct standalone, with no database; external read models implement the same `IReadModel` against this seam.
 
-**A public, pure fold is exported.** External read models apply each commit by folding it with the engine's own reducer (so they can never *semantically* diverge — same upcasting, same unknown-type policy), then serializing the resulting `IWorkspaceState`. The fold (`foldWorkspace`/`applyWorkspace`, internal today, §16.1) is therefore **exported** as a public, pure, read-only function for that purpose ([ADR-003](#adr-003--cqrs-with-consistency-tokens-2026-06-02)).
+**A public, pure fold is exported.** External read models apply each commit by folding it with the engine's own reducer (so they can never *semantically* diverge — same upcasting, same unknown-type policy), then serializing the resulting `IWorkspaceState`. `foldWorkspace(events, registry, from?)` and `applyWorkspace(state, event, registry)` are **exported** from the `wiki` barrel for that purpose ([ADR-003](#adr-003--cqrs-with-consistency-tokens-2026-06-02), [§16.1](#161-what-each-file-owns)). Because the fold routes content events through the page-type reducers, the **`Registry`** is exported via the **`wiki/registry`** subpath ([§10.7](#107-package-entry-points)) so a consumer can build one from its `pageTypes`; and the opaque token codec (`encodeToken`/`decodeToken`/`ZERO_VERSION`) is exported too, so an external read model can compare/produce the same `ConsistencyToken` the engine's writes return.
 
 ---
 
@@ -1130,7 +1134,8 @@ export type CommandMap = Readonly<Record<string, ICommandDef<any, any, any, any>
 
 | Import | Public exports |
 |---|---|
-| `wiki` | `createWiki`; interfaces `IWiki`, `IWorkspaceHandle`, `IPageView`, `IWikiConfig`, `IStreamConfig`; authoring `definePageType`, `defineItemType`, `t` and the `*Def` / `ISchema` / context interfaces; the data types; all error classes. |
+| `wiki` | `createWiki`; interfaces `IWiki`, `IWorkspaceHandle`, `IPageView`, `IWikiConfig`, `IStreamConfig`; authoring `definePageType`, `defineItemType`, `t` and the `*Def` / `ISchema` / context interfaces; the data types; all error classes; the **CQRS** surface — `Committed`, `ConsistencyToken`, `IReadOpts`, `IReadModel`, the public `foldWorkspace`/`applyWorkspace`, and the token codec `encodeToken`/`decodeToken`/`ZERO_VERSION` (§8.6). |
+| `wiki/registry` | the `Registry` class (build one from a `pageTypes` set) — for an **external read model** that reuses the public `foldWorkspace` (§8.6). |
 | `wiki/pages/feature` | the worked-example page types — `FeatureBrief`, `ImplementationPlan`, `ImplementationChecklist`, `TestingPlan` (each `IPageType`) — and their exported state/command types. |
 | `wiki/testing` *(dev only)* | helpers to start an in-memory `DurableStreamTestServer` and an `IWiki` bound to it. |
 
@@ -1521,13 +1526,13 @@ points at for storage — it imports neither `wiki` nor its types (`wiki-server/
 | File | Owns | Key exports | May import |
 |---|---|---|---|
 | `api.ts` | the entire **public type surface** | all `I*` interfaces, data shapes, branded ids, type-level helpers | nothing (pure types) |
-| `index.ts` | the **public barrel** | re-exports of `api`, `core/errors`, the public `foldWorkspace`/`applyWorkspace` (§8.6), bundled page types | api, core/errors, core/workspace, pages/* |
+| `index.ts` | the **public barrel** | re-exports of `api`, `core/errors`, the public `foldWorkspace`/`applyWorkspace` + the token codec `encodeToken`/`decodeToken`/`ZERO_VERSION` (§8.6), bundled page types | api, core/errors, core/workspace, core/readmodel, pages/* |
 | `core/wiki.ts` | engine entry + handle impls | `createWiki` | command-bus, registry, event-log, snapshot, api |
 | `core/command-bus.ts` | the command hot path (§5) | `CommandBus` *(internal)* | guard, registry, workspace, event-log |
 | `core/workspace.ts` | fold/apply (the reducer) — a **public, pure** fold | `foldWorkspace`, `applyWorkspace` *(exported for external read models, §8.6)* | registry, structure, api |
 | `core/readmodel.ts` | the default in-memory `IReadModel` | `InMemoryReadModel` *(internal)*; `IReadModel`/`ConsistencyToken` live in `api.ts` | workspace, event-log, api |
 | `core/structure.ts` | tree/link ops + invariants | structural command handlers | api, errors |
-| `core/registry.ts` | **per-type dispatch** | `Registry` resolving `type → def` | api |
+| `core/registry.ts` | **per-type dispatch** | `Registry` resolving `type → def` *(also re-exported via the `wiki/registry` subpath for external read models, §8.6)* | api |
 | `core/guard.ts` | the in-house FSM | `makeGuard`, `t`, `ITransition`, `renderMermaid` | *(none)* |
 | `core/snapshot.ts` | snapshot read/write | `loadSnapshot`, `writeSnapshot` | event-log, api |
 | `core/define.ts` | the authoring API | `definePageType`, `defineItemType` | guard, api |
@@ -1711,7 +1716,7 @@ interface IReadModel {
 }
 ```
 
-- **Export a public, pure `fold`.** `foldWorkspace` / `applyWorkspace` are internal today ([§16.1](#161-what-each-file-owns)); a read-only fold is exported so external read models reuse exact write-model semantics (upcasting, unknown-type policy, item/FSM effects) and only own the state→storage mapping.
+- **Export a public, pure `fold`.** `foldWorkspace(events, registry, from?)` / `applyWorkspace(state, event, registry)` are **exported** (with the `Registry` via the `wiki/registry` subpath, [§10.7](#107-package-entry-points)) so external read models reuse exact write-model semantics (upcasting, unknown-type policy, item/FSM effects) and only own the state→storage mapping.
 - **A new `ConsistencyTimeoutError`** (a `WikiError` subclass, [§14](#14-errors--validation)) when `waitFor` exceeds `timeoutMs`, so a caller can retry or read stale-with-a-flag. `IWikiConfig` gains a default read-consistency timeout (`readConsistencyTimeoutMs`, default 5000).
 
 **Consequences (a real, breaking API change — not small).** Both write *and* read surfaces change. **Writes:** every return becomes `Committed<T>` (including the eight `Promise<void>` structural commands and `archive()`), so every caller unwraps `.value`/`.token`. **Reads:** the handle's synchronous, token-free `tree`/`page`/`toMarkdown` become **token-aware and `async`**, served from the new read model rather than the write-side fold. §8 (event sourcing) and §10 (API) both change; the in-memory `IReadModel` keeps the engine CQRS-correct with no database. The payoff: fast writes, eventually-consistent reads, and a token to demand read-your-writes on demand — and a public fold that lets `wiki-mcp`'s SQL read model stay semantically identical to the engine. (See [`wiki-mcp/DESIGN.md`](../wiki-mcp/DESIGN.md) §3 / ADR-M1.)

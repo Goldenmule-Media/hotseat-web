@@ -3,9 +3,11 @@
  * package: re-exports the entry function, the public type surface, the authoring
  * helpers, the FSM guard helpers, the typed error hierarchy, and the Zod adapter.
  *
- * Internal-only machinery (CommandBus, EventLog, Registry, the structure/render
- * modules) is deliberately NOT re-exported — those are implementation details
- * behind the interfaces in `./api`.
+ * Internal-only machinery (CommandBus, EventLog, the structure/render modules) is
+ * deliberately NOT re-exported here — those are implementation details behind the
+ * interfaces in `./api`. The `Registry` is the one exception: not in this barrel, but
+ * exposed via the `wiki/registry` subpath so an external read model can build one and
+ * reuse the public `foldWorkspace` (DESIGN §8.6).
  */
 
 // ── entry point ───────────────────────────────────────────────────────────────
