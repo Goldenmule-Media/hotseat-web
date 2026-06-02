@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * wiki-server entrypoint (DESIGN §3.1, §8.1, §8.5). One deployable that hosts BOTH
  * planes in a single lifecycle:

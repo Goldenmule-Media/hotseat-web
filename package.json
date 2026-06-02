@@ -13,10 +13,10 @@
     "build": "npm run build -w wiki -w wiki-server -w wiki-mcp"
   },
   "devDependencies": {
-    "typescript": "^5.7.3",
-    "vitest": "^3.0.5",
+    "@types/node": "^24.0.0",
+    "tsdown": "^0.22.1",
     "tsx": "^4.19.2",
-    "tsup": "^8.5.0",
-    "@types/node": "^24.0.0"
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
   }
 }

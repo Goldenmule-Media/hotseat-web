@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * The `wiki-mcp` library API + `bin` entry (DESIGN §6, §7, §8, ADR-M5).
  *
