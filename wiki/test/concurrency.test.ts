@@ -55,14 +55,18 @@ describe("concurrency: two handles on one workspace", () => {
     // wikiA seeds a workspace with a feature-brief (→ plan, checklist, testing-plan).
     const a = await wikiA.createWorkspace({ name: "shared" });
     wsId = a.id;
-    const brief = await a.createPage("feature-brief", { title: "Export", parentId: null });
-    const [plan, , testPlan] = a.page(brief).children().map((c) => c.id);
+    const { value: brief, token: briefToken } = await a.createPage("feature-brief", {
+      title: "Export",
+      parentId: null,
+    });
+    const aBriefView = await a.page(brief, { consistentWith: briefToken });
+    const [plan, , testPlan] = (await aBriefView.children()).map((c) => c.id);
 
     // wikiB opens the SAME workspace and folds the same head.
     const b = await wikiB.openWorkspace(wsId);
 
-    const headA = a.history().length;
-    const headB = b.history().length;
+    const headA = (await a.history()).length;
+    const headB = (await b.history()).length;
     expect(headA).toBe(headB);
 
     // Both writers act from the same folded head, concurrently, on DIFFERENT pages:
@@ -70,44 +74,52 @@ describe("concurrency: two handles on one workspace", () => {
     // One append wins; the other gets a 409 and rebases over the winner's
     // unrelated event — its command is still valid → it lands on retry.
     const [stepRes, caseRes] = await Promise.all([
-      a.mutate(plan, "addStep", { text: "stream the export" }) as Promise<{ stepId: string }>,
-      b.mutate(testPlan, "addCase", { text: "10k rows < 2s" }) as Promise<{ caseId: string }>,
+      a.mutate(plan, "addStep", { text: "stream the export" }),
+      b.mutate(testPlan, "addCase", { text: "10k rows < 2s" }),
     ]);
 
-    expect(stepRes.stepId).toBeTruthy();
-    expect(caseRes.caseId).toBeTruthy();
+    expect((stepRes.value as { stepId: string }).stepId).toBeTruthy();
+    expect((caseRes.value as { caseId: string }).caseId).toBeTruthy();
 
     // BOTH events landed in the single shared stream: the authoritative log read
-    // from a fresh handle shows the step AND the case.
+    // from a fresh handle (folded from zero, so already current) shows the step
+    // AND the case.
     const fresh = await wikiC.openWorkspace(wsId);
-    const types = fresh.history().map((e) => e.type);
+    const types = (await fresh.history()).map((e) => e.type);
     expect(types.filter((t) => t === "StepAdded")).toHaveLength(1);
     expect(types.filter((t) => t === "CaseAdded")).toHaveLength(1);
 
     // Versions are contiguous (no gap, no duplicate) — the two appends serialized
     // cleanly behind OCC.
-    const versions = fresh.history().map((e) => e.version);
+    const versions = (await fresh.history()).map((e) => e.version);
     expect(versions).toEqual(versions.map((_, i) => i));
 
     // The freshly-folded state carries both children's items.
-    expect(fresh.page(plan).state().items.step).toHaveLength(1);
-    expect(fresh.page(testPlan).state().items.case).toHaveLength(1);
+    expect((await (await fresh.page(plan)).state()).items.step).toHaveLength(1);
+    expect((await (await fresh.page(testPlan)).state()).items.case).toHaveLength(1);
   });
 
   it("rejects the second answer to the SAME question with MutationNotAllowedError after rebase", async () => {
     const a = await wikiA.createWorkspace({ name: "shared" });
     wsId = a.id;
-    const brief = await a.createPage("feature-brief", { title: "Export", parentId: null });
+    const { value: brief } = await a.createPage("feature-brief", {
+      title: "Export",
+      parentId: null,
+    });
 
     // One open question on the brief.
-    const { questionId } = (await a.mutate(brief, "askQuestion", {
+    const { value: askResult, token: askToken } = await a.mutate(brief, "askQuestion", {
       text: "Which formats?",
-    })) as { questionId: string };
+    });
+    const { questionId } = askResult as { questionId: string };
 
     // wikiB opens the workspace while the question is still OPEN on both projections.
     const b = await wikiB.openWorkspace(wsId);
+    // Gate B's read on A's ask token so B has definitely tailed the question into
+    // its projection before we assert its open status.
+    const bView = await b.page(brief, { consistentWith: askToken });
     expect(
-      b.page(brief).state().items.question.find((q) => q.id === questionId)?.status,
+      (await bView.state()).items.question.find((q) => q.id === questionId)?.status,
     ).toBe("open");
 
     // Race the SAME item-level mutation from both handles. The first wins and
@@ -136,21 +148,25 @@ describe("concurrency: two handles on one workspace", () => {
     // The question is resolved exactly once in the authoritative log: one
     // QuestionAnswered event total.
     const fresh = await wikiC.openWorkspace(wsId);
-    const answered = fresh.history().filter((e) => e.type === "QuestionAnswered");
+    const answered = (await fresh.history()).filter((e) => e.type === "QuestionAnswered");
     expect(answered).toHaveLength(1);
-    expect(fresh.page(brief).state().items.question.find((q) => q.id === questionId)?.status).toBe(
-      "resolved",
-    );
+    expect(
+      (await (await fresh.page(brief)).state()).items.question.find((q) => q.id === questionId)
+        ?.status,
+    ).toBe("resolved");
   });
 
   it("two writers serialize cleanly without gaps even when both rebase repeatedly", async () => {
     const a = await wikiA.createWorkspace({ name: "shared" });
     wsId = a.id;
-    const brief = await a.createPage("feature-brief", { title: "Export", parentId: null });
-    const checklist = a
-      .page(brief)
-      .children()
-      .find((c) => c.type === "implementation-checklist")!.id as PageId;
+    const { value: brief, token: briefToken } = await a.createPage("feature-brief", {
+      title: "Export",
+      parentId: null,
+    });
+    const aBriefView = await a.page(brief, { consistentWith: briefToken });
+    const checklist = (await aBriefView.children()).find(
+      (c) => c.type === "implementation-checklist",
+    )!.id as PageId;
 
     await a.mutate(brief, "beginPlanning", {});
 
@@ -165,12 +181,12 @@ describe("concurrency: two handles on one workspace", () => {
     ]);
 
     const fresh = await wikiC.openWorkspace(wsId);
-    const versions = fresh.history().map((e) => e.version);
+    const versions = (await fresh.history()).map((e) => e.version);
     // Contiguous 0..N-1: OCC + rebase produced a clean, gap-free, dup-free log.
     expect(versions).toEqual(versions.map((_, i) => i));
 
     // All four mutations are represented exactly once.
-    const types = fresh.history().map((e) => e.type);
+    const types = (await fresh.history()).map((e) => e.type);
     expect(types.filter((t) => t === "ConstraintAdded")).toHaveLength(1);
     expect(types.filter((t) => t === "QuestionAsked")).toHaveLength(1);
     expect(types.filter((t) => t === "TaskAdded")).toHaveLength(2);

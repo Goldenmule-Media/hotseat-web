@@ -24,15 +24,19 @@ import { createTestWiki, type ITestWiki } from "../src/testing";
  */
 async function buildBuildingBrief(
   ws: IWorkspaceHandle,
-): Promise<{ brief: PageId; plan: PageId; checklist: PageId; testPlan: PageId }> {
+): Promise<{ brief: PageId; plan: PageId; checklist: PageId; testPlan: PageId; token: string }> {
   // A sibling brief to reference (the §13.5 "Access control (RBAC)").
-  const rbac = await ws.createPage("feature-brief", {
+  const { value: rbac } = await ws.createPage("feature-brief", {
     title: "Access control (RBAC)",
     parentId: null,
   });
 
-  const brief = await ws.createPage("feature-brief", { title: "Bulk export", parentId: null });
-  const [plan, checklist, testPlan] = ws.page(brief).children().map((c) => c.id);
+  const { value: brief, token: briefToken } = await ws.createPage("feature-brief", {
+    title: "Bulk export",
+    parentId: null,
+  });
+  const briefView = await ws.page(brief, { consistentWith: briefToken });
+  const [plan, checklist, testPlan] = (await briefView.children()).map((c) => c.id);
 
   // Give the mandated children the display titles used in §13.5.
   await ws.setPageTitle(plan, "Implementation plan");
@@ -50,7 +54,7 @@ async function buildBuildingBrief(
   });
   const { questionId: q1 } = (await ws.mutate(brief, "askQuestion", {
     text: "Which formats in v1?",
-  })) as { questionId: string };
+  })).value as { questionId: string };
   await ws.mutate(brief, "answerQuestion", {
     questionId: q1,
     answer: "CSV and JSON; Parquet later.",
@@ -65,7 +69,7 @@ async function buildBuildingBrief(
   // A planning-detail question moved off the brief onto the plan (atomic cross-page move).
   const { questionId: q2 } = (await ws.mutate(brief, "askQuestion", {
     text: "Page size while streaming?",
-  })) as { questionId: string };
+  })).value as { questionId: string };
   await ws.moveItem({ from: brief, to: plan, itemType: "question", itemId: q2 });
 
   // ── implementation (gated) ──
@@ -74,9 +78,12 @@ async function buildBuildingBrief(
     sha: "a1b2c3d",
     message: "feat(api): streaming export endpoint",
   });
-  await ws.mutate(brief, "recordCommit", { sha: "e4f5g6h", message: "feat(cli): wiki export" });
+  const { token } = await ws.mutate(brief, "recordCommit", {
+    sha: "e4f5g6h",
+    message: "feat(cli): wiki export",
+  });
 
-  return { brief, plan, checklist, testPlan };
+  return { brief, plan, checklist, testPlan, token };
 }
 
 const EXPECTED_BRIEF = `# Feature: Bulk export
@@ -116,30 +123,32 @@ describe("feature-brief render — byte-stable + §13.5 shape", () => {
   let tw: ITestWiki;
   let ws: IWorkspaceHandle;
   let brief: PageId;
+  /** The committed-head token after the build script, for read-your-writes. */
+  let token: string;
 
   beforeAll(async () => {
     tw = await createTestWiki(featurePageTypes);
     ws = await tw.wiki.createWorkspace({ name: "Acme platform" });
-    ({ brief } = await buildBuildingBrief(ws));
+    ({ brief, token } = await buildBuildingBrief(ws));
   });
 
   afterAll(async () => {
     await tw.stop();
   });
 
-  it("matches the §13.5 mid-flight Markdown byte-for-byte", () => {
-    expect(ws.toMarkdown(brief)).toBe(EXPECTED_BRIEF);
+  it("matches the §13.5 mid-flight Markdown byte-for-byte", async () => {
+    expect(await ws.toMarkdown(brief, { consistentWith: token })).toBe(EXPECTED_BRIEF);
   });
 
-  it("ends with exactly one trailing newline and uses \\n line endings", () => {
-    const md = ws.toMarkdown(brief);
+  it("ends with exactly one trailing newline and uses \\n line endings", async () => {
+    const md = await ws.toMarkdown(brief, { consistentWith: token });
     expect(md.endsWith("\n")).toBe(true);
     expect(md.endsWith("\n\n")).toBe(false);
     expect(md.includes("\r")).toBe(false);
   });
 
-  it("renders every §13.5 section heading exactly once, in order", () => {
-    const md = ws.toMarkdown(brief);
+  it("renders every §13.5 section heading exactly once, in order", async () => {
+    const md = await ws.toMarkdown(brief, { consistentWith: token });
     const headings = md.split("\n").filter((l) => l.startsWith("## "));
     expect(headings).toEqual([
       "## Summary",
@@ -153,10 +162,10 @@ describe("feature-brief render — byte-stable + §13.5 shape", () => {
     ]);
   });
 
-  it("is byte-identical when rendered repeatedly from the SAME state (no clock/RNG leak)", () => {
-    const a = ws.toMarkdown(brief);
-    const b = ws.toMarkdown(brief);
-    const c = ws.page(brief).toMarkdown();
+  it("is byte-identical when rendered repeatedly from the SAME state (no clock/RNG leak)", async () => {
+    const a = await ws.toMarkdown(brief, { consistentWith: token });
+    const b = await ws.toMarkdown(brief);
+    const c = await (await ws.page(brief)).toMarkdown();
     expect(b).toBe(a);
     expect(c).toBe(a);
   });
@@ -169,11 +178,13 @@ describe("feature-brief render — equal state ⇒ identical output (across inde
     try {
       const ws1 = await tw1.wiki.createWorkspace({ name: "Acme platform" });
       const ws2 = await tw2.wiki.createWorkspace({ name: "Acme platform" });
-      const { brief: b1 } = await buildBuildingBrief(ws1);
-      const { brief: b2 } = await buildBuildingBrief(ws2);
-      expect(ws1.toMarkdown(b1)).toBe(ws2.toMarkdown(b2));
+      const { brief: b1, token: t1 } = await buildBuildingBrief(ws1);
+      const { brief: b2, token: t2 } = await buildBuildingBrief(ws2);
+      expect(await ws1.toMarkdown(b1, { consistentWith: t1 })).toBe(
+        await ws2.toMarkdown(b2, { consistentWith: t2 }),
+      );
       // And both equal the canonical §13.5 expectation.
-      expect(ws1.toMarkdown(b1)).toBe(EXPECTED_BRIEF);
+      expect(await ws1.toMarkdown(b1, { consistentWith: t1 })).toBe(EXPECTED_BRIEF);
     } finally {
       await tw1.stop();
       await tw2.stop();
@@ -184,20 +195,21 @@ describe("feature-brief render — equal state ⇒ identical output (across inde
 describe("workspace render — deterministic tree", () => {
   let tw: ITestWiki;
   let ws: IWorkspaceHandle;
+  let token: string;
 
   beforeAll(async () => {
     tw = await createTestWiki(featurePageTypes);
     ws = await tw.wiki.createWorkspace({ name: "Acme platform" });
-    await buildBuildingBrief(ws);
+    ({ token } = await buildBuildingBrief(ws));
   });
 
   afterAll(async () => {
     await tw.stop();
   });
 
-  it("renders the workspace tree with type+status annotations, byte-stable", () => {
-    const a = ws.toMarkdown();
-    const b = ws.toMarkdown();
+  it("renders the workspace tree with type+status annotations, byte-stable", async () => {
+    const a = await ws.toMarkdown(undefined, { consistentWith: token });
+    const b = await ws.toMarkdown();
     expect(b).toBe(a);
     // The H1 is the workspace name; the building brief and its three children appear.
     expect(a.startsWith("# Acme platform\n")).toBe(true);

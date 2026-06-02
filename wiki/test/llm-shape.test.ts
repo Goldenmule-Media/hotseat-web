@@ -83,15 +83,18 @@ async function freshBrief(title: string): Promise<{
   checklist: PageId;
   testPlan: PageId;
 }> {
-  const brief = await ws.createPage("feature-brief", { title, parentId: null });
-  const [plan, checklist, testPlan] = ws.page(brief).children().map((c) => c.id);
+  const { value: brief, token } = await ws.createPage("feature-brief", { title, parentId: null });
+  // Read-your-writes: gate the children read on the createPage token so the page
+  // (and its atomically-created children) are guaranteed visible.
+  const view = await ws.page(brief, { consistentWith: token });
+  const [plan, checklist, testPlan] = (await view.children()).map((c) => c.id);
   return { brief, plan, checklist, testPlan };
 }
 
 describe("describeMutations() — valid JSON Schema + availability flags", () => {
   it("emits one descriptor per declared command, each with a valid args JSON Schema", async () => {
     const { brief } = await freshBrief("Schemas A");
-    const descriptors = ws.page(brief).describeMutations();
+    const descriptors = await (await ws.page(brief)).describeMutations();
 
     // One per declared command (regardless of availability).
     expect(descriptors.map((d) => d.name).sort()).toEqual([...ALL_BRIEF_COMMANDS].sort());
@@ -109,7 +112,9 @@ describe("describeMutations() — valid JSON Schema + availability flags", () =>
 
   it("the args schema reflects each command's real parameters (e.g. setSummary.text)", async () => {
     const { brief } = await freshBrief("Schemas B");
-    const byName = new Map(ws.page(brief).describeMutations().map((d) => [d.name, d]));
+    const byName = new Map(
+      (await (await ws.page(brief)).describeMutations()).map((d) => [d.name, d]),
+    );
 
     const setSummary = byName.get("setSummary");
     expect(setSummary).toBeDefined();
@@ -139,15 +144,14 @@ describe("describeMutations() — valid JSON Schema + availability flags", () =>
 
   it("the `available` flags equal exactly the available command set for the status (draft)", async () => {
     const { brief } = await freshBrief("Schemas C");
-    const view = ws.page(brief);
-    expect(view.status()).toBe("draft");
+    const view = await ws.page(brief);
+    expect(await view.status()).toBe("draft");
 
-    const availableFromDescriptors = view
-      .describeMutations()
+    const availableFromDescriptors = (await view.describeMutations())
       .filter((d) => d.available)
       .map((d) => d.name)
       .sort();
-    expect(availableFromDescriptors).toEqual([...view.availableMutations()].sort());
+    expect(availableFromDescriptors).toEqual([...(await view.availableMutations())].sort());
     expect(availableFromDescriptors).toEqual([...OFFERED_BY_STATUS.draft].sort());
   });
 });
@@ -155,17 +159,21 @@ describe("describeMutations() — valid JSON Schema + availability flags", () =>
 describe("availableMutations() — matches the §13.6 table per status", () => {
   it("draft offers exactly the §13.6 draft set", async () => {
     const { brief } = await freshBrief("Status draft");
-    const view = ws.page(brief);
-    expect(view.status()).toBe("draft");
-    expect([...view.availableMutations()].sort()).toEqual([...OFFERED_BY_STATUS.draft].sort());
+    const view = await ws.page(brief);
+    expect(await view.status()).toBe("draft");
+    expect([...(await view.availableMutations())].sort()).toEqual(
+      [...OFFERED_BY_STATUS.draft].sort(),
+    );
   });
 
   it("planning offers exactly the §13.6 planning set", async () => {
     const { brief } = await freshBrief("Status planning");
-    await ws.mutate(brief, "beginPlanning", {});
-    const view = ws.page(brief);
-    expect(view.status()).toBe("planning");
-    expect([...view.availableMutations()].sort()).toEqual([...OFFERED_BY_STATUS.planning].sort());
+    const { token } = await ws.mutate(brief, "beginPlanning", {});
+    const view = await ws.page(brief, { consistentWith: token });
+    expect(await view.status({ consistentWith: token })).toBe("planning");
+    expect([...(await view.availableMutations({ consistentWith: token }))].sort()).toEqual(
+      [...OFFERED_BY_STATUS.planning].sort(),
+    );
   });
 
   it("building offers exactly the §13.6 building set (after the cross-page gate is met)", async () => {
@@ -173,10 +181,12 @@ describe("availableMutations() — matches the §13.6 table per status", () => {
     await ws.mutate(brief, "beginPlanning", {});
     await ws.mutate(plan, "addStep", { text: "do the thing" });
     await ws.mutate(testPlan, "addCase", { text: "verify the thing" });
-    await ws.mutate(brief, "beginImplementation", {});
-    const view = ws.page(brief);
-    expect(view.status()).toBe("building");
-    expect([...view.availableMutations()].sort()).toEqual([...OFFERED_BY_STATUS.building].sort());
+    const { token } = await ws.mutate(brief, "beginImplementation", {});
+    const view = await ws.page(brief, { consistentWith: token });
+    expect(await view.status({ consistentWith: token })).toBe("building");
+    expect([...(await view.availableMutations({ consistentWith: token }))].sort()).toEqual(
+      [...OFFERED_BY_STATUS.building].sort(),
+    );
   });
 
   it("review offers exactly the §13.6 review set", async () => {
@@ -185,45 +195,47 @@ describe("availableMutations() — matches the §13.6 table per status", () => {
     await ws.mutate(plan, "addStep", { text: "step" });
     await ws.mutate(testPlan, "addCase", { text: "case" });
     await ws.mutate(brief, "beginImplementation", {});
-    await ws.mutate(brief, "submitForReview", {});
-    const view = ws.page(brief);
-    expect(view.status()).toBe("review");
-    expect([...view.availableMutations()].sort()).toEqual([...OFFERED_BY_STATUS.review].sort());
+    const { token } = await ws.mutate(brief, "submitForReview", {});
+    const view = await ws.page(brief, { consistentWith: token });
+    expect(await view.status({ consistentWith: token })).toBe("review");
+    expect([...(await view.availableMutations({ consistentWith: token }))].sort()).toEqual(
+      [...OFFERED_BY_STATUS.review].sort(),
+    );
   });
 
   it("shipped is terminal — offers nothing (after all gates satisfied)", async () => {
     const { brief, plan, checklist, testPlan } = await freshBrief("Status shipped");
     await ws.mutate(brief, "beginPlanning", {});
     await ws.mutate(plan, "addStep", { text: "step" });
-    const { caseId } = (await ws.mutate(testPlan, "addCase", { text: "case" })) as {
+    const { caseId } = (await ws.mutate(testPlan, "addCase", { text: "case" })).value as {
       caseId: string;
     };
     await ws.mutate(brief, "beginImplementation", {});
-    const { taskId } = (await ws.mutate(checklist, "addTask", { text: "task" })) as {
+    const { taskId } = (await ws.mutate(checklist, "addTask", { text: "task" })).value as {
       taskId: string;
     };
     await ws.mutate(checklist, "checkTask", { taskId });
     await ws.mutate(testPlan, "markCasePassed", { caseId });
     await ws.mutate(brief, "submitForReview", {});
-    await ws.mutate(brief, "ship", {});
+    const { token } = await ws.mutate(brief, "ship", {});
 
-    const view = ws.page(brief);
-    expect(view.status()).toBe("shipped");
-    expect(view.availableMutations()).toEqual([]);
+    const view = await ws.page(brief, { consistentWith: token });
+    expect(await view.status({ consistentWith: token })).toBe("shipped");
+    expect(await view.availableMutations({ consistentWith: token })).toEqual([]);
   });
 
   it("abandoned is terminal — offers nothing", async () => {
     const { brief } = await freshBrief("Status abandoned");
-    await ws.mutate(brief, "abandon", {});
-    const view = ws.page(brief);
-    expect(view.status()).toBe("abandoned");
-    expect(view.availableMutations()).toEqual([]);
+    const { token } = await ws.mutate(brief, "abandon", {});
+    const view = await ws.page(brief, { consistentWith: token });
+    expect(await view.status({ consistentWith: token })).toBe("abandoned");
+    expect(await view.availableMutations({ consistentWith: token })).toEqual([]);
   });
 
   it("availableMutations() is always a SUBSET of the full command set", async () => {
     const { brief } = await freshBrief("Subset check");
     const full = new Set(ALL_BRIEF_COMMANDS);
-    for (const cmd of ws.page(brief).availableMutations()) {
+    for (const cmd of await (await ws.page(brief)).availableMutations()) {
       expect(full.has(cmd)).toBe(true);
     }
   });

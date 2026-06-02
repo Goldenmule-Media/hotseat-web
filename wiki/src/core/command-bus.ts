@@ -52,6 +52,18 @@ export interface CommandBusConfig {
 }
 
 /**
+ * A committed write's outcome (DESIGN §5 step 6, §8.6): the command's `result`
+ * value plus the **committed-head version** — the per-workspace `version` after the
+ * append and any OCC rebase-retry. The handle turns `committedVersion` into a
+ * {@link ConsistencyToken}. An idempotent / zero-event write reports the current head.
+ */
+export interface CommitOutcome {
+  readonly result: unknown;
+  /** The workspace `version` after this commit landed (== folded head). */
+  readonly committedVersion: number;
+}
+
+/**
  * The bus's view of an open workspace: the standard {@link ProjectionEntry} plus
  * the FULL in-memory event log the handle keeps for `history()`. The bus appends
  * each committed/rebased envelope to `events` so `history()` is always complete.
@@ -99,8 +111,9 @@ export class CommandBus {
   /**
    * Run a structural command. The decision is re-evaluated from scratch on each
    * (re)attempt against the latest folded state so a rebase re-checks invariants.
+   * Resolves to a {@link CommitOutcome} (result + committed-head version, §8.6).
    */
-  async runStructural(projection: BusProjection, req: StructuralRequest): Promise<unknown> {
+  async runStructural(projection: BusProjection, req: StructuralRequest): Promise<CommitOutcome> {
     const handler = STRUCTURAL_HANDLERS[req.handler];
     if (handler === undefined) {
       // Unknown structural verb — treat as a forbidden mutation rather than a crash.
@@ -133,8 +146,9 @@ export class CommandBus {
    * Run a page-scoped command: validate args, guard the page FSM (and the item
    * FSM for item-level commands), build the command context, run the pure
    * `produces`, then commit. The decision is re-run on each rebase attempt.
+   * Resolves to a {@link CommitOutcome} (result + committed-head version, §8.6).
    */
-  async runPage(projection: BusProjection, req: PageRequest): Promise<unknown> {
+  async runPage(projection: BusProjection, req: PageRequest): Promise<CommitOutcome> {
     const decide = (state: IWorkspaceState) => this.decidePage(state, req);
     return this.commit(projection, decide, {
       actor: req.actor,
@@ -248,20 +262,26 @@ export class CommandBus {
    * and append them atomically asserting `expectedVersion = state.version`. On a
    * stale-write conflict, fold the new tail forward and re-run `decide` against
    * the fresh state (bounded retries → {@link ConcurrencyError}).
+   *
+   * Returns a {@link CommitOutcome}: the typed `result` plus the **committed-head
+   * version** after the append AND any rebase (§5 step 6, §8.6). An idempotent /
+   * zero-event write reports the current head — no append happens, so the token
+   * names where the (already-applied or empty) effect sits.
    */
   private async commit(
     projection: BusProjection,
     decide: (state: IWorkspaceState) => { events: DomainEvent[]; result: unknown },
     meta: { actor?: string; commandId?: string; defaultPageId?: PageId },
-  ): Promise<unknown> {
+  ): Promise<CommitOutcome> {
     const ws = projection.state.id;
 
     for (let attempt = 0; attempt < MAX_REBASE_ATTEMPTS; attempt++) {
       // Idempotency: a commandId already represented in history short-circuits
       // BEFORE we guard/decide (the FSM would otherwise reject the replayed
       // command). The original append already produced the effect (BUILD_NOTES §3).
+      // The token reflects the CURRENT head, since the effect already landed (§8.6).
       if (meta.commandId !== undefined && this.commandSeen(projection, meta.commandId)) {
-        return undefined;
+        return { result: undefined, committedVersion: projection.state.version };
       }
 
       // (Re)decide against the freshest folded state every attempt.
@@ -269,9 +289,9 @@ export class CommandBus {
 
       const expectedVersion = projection.state.version;
 
-      // Empty decision: nothing to append.
+      // Empty decision: nothing to append — current head is the committed head (§8.6).
       if (raw.length === 0) {
-        return result;
+        return { result, committedVersion: projection.state.version };
       }
 
       const envelopes = this.envelope(projection.state, raw, expectedVersion, meta);
@@ -286,10 +306,12 @@ export class CommandBus {
         throw e;
       }
 
-      // Success — fold our own envelopes in, advance bookkeeping, fan out.
+      // Success — fold our own envelopes in, advance bookkeeping, fan out. The
+      // committed head is the post-absorb version (after the append; rebases
+      // already advanced it before this attempt).
       this.absorb(projection, envelopes);
       await this.maybeSnapshot(projection);
-      return result;
+      return { result, committedVersion: projection.state.version };
     }
 
     throw new ConcurrencyError(projection.state.version, projection.state.version);

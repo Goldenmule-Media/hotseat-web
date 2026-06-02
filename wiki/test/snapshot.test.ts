@@ -44,16 +44,20 @@ describe("snapshot round-trip & fold equivalence", () => {
     // Build a non-trivial workspace: a brief (+3 children), filled fields, items
     // across pages, status transitions, a link, and a cross-page item move — so
     // the folded state covers every structural + content code path.
-    const brief = await ws.createPage("feature-brief", { title: "Bulk export", parentId: null });
-    const other = await ws.createPage("feature-brief", { title: "RBAC", parentId: null });
-    const [plan, checklist, testPlan] = ws.page(brief).children().map((c) => c.id);
+    const { value: brief, token: briefToken } = await ws.createPage("feature-brief", {
+      title: "Bulk export",
+      parentId: null,
+    });
+    const { value: other } = await ws.createPage("feature-brief", { title: "RBAC", parentId: null });
+    const briefView = await ws.page(brief, { consistentWith: briefToken });
+    const [plan, checklist, testPlan] = (await briefView.children()).map((c) => c.id);
 
     await ws.mutate(brief, "setSummary", { text: "Export as CSV/JSON." });
     await ws.mutate(brief, "addComponent", { name: "web-app" });
     await ws.mutate(brief, "addConstraint", { text: "Stream; never buffer >50MB." });
     const { questionId: q1 } = (await ws.mutate(brief, "askQuestion", {
       text: "Which formats?",
-    })) as { questionId: string };
+    })).value as { questionId: string };
     await ws.mutate(brief, "answerQuestion", { questionId: q1, answer: "CSV/JSON." });
     await ws.link(brief, other, "depends-on");
 
@@ -61,22 +65,24 @@ describe("snapshot round-trip & fold equivalence", () => {
     await ws.mutate(plan, "addStep", { text: "Stream from /export." });
     const { caseId } = (await ws.mutate(testPlan, "addCase", {
       text: "10k rows < 2s.",
-    })) as { caseId: string };
+    })).value as { caseId: string };
 
     // Cross-page move: a question relocates brief → plan (ItemRemoved + ItemAdded).
     const { questionId: q2 } = (await ws.mutate(brief, "askQuestion", {
       text: "Page size?",
-    })) as { questionId: string };
+    })).value as { questionId: string };
     await ws.moveItem({ from: brief, to: plan, itemType: "question", itemId: q2 });
 
     await ws.mutate(brief, "beginImplementation", {});
     const { taskId } = (await ws.mutate(checklist, "addTask", {
       text: "Endpoint",
-    })) as { taskId: string };
+    })).value as { taskId: string };
     await ws.mutate(checklist, "checkTask", { taskId });
-    await ws.mutate(testPlan, "markCasePassed", { caseId });
+    const { token: lastToken } = await ws.mutate(testPlan, "markCasePassed", { caseId });
 
-    events = ws.history();
+    // History is a read; gate it on the last write's token so it reflects every
+    // mutation above (read-your-writes), not a possibly-stale tail.
+    events = await ws.history({ consistentWith: lastToken });
     // Sanity: a real, multi-commit log with a WorkspaceCreated head.
     expect(events.length).toBeGreaterThan(15);
     expect(events[0]?.type).toBe("WorkspaceCreated");

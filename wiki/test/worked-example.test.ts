@@ -57,22 +57,28 @@ describe("worked example: plan → build → ship a feature", () => {
   it("creates a feature-brief whose 3 mandated children appear atomically", async () => {
     // A reference target for the brief's "depends-on" link (also a feature-brief,
     // so it pulls in its own 3 children — but those live under IT, not the brief).
-    rbac = await ws.createPage("feature-brief", {
+    const rbacCommit = await ws.createPage("feature-brief", {
       title: "Access control (RBAC)",
       parentId: null,
     });
+    rbac = rbacCommit.value;
 
     // The history length right after creating one feature-brief: it must have
     // emitted exactly 4 PageCreated events (brief + 3 children) in ONE commit.
-    const beforeBrief = ws.history().length;
-    brief = await ws.createPage("feature-brief", { title: "Bulk export", parentId: null });
-    const afterBrief = ws.history().length;
+    // Gate on the RBAC token so the "before" count is read-your-writes consistent.
+    const beforeBrief = (await ws.history({ consistentWith: rbacCommit.token })).length;
+    const briefCommit = await ws.createPage("feature-brief", {
+      title: "Bulk export",
+      parentId: null,
+    });
+    brief = briefCommit.value;
+    const briefToken = briefCommit.token;
+    const afterBrief = (await ws.history({ consistentWith: briefToken })).length;
     expect(afterBrief - beforeBrief).toBe(4);
 
     // The 4 PageCreated events of THIS brief share a single commit version run and
     // a single occurredAt (one atomic append → one envelope meta timestamp).
-    const created = ws
-      .history()
+    const created = (await ws.history({ consistentWith: briefToken }))
       .slice(beforeBrief)
       .filter((e) => e.type === "PageCreated");
     expect(created).toHaveLength(4);
@@ -85,7 +91,8 @@ describe("worked example: plan → build → ship a feature", () => {
     ]);
 
     // The brief now has exactly its 3 pinned children, in requiredChildren order.
-    const children = ws.page(brief).children();
+    const briefView = await ws.page(brief, { consistentWith: briefToken });
+    const children = await briefView.children();
     expect(children.map((c) => c.type)).toEqual([
       "implementation-plan",
       "implementation-checklist",
@@ -94,7 +101,7 @@ describe("worked example: plan → build → ship a feature", () => {
     [plan, checklist, testPlan] = children.map((c) => c.id);
 
     // Tree assertion: @root → [RBAC, Bulk export]; Bulk export → its 3 children.
-    const tree = ws.tree();
+    const tree = await ws.tree({ consistentWith: briefToken });
     expect(tree.id).toBe("@root");
     expect(tree.children.map((c) => c.title)).toEqual([
       "Access control (RBAC)",
@@ -120,16 +127,16 @@ describe("worked example: plan → build → ship a feature", () => {
 
     const ask1 = (await ws.mutate(brief, "askQuestion", {
       text: "Which formats in v1?",
-    })) as { questionId: string };
+    })).value as { questionId: string };
     q1 = ask1.questionId;
     await ws.mutate(brief, "answerQuestion", {
       questionId: q1,
       answer: "CSV and JSON; Parquet later.",
     });
 
-    await ws.link(brief, rbac, "depends-on");
+    const { token: linkToken } = await ws.link(brief, rbac, "depends-on");
 
-    const state = ws.page(brief).state();
+    const state = await (await ws.page(brief, { consistentWith: linkToken })).state();
     expect(state.fields).toEqual({ summary: "Let users export their workspace as CSV/JSON." });
     expect(state.items.component.map((c) => c.name)).toEqual(["web-app", "cli"]);
     expect(state.items.constraint.map((c) => c.text)).toEqual([
@@ -141,8 +148,10 @@ describe("worked example: plan → build → ship a feature", () => {
   });
 
   it("blocks beginImplementation (InvariantViolationError) until plan ≥1 step AND testing-plan ≥1 case", async () => {
-    await ws.mutate(brief, "beginPlanning", {});
-    expect(ws.page(brief).status()).toBe("planning");
+    const { token: planningToken } = await ws.mutate(brief, "beginPlanning", {});
+    expect(await (await ws.page(brief, { consistentWith: planningToken })).status()).toBe(
+      "planning",
+    );
 
     // No plan steps, no test cases yet → gate fails.
     await expect(ws.mutate(brief, "beginImplementation", {})).rejects.toBeInstanceOf(
@@ -159,29 +168,32 @@ describe("worked example: plan → build → ship a feature", () => {
 
     // Add the second step and a test case — now both halves of the gate pass.
     await ws.mutate(plan, "addStep", { text: "Add `wiki export` CLI wrapping the endpoint." });
-    const addCase = (await ws.mutate(testPlan, "addCase", {
+    const addCase = await ws.mutate(testPlan, "addCase", {
       text: "10k-row export < 2s, memory flat.",
-    })) as { caseId: string };
-    c1 = addCase.caseId;
+    });
+    c1 = (addCase.value as { caseId: string }).caseId;
 
     // The brief is still in planning (the failed attempts did not transition it).
-    expect(ws.page(brief).status()).toBe("planning");
+    expect(await (await ws.page(brief, { consistentWith: addCase.token })).status()).toBe(
+      "planning",
+    );
   });
 
   it("performs an atomic cross-page moveItem of a question from the brief to the plan", async () => {
-    const ask2 = (await ws.mutate(brief, "askQuestion", {
+    const ask2 = await ws.mutate(brief, "askQuestion", {
       text: "Page size while streaming?",
-    })) as { questionId: string };
-    q2 = ask2.questionId;
+    });
+    q2 = (ask2.value as { questionId: string }).questionId;
 
     // Brief currently owns BOTH questions (q1 resolved, q2 open).
-    expect(ws.page(brief).state().items.question.map((q) => q.id).sort()).toEqual(
+    const briefBeforeMove = await ws.page(brief, { consistentWith: ask2.token });
+    expect((await briefBeforeMove.state()).items.question.map((q) => q.id).sort()).toEqual(
       [q1, q2].sort(),
     );
 
-    const beforeMove = ws.history().length;
-    await ws.moveItem({ from: brief, to: plan, itemType: "question", itemId: q2 });
-    const moveEvents = ws.history().slice(beforeMove);
+    const beforeMove = (await ws.history({ consistentWith: ask2.token })).length;
+    const moveCommit = await ws.moveItem({ from: brief, to: plan, itemType: "question", itemId: q2 });
+    const moveEvents = (await ws.history({ consistentWith: moveCommit.token })).slice(beforeMove);
 
     // Atomic: exactly one ItemRemoved (from brief) + one ItemAdded (to plan), in
     // ONE commit (single occurredAt), or neither.
@@ -191,28 +203,32 @@ describe("worked example: plan → build → ship a feature", () => {
     expect(new Set(moveEvents.map((e) => e.meta.occurredAt)).size).toBe(1);
 
     // Brief no longer owns q2; the plan now does (status preserved as "open").
-    const briefQuestions = ws.page(brief).state().items.question;
+    const briefQuestions = (await (await ws.page(brief, { consistentWith: moveCommit.token })).state())
+      .items.question;
     expect(briefQuestions.map((q) => q.id)).toEqual([q1]);
-    const planQuestions = ws.page(plan).state().items.question;
+    const planQuestions = (await (await ws.page(plan, { consistentWith: moveCommit.token })).state())
+      .items.question;
     expect(planQuestions.map((q) => q.id)).toEqual([q2]);
     expect(planQuestions[0]?.status).toBe("open");
   });
 
   it("drives building: beginImplementation succeeds, then tasks / commits / case pass", async () => {
-    await ws.mutate(brief, "beginImplementation", {});
-    expect(ws.page(brief).status()).toBe("building");
+    const beginImpl = await ws.mutate(brief, "beginImplementation", {});
+    expect(await (await ws.page(brief, { consistentWith: beginImpl.token })).status()).toBe(
+      "building",
+    );
 
     const a1 = (await ws.mutate(checklist, "addTask", {
       text: "Streaming /export endpoint",
-    })) as { taskId: string };
+    })).value as { taskId: string };
     t1 = a1.taskId;
     const a2 = (await ws.mutate(checklist, "addTask", {
       text: "`wiki export` CLI",
-    })) as { taskId: string };
+    })).value as { taskId: string };
     t2 = a2.taskId;
     const a3 = (await ws.mutate(checklist, "addTask", {
       text: "Docs + changelog",
-    })) as { taskId: string };
+    })).value as { taskId: string };
     t3 = a3.taskId;
 
     await ws.mutate(brief, "recordCommit", {
@@ -225,22 +241,27 @@ describe("worked example: plan → build → ship a feature", () => {
       message: "feat(cli): wiki export",
     });
     await ws.mutate(checklist, "checkTask", { taskId: t2 });
-    await ws.mutate(testPlan, "markCasePassed", { caseId: c1 });
+    const passedCommit = await ws.mutate(testPlan, "markCasePassed", { caseId: c1 });
 
     // Two tasks done, one still todo; the single case passed.
-    const tasks = ws.page(checklist).state().items.task;
+    const tasks = (await (await ws.page(checklist, { consistentWith: passedCommit.token })).state())
+      .items.task;
     expect(tasks.filter((t) => t.status === "done").map((t) => t.id).sort()).toEqual(
       [t1, t2].sort(),
     );
     expect(tasks.find((t) => t.id === t3)?.status).toBe("todo");
-    expect(ws.page(testPlan).state().items.case.find((c) => c.id === c1)?.status).toBe(
-      "passed",
-    );
+    expect(
+      (await (await ws.page(testPlan, { consistentWith: passedCommit.token })).state()).items.case.find(
+        (c) => c.id === c1,
+      )?.status,
+    ).toBe("passed");
   });
 
   it("blocks ship until checklist 100% done + all cases passed + no open questions, then succeeds", async () => {
-    await ws.mutate(brief, "submitForReview", {});
-    expect(ws.page(brief).status()).toBe("review");
+    const reviewCommit = await ws.mutate(brief, "submitForReview", {});
+    expect(await (await ws.page(brief, { consistentWith: reviewCommit.token })).status()).toBe(
+      "review",
+    );
 
     // t3 still todo → checklist not 100% done → ship is gated.
     await expect(ws.mutate(brief, "ship", {})).rejects.toBeInstanceOf(InvariantViolationError);
@@ -250,15 +271,17 @@ describe("worked example: plan → build → ship a feature", () => {
     await ws.mutate(checklist, "checkTask", { taskId: t3 });
 
     // All gates satisfied now (3/3 done, 1/1 passed, 0 open questions on brief).
-    await ws.mutate(brief, "ship", {});
-    expect(ws.page(brief).status()).toBe("shipped");
+    const shipCommit = await ws.mutate(brief, "ship", {});
+    expect(await (await ws.page(brief, { consistentWith: shipCommit.token })).status()).toBe(
+      "shipped",
+    );
   });
 
   it("renders a byte-stable Markdown of the brief and a final tree", async () => {
-    const md = ws.toMarkdown(brief);
+    const md = await ws.toMarkdown(brief);
 
     // Determinism: re-rendering identical state yields identical bytes.
-    expect(ws.toMarkdown(brief)).toBe(md);
+    expect(await ws.toMarkdown(brief)).toBe(md);
 
     // The brief shipped, so its status badge reads "shipped"; q2 lives on the plan
     // now, so Open questions is empty; q1 is the lone resolved question. Per
@@ -283,7 +306,7 @@ describe("worked example: plan → build → ship a feature", () => {
     expect(md).toBe(expected);
 
     // Final tree: the brief and its 3 children, with terminal/derived statuses.
-    const briefNode = ws.tree().children.find((c) => c.id === brief);
+    const briefNode = (await ws.tree()).children.find((c) => c.id === brief);
     expect(briefNode?.status).toBe("shipped");
     expect(
       briefNode?.children.map((c) => ({ type: c.type, status: c.status })),

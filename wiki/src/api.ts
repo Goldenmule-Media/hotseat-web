@@ -35,6 +35,54 @@ export type DeepReadonly<T> = T extends (infer U)[]
 export type Unsubscribe = () => void;
 
 // ────────────────────────────────────────────────────────────────────────────
+// CQRS consistency tokens & read model (DESIGN §8.6, ADR-003)
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Opaque, comparable token marking a position in a workspace's history. Encodes
+ * `{ workspaceId, version }` — `version` being the per-workspace 0-based sequence
+ * (== stream length; drives fold order & OCC, §8.1). Compared **within a single
+ * workspace only**; cross-workspace tokens are independent.
+ */
+export type ConsistencyToken = string;
+
+/**
+ * The return shape of **every** write (DESIGN §8.6): the command's `value` plus a
+ * {@link ConsistencyToken} naming the committed head `version` after the append and
+ * any OCC rebase-retry. A void write resolves to `Committed<void>` — the token still
+ * names where the events landed so a caller can read the mutated graph back.
+ */
+export interface Committed<T> {
+  readonly value: T;
+  readonly token: ConsistencyToken;
+}
+
+/**
+ * Optional read consistency for a token-gated read (DESIGN §8.6). With
+ * `consistentWith` present, the read `waitFor`s the read model to apply that token
+ * before serving (read-your-writes / monotonic); absent, it serves the current
+ * (possibly stale) projection.
+ */
+export interface IReadOpts {
+  /** A token from a prior write: `waitFor` the read model to apply it before serving. */
+  readonly consistentWith?: ConsistencyToken;
+  /** Override the default `waitFor` timeout (`IWikiConfig.readConsistencyTimeoutMs`, default 5000 ms). */
+  readonly timeoutMs?: number;
+}
+
+/**
+ * The read-side seam (DESIGN §8.6). Any projection — the default in-memory one or an
+ * external one (e.g. a SQL read model) — implements this so a read can wait until the
+ * read side has caught up to a write's token.
+ */
+export interface IReadModel {
+  /** How far this read model has applied, for a workspace (the zero token if unknown). */
+  appliedToken(workspace: WorkspaceId): Promise<ConsistencyToken>;
+  /** Resolve once applied ≥ `token`; reject with `ConsistencyTimeoutError` after `timeoutMs`. */
+  waitFor(token: ConsistencyToken, opts?: { timeoutMs?: number }): Promise<void>;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Event sourcing (DESIGN §8.1)
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -156,6 +204,9 @@ export interface IWikiConfig {
   readonly snapshotEvery?: number;
   /** Snapshot after this many ms of write-idle. @default 5000 */
   readonly snapshotIdleMs?: number;
+  /** Default timeout (ms) for a token-gated read's `waitFor` before it throws
+   *  {@link ConsistencyTimeoutError}; a per-read `timeoutMs` overrides it. @default 5000 @see §8.6 */
+  readonly readConsistencyTimeoutMs?: number;
   /** Bound the in-memory projection cache, or `false` to disable caching. */
   readonly cache?: { readonly maxWorkspaces?: number } | false;
   /** Optional sink for every appended event (logging/metrics). Must not throw. */
@@ -208,32 +259,36 @@ export interface IWorkspaceHandle {
   readonly id: WorkspaceId;
 
   // ── structural commands (atomic; guarded by invariants + workspace/page status) ──
+  // Every write resolves to a {@link Committed} value carrying the committed-head
+  // {@link ConsistencyToken} — the position after the append AND any OCC rebase-retry (§8.6).
   createPage<K extends PageTypeName>(
     type: K,
     input: { title: string; parentId: PageId | null } & CreateArgs<K>,
-  ): Promise<PageId>;
-  reparent(pageId: PageId, newParentId: PageId | null, position?: number): Promise<void>;
-  reorder(parentId: PageId | null, orderedChildIds: readonly PageId[]): Promise<void>;
-  setPageTitle(pageId: PageId, title: string): Promise<void>;
-  archivePage(pageId: PageId): Promise<void>;
-  link(from: PageId, to: PageId, role: string): Promise<void>;
-  unlink(from: PageId, to: PageId, role: string): Promise<void>;
-  moveItem(input: { from: PageId; to: PageId; itemType: string; itemId: string }): Promise<void>;
-  archive(): Promise<void>;
+  ): Promise<Committed<PageId>>;
+  reparent(pageId: PageId, newParentId: PageId | null, position?: number): Promise<Committed<void>>;
+  reorder(parentId: PageId | null, orderedChildIds: readonly PageId[]): Promise<Committed<void>>;
+  setPageTitle(pageId: PageId, title: string): Promise<Committed<void>>;
+  archivePage(pageId: PageId): Promise<Committed<void>>;
+  link(from: PageId, to: PageId, role: string): Promise<Committed<void>>;
+  unlink(from: PageId, to: PageId, role: string): Promise<Committed<void>>;
+  moveItem(input: { from: PageId; to: PageId; itemType: string; itemId: string }): Promise<Committed<void>>;
+  archive(): Promise<Committed<void>>;
 
   // ── page-scoped content/status command ──
   mutate<K extends PageTypeName, C extends CommandName<K>>(
     pageId: PageId,
     command: C,
     args: CommandArgs<K, C>,
-  ): Promise<CommandResult<K, C>>;
+  ): Promise<Committed<CommandResult<K, C>>>;
 
-  // ── reads ──
-  status(): WorkspaceStatus;
-  tree(): ITreeNode;
-  page(pageId: PageId): IPageView;
-  toMarkdown(pageId?: PageId): string;
-  history(): readonly IEventEnvelope[];
+  // ── reads (token-gated; async — §8.6) ──
+  // Pass `consistentWith` a write's token to read-your-writes (waits up to `timeoutMs`,
+  // default IWikiConfig.readConsistencyTimeoutMs); omit it for current/eventually-consistent state.
+  status(opts?: IReadOpts): Promise<WorkspaceStatus>;
+  tree(opts?: IReadOpts): Promise<ITreeNode>;
+  page(pageId: PageId, opts?: IReadOpts): Promise<IPageView>;
+  toMarkdown(pageId?: PageId, opts?: IReadOpts): Promise<string>;
+  history(opts?: IReadOpts): Promise<readonly IEventEnvelope[]>;
 
   // ── live updates (G6) ──
   subscribe(handler: (event: IEventEnvelope) => void): Promise<Unsubscribe>;
@@ -255,15 +310,17 @@ export interface IMutationDescriptor {
 export interface IPageView<K extends PageTypeName = PageTypeName> {
   readonly id: PageId;
   readonly type: K;
-  parentId(): PageId | null;
-  title(): string;
-  children(): readonly IPageView[];
-  status(): StatusOf<K>;
-  state(): DeepReadonly<PageState>;
-  availableMutations(): readonly CommandName<K>[];
-  describeMutations(): readonly IMutationDescriptor[];
-  toMarkdown(): string;
-  mutate<C extends CommandName<K>>(command: C, args: CommandArgs<K, C>): Promise<CommandResult<K, C>>;
+  // Reads are token-gated and async (§8.6): pass `consistentWith` a write's token to
+  // read-your-writes, or omit it for current state.
+  parentId(opts?: IReadOpts): Promise<PageId | null>;
+  title(opts?: IReadOpts): Promise<string>;
+  children(opts?: IReadOpts): Promise<readonly IPageView[]>;
+  status(opts?: IReadOpts): Promise<StatusOf<K>>;
+  state(opts?: IReadOpts): Promise<DeepReadonly<PageState>>;
+  availableMutations(opts?: IReadOpts): Promise<readonly CommandName<K>[]>;
+  describeMutations(opts?: IReadOpts): Promise<readonly IMutationDescriptor[]>;
+  toMarkdown(opts?: IReadOpts): Promise<string>;
+  mutate<C extends CommandName<K>>(command: C, args: CommandArgs<K, C>): Promise<Committed<CommandResult<K, C>>>;
 }
 
 // ────────────────────────────────────────────────────────────────────────────

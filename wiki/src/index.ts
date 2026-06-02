@@ -11,6 +11,15 @@
 // ── entry point ───────────────────────────────────────────────────────────────
 export { createWiki } from "./core/wiki";
 
+// ── public, pure fold (for external read models — DESIGN §8.6, §16.1) ──────────
+export { foldWorkspace, applyWorkspace } from "./core/workspace";
+
+// ── consistency-token codec (the §8.6 token SHAPE; for external read models) ───
+// An external IReadModel (e.g. wiki-mcp's SQL projection) must encode/decode the
+// SAME opaque `{ workspaceId, version }` token the engine's writes return, so the
+// codec is part of the public surface alongside the token type.
+export { encodeToken, decodeToken, ZERO_VERSION } from "./core/readmodel";
+
 // ── public runtime values from the type surface ──────────────────────────────
 export { ROOT } from "./api";
 
@@ -24,6 +33,11 @@ export type {
   JsonSchema,
   DeepReadonly,
   Unsubscribe,
+  // CQRS consistency tokens & read model (§8.6)
+  ConsistencyToken,
+  Committed,
+  IReadOpts,
+  IReadModel,
   // event sourcing
   IEventMeta,
   IEventEnvelope,
@@ -91,6 +105,7 @@ export {
   ConcurrencyError,
   InvariantViolationError,
   UnknownPageTypeError,
+  ConsistencyTimeoutError,
 } from "./core/errors";
 export type { SchemaIssue } from "./core/errors";
 

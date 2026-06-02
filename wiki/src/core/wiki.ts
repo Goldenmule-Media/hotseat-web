@@ -13,12 +13,15 @@
  * resolved by the bus's rebase-and-retry.
  */
 import type {
+  Committed,
+  ConsistencyToken,
   DeepReadonly,
   DomainEvent,
   IEventEnvelope,
   IMutationDescriptor,
   IPageNode,
   IPageView,
+  IReadOpts,
   ITreeNode,
   IWiki,
   IWikiConfig,
@@ -35,8 +38,9 @@ import type {
 import { ROOT } from "../api";
 import { renderPage, renderWorkspace } from "../render/markdown";
 import { EventLog } from "../stores/event-log";
-import { CommandBus, type BusProjection, type CommandBusConfig } from "./command-bus";
+import { CommandBus, type BusProjection, type CommandBusConfig, type CommitOutcome } from "./command-bus";
 import { PageNotFoundError, WorkspaceNotFoundError } from "./errors";
+import { encodeToken, InMemoryReadModel } from "./readmodel";
 import { Registry } from "./registry";
 import { STRUCTURAL_HANDLERS } from "./structure";
 import type { CatalogEvent, IEventLog, Services } from "./types";
@@ -44,6 +48,8 @@ import { applyWorkspace, foldWorkspace, pageStateView } from "./workspace";
 
 /** Defaults from {@link IWikiConfig}. */
 const DEFAULT_SNAPSHOT_EVERY = 100;
+/** Default token-gated read `waitFor` timeout (DESIGN §8.6 / §10.1). */
+const DEFAULT_READ_CONSISTENCY_TIMEOUT_MS = 5000;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Mutex — a minimal promise-chain serializer (DESIGN §15)
@@ -114,7 +120,13 @@ export function createWiki(config: IWikiConfig): IWiki {
   };
   const bus = new CommandBus(eventLog, registry, services, busConfig);
 
-  return new Wiki(config, registry, services, eventLog, bus);
+  // The default in-memory read model (DESIGN §8.4/§8.6): fed by the same fold the
+  // handle maintains off the live tail; serves token-gated reads.
+  const readModel = new InMemoryReadModel(
+    config.readConsistencyTimeoutMs ?? DEFAULT_READ_CONSISTENCY_TIMEOUT_MS,
+  );
+
+  return new Wiki(config, registry, services, eventLog, bus, readModel);
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -131,6 +143,7 @@ class Wiki implements IWiki {
     private readonly services: Services,
     private readonly eventLog: IEventLog,
     private readonly bus: CommandBus,
+    private readonly readModel: InMemoryReadModel,
   ) {}
 
   async createWorkspace(input: { name: string; id?: WorkspaceId }): Promise<IWorkspaceHandle> {
@@ -213,15 +226,28 @@ class Wiki implements IWiki {
   }
 
   async close(): Promise<void> {
-    for (const handle of this.open.values()) handle.teardown();
+    for (const handle of this.open.values()) {
+      handle.teardown();
+      this.readModel.forget(handle.id);
+    }
     this.open.clear();
     await this.eventLog.close();
   }
 
   /** Start the live tail, register the handle, and return it. */
   private async attach(id: WorkspaceId, projection: BusProjection): Promise<WorkspaceHandle> {
-    const handle = new WorkspaceHandle(id, projection, this.registry, this.bus, this.config);
+    const handle = new WorkspaceHandle(
+      id,
+      projection,
+      this.registry,
+      this.bus,
+      this.config,
+      this.readModel,
+    );
     this.open.set(id, handle);
+    // Seed the read model with whatever the projection has already folded so a token
+    // for an existing head is satisfiable before the first tail batch (DESIGN §8.4).
+    this.readModel.notifyApplied(id, projection.state.version);
     await handle.startTail(this.eventLog);
     return handle;
   }
@@ -280,6 +306,7 @@ class WorkspaceHandle implements IWorkspaceHandle {
     private readonly registry: Registry,
     private readonly bus: CommandBus,
     private readonly config: IWikiConfig,
+    private readonly readModel: InMemoryReadModel,
   ) {
     this.id = id;
   }
@@ -300,6 +327,8 @@ class WorkspaceHandle implements IWorkspaceHandle {
             applyAndFanOut(this.projection, env, this.registry);
           }
           this.projection.cursor = cursor;
+          // Advance the read model so token-gated reads see externally-tailed writes.
+          this.readModel.notifyApplied(this.id, this.projection.state.version);
         });
       },
       { fromCursor: this.projection.cursor },
@@ -315,43 +344,53 @@ class WorkspaceHandle implements IWorkspaceHandle {
 
   // ── structural commands ───────────────────────────────────────────────────
 
-  createPage(
+  async createPage(
     type: string,
     input: { title: string; parentId: PageId | null } & Record<string, unknown>,
-  ): Promise<PageId> {
+  ): Promise<Committed<PageId>> {
     return this.structural("createPage", {
       type,
       title: input.title,
       parentId: input.parentId,
-    }) as Promise<PageId>;
+    }) as Promise<Committed<PageId>>;
   }
 
-  async reparent(pageId: PageId, newParentId: PageId | null, position?: number): Promise<void> {
-    await this.structural("reparent", {
+  async reparent(
+    pageId: PageId,
+    newParentId: PageId | null,
+    position?: number,
+  ): Promise<Committed<void>> {
+    return this.structural("reparent", {
       pageId,
       newParentId,
       ...(position !== undefined ? { position } : {}),
-    });
+    }) as Promise<Committed<void>>;
   }
 
-  async reorder(parentId: PageId | null, orderedChildIds: readonly PageId[]): Promise<void> {
-    await this.structural("reorder", { parentId, orderedChildIds: [...orderedChildIds] });
+  async reorder(
+    parentId: PageId | null,
+    orderedChildIds: readonly PageId[],
+  ): Promise<Committed<void>> {
+    return this.structural("reorder", {
+      parentId,
+      orderedChildIds: [...orderedChildIds],
+    }) as Promise<Committed<void>>;
   }
 
-  async setPageTitle(pageId: PageId, title: string): Promise<void> {
-    await this.structural("setPageTitle", { pageId, title });
+  async setPageTitle(pageId: PageId, title: string): Promise<Committed<void>> {
+    return this.structural("setPageTitle", { pageId, title }) as Promise<Committed<void>>;
   }
 
-  async archivePage(pageId: PageId): Promise<void> {
-    await this.structural("archivePage", { pageId });
+  async archivePage(pageId: PageId): Promise<Committed<void>> {
+    return this.structural("archivePage", { pageId }) as Promise<Committed<void>>;
   }
 
-  async link(from: PageId, to: PageId, role: string): Promise<void> {
-    await this.structural("link", { from, to, role });
+  async link(from: PageId, to: PageId, role: string): Promise<Committed<void>> {
+    return this.structural("link", { from, to, role }) as Promise<Committed<void>>;
   }
 
-  async unlink(from: PageId, to: PageId, role: string): Promise<void> {
-    await this.structural("unlink", { from, to, role });
+  async unlink(from: PageId, to: PageId, role: string): Promise<Committed<void>> {
+    return this.structural("unlink", { from, to, role }) as Promise<Committed<void>>;
   }
 
   async moveItem(input: {
@@ -359,63 +398,102 @@ class WorkspaceHandle implements IWorkspaceHandle {
     to: PageId;
     itemType: string;
     itemId: string;
-  }): Promise<void> {
-    await this.structural("moveItem", input);
+  }): Promise<Committed<void>> {
+    return this.structural("moveItem", input) as Promise<Committed<void>>;
   }
 
-  async archive(): Promise<void> {
-    await this.structural("archive", {});
+  async archive(): Promise<Committed<void>> {
+    return this.structural("archive", {}) as Promise<Committed<void>>;
   }
 
-  /** Run a structural command under the per-workspace mutex. */
-  private structural(handler: string, args: unknown): Promise<unknown> {
-    return this.mutex.run(() =>
-      this.bus.runStructural(this.projection, {
+  /**
+   * Run a structural command under the per-workspace mutex and wrap its outcome in
+   * a {@link Committed} carrying the committed-head token (§8.6). After committing,
+   * advance the read model so a token threaded into a subsequent read resolves.
+   */
+  private structural(handler: string, args: unknown): Promise<Committed<unknown>> {
+    return this.mutex.run(async () => {
+      const outcome = await this.bus.runStructural(this.projection, {
         handler,
         args,
         ...(this.config.actor !== undefined ? { actor: this.config.actor } : {}),
-      }),
-    );
+      });
+      return this.commit(outcome);
+    });
   }
 
   // ── page-scoped command ─────────────────────────────────────────────────────
 
-  mutate(pageId: PageId, command: string, args: Record<string, unknown>): Promise<unknown> {
-    return this.mutex.run(() =>
-      this.bus.runPage(this.projection, {
+  mutate(
+    pageId: PageId,
+    command: string,
+    args: Record<string, unknown>,
+  ): Promise<Committed<unknown>> {
+    return this.mutex.run(async () => {
+      const outcome = await this.bus.runPage(this.projection, {
         pageId,
         command,
         args,
         ...(this.config.actor !== undefined ? { actor: this.config.actor } : {}),
-      }),
-    );
+      });
+      return this.commit(outcome);
+    });
   }
 
-  // ── reads ───────────────────────────────────────────────────────────────────
+  /**
+   * Turn a bus {@link CommitOutcome} into the public {@link Committed} shape: notify
+   * the read model of the new applied head, then mint the token for that version.
+   */
+  private commit(outcome: CommitOutcome): Committed<unknown> {
+    this.readModel.notifyApplied(this.id, outcome.committedVersion);
+    return { value: outcome.result, token: encodeToken(this.id, outcome.committedVersion) };
+  }
 
-  status(): WorkspaceStatus {
+  // ── reads (token-gated; async — §8.6) ─────────────────────────────────────────
+
+  async status(opts?: IReadOpts): Promise<WorkspaceStatus> {
+    await this.awaitConsistency(opts);
     return this.projection.state.status;
   }
 
-  tree(): ITreeNode {
+  async tree(opts?: IReadOpts): Promise<ITreeNode> {
+    await this.awaitConsistency(opts);
     return buildTree(this.projection.state);
   }
 
-  page(pageId: PageId): IPageView {
+  async page(pageId: PageId, opts?: IReadOpts): Promise<IPageView> {
+    await this.awaitConsistency(opts);
     const node = this.projection.state.pages.get(pageId);
     if (node === undefined) throw new PageNotFoundError(pageId);
     return new PageView(pageId, node.type, this);
   }
 
-  toMarkdown(pageId?: PageId): string {
+  async toMarkdown(pageId?: PageId, opts?: IReadOpts): Promise<string> {
+    await this.awaitConsistency(opts);
     if (pageId === undefined) {
       return renderWorkspace(this.projection.state, this.registry);
     }
     return renderPage(this.projection.state, pageId, this.registry);
   }
 
-  history(): readonly IEventEnvelope[] {
+  async history(opts?: IReadOpts): Promise<readonly IEventEnvelope[]> {
+    await this.awaitConsistency(opts);
     return this.projection.events;
+  }
+
+  /**
+   * Honor a read's consistency option (§8.6): if `consistentWith` is set, wait for
+   * the read model to apply that token (bounded by `timeoutMs` /
+   * `readConsistencyTimeoutMs` → {@link ConsistencyTimeoutError}) before serving;
+   * otherwise serve the current (eventually-consistent) projection.
+   */
+  async awaitConsistency(opts?: IReadOpts): Promise<void> {
+    const token: ConsistencyToken | undefined = opts?.consistentWith;
+    if (token === undefined) return;
+    await this.readModel.waitFor(
+      token,
+      opts?.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : undefined,
+    );
   }
 
   async subscribe(handler: (event: IEventEnvelope) => void): Promise<Unsubscribe> {
@@ -432,6 +510,16 @@ class WorkspaceHandle implements IWorkspaceHandle {
     const node = this.projection.state.pages.get(pageId);
     if (node === undefined) throw new PageNotFoundError(pageId);
     return node;
+  }
+
+  /**
+   * Construct a {@link IPageView} synchronously (no consistency wait) — used where
+   * consistency was already honored by the caller, e.g. resolving a parent view's
+   * already-awaited children.
+   */
+  pageViewOf(pageId: PageId): IPageView {
+    const node = this.nodeOf(pageId);
+    return new PageView(pageId, node.type, this);
   }
 
   registryRef(): Registry {
@@ -460,33 +548,40 @@ class PageView implements IPageView {
     this.type = type;
   }
 
-  parentId(): PageId | null {
+  async parentId(opts?: IReadOpts): Promise<PageId | null> {
+    await this.handle.awaitConsistency(opts);
     return this.handle.nodeOf(this.id).parentId;
   }
 
-  title(): string {
+  async title(opts?: IReadOpts): Promise<string> {
+    await this.handle.awaitConsistency(opts);
     return this.handle.nodeOf(this.id).title;
   }
 
-  children(): readonly IPageView[] {
-    return this.handle.childIdsOf(this.id).map((childId) => this.handle.page(childId));
+  async children(opts?: IReadOpts): Promise<readonly IPageView[]> {
+    await this.handle.awaitConsistency(opts);
+    return this.handle.childIdsOf(this.id).map((childId) => this.handle.pageViewOf(childId));
   }
 
-  status(): string {
+  async status(opts?: IReadOpts): Promise<string> {
+    await this.handle.awaitConsistency(opts);
     return this.handle.nodeOf(this.id).status;
   }
 
-  state(): DeepReadonly<PageState> {
+  async state(opts?: IReadOpts): Promise<DeepReadonly<PageState>> {
+    await this.handle.awaitConsistency(opts);
     const node = this.handle.nodeOf(this.id);
     return pageStateView(node) as DeepReadonly<PageState>;
   }
 
-  availableMutations(): readonly string[] {
+  async availableMutations(opts?: IReadOpts): Promise<readonly string[]> {
+    await this.handle.awaitConsistency(opts);
     const node = this.handle.nodeOf(this.id);
     return this.handle.registryRef().pageGuard(node.type).available(node.status);
   }
 
-  describeMutations(): readonly IMutationDescriptor[] {
+  async describeMutations(opts?: IReadOpts): Promise<readonly IMutationDescriptor[]> {
+    await this.handle.awaitConsistency(opts);
     const node = this.handle.nodeOf(this.id);
     const registry = this.handle.registryRef();
     const def = registry.page(node.type);
@@ -508,11 +603,12 @@ class PageView implements IPageView {
     return descriptors;
   }
 
-  toMarkdown(): string {
+  async toMarkdown(opts?: IReadOpts): Promise<string> {
+    await this.handle.awaitConsistency(opts);
     return this.handle.renderPageMarkdown(this.id);
   }
 
-  mutate(command: string, args: Record<string, unknown>): Promise<unknown> {
+  mutate(command: string, args: Record<string, unknown>): Promise<Committed<unknown>> {
     return this.handle.mutate(this.id, command, args);
   }
 }

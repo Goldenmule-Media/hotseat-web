@@ -140,3 +140,24 @@ export class UnknownPageTypeError extends WikiError {
     this.types = types;
   }
 }
+
+/**
+ * Thrown when a token-gated read's `waitFor` exceeds its timeout — the read model
+ * hasn't applied the requested {@link ConsistencyToken} in time (DESIGN §8.6/§14).
+ * Carries the awaited `token` + `timeoutMs` so a caller can retry or fall back to an
+ * eventually-consistent read (omit the token). `token` is a `ConsistencyToken`
+ * (an opaque `string`, declared in `api.ts`); kept as `string` here to keep this
+ * module dependency-free.
+ */
+export class ConsistencyTimeoutError extends WikiError {
+  readonly token: string;
+  readonly timeoutMs: number;
+  constructor(token: string, timeoutMs: number) {
+    super(
+      "CONSISTENCY_TIMEOUT",
+      `Read model did not apply token "${token}" within ${timeoutMs} ms.`,
+    );
+    this.token = token;
+    this.timeoutMs = timeoutMs;
+  }
+}

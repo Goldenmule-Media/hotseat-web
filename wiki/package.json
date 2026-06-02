@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./pages/feature": "./src/pages/feature/index.ts",
-    "./testing": "./src/testing.ts"
+    "./testing": "./src/testing.ts",
+    "./registry": "./src/core/registry.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
