@@ -397,6 +397,9 @@ A consumer sibling. **New dependencies** (none currently in the repo — version
         │   ├─ store.ts         #   Kysely + dialect (PGlite | pg) wiring
         │   ├─ project.ts       #   fold → serialize state → SQL (one txn/commit)
         │   └─ readmodel.ts     #   IReadModel: appliedToken / waitFor + typed queries
+        ├─ models/
+        │   ├─ registry.ts      #   live ModelRegistry: generation-counted, mutable page-type set (ADR-M6)
+        │   └─ loader.ts        #   cache-busted dynamic import() of a model bundle (ADR-M6)
         ├─ tail/projection.ts   # catalog + per-workspace tailers driving project.ts
         └─ mcp/
             ├─ tools.ts         #   command catalog + queries → MCP tools (from argsSchema)
@@ -413,8 +416,9 @@ because a host that bundles `wiki-mcp` **from source** inlines every module unde
 `import.meta.url`, so a guard living in the library would fire under the host's argv and boot a rogue second
 server. tsdown's `entry` is
 `src/bin.ts` (output `dist/bin.js`, the package `bin`), and its `deps.alwaysBundle` must use a **regex**
-(`/^wiki(\/|$)/`) so the `wiki/registry` **subpath** export is bundled too — a bare-string match leaves it
-external and Node crashes at runtime loading the engine's extensionless TS source (`ERR_MODULE_NOT_FOUND`).
+(`/^wiki(\/|$)/`) so the `wiki/registry` and `wiki/authoring` **subpath** exports are bundled too — a
+bare-string match leaves them external and Node crashes at runtime loading the engine's extensionless TS
+source (`ERR_MODULE_NOT_FOUND`).
 Add `wiki-mcp` to the root `workspaces`. It imports `wiki`'s **public** surface only.
 
 ---
@@ -556,15 +560,19 @@ already version-aware (upcast-to-latest, [wiki-models ADR-W1](../wiki-models/DES
 
 **Decision.** Replace the construct-once `Registry` with a mutable, **generation-counted `ModelRegistry`**
 that wraps the engine's immutable `Registry`. Bundles are loaded by **dynamic `import()` of a module
-specifier**. Operations: `load(spec)`, `reload(id)` (a **hard replace**), `unregister(id)`. On any change the
-generation + `fingerprint` bump, and:
+specifier**. Operations: `register(id, pageTypes)` (seed the host's page types as an in-memory `default`
+bundle — no specifier, so it can't be reloaded), `load(id, specifier)`, `reload(id)` (a **hard replace**),
+and `unregister(id)`. On any change the generation + `fingerprint` bump, and:
 
 - `reload` re-imports the rebuilt bundle **under a cache-busting URL** — `import(fileURL + '?v=' + buildHash)`.
   Plain `import()` of the same path returns Node's **cached** module, so the query string is the whole trick
   that makes a code change actually take effect;
-- the engine `Registry` is rebuilt from the new def set, `EmbeddedEngine` **evicts its hot handles** so new
-  writes bind the new code, and affected workspaces **reproject** from the stream via the fingerprint-rebuild
-  path ([§5.3](#53-pglite-local-postgres-prod), [ADR-M3](#adr-m3--projection--engine-fold--serialize-to-sql-2026-06-02)).
+- the engine `Registry` is rebuilt from the new def set, `EmbeddedEngine.rebind` **rebuilds the engine** from
+  the new page-type set — dropping every hot handle and **closing the old engine** — so new writes bind the
+  new code, and the projection **reprojects** the read model: `ProjectionService.reproject` **resets every
+  projected workspace's offset** (deletes its `projection_offsets` row) and **clears any halt**, then re-folds
+  all from the stream with the new registry ([§5.3](#53-pglite-local-postgres-prod), [ADR-M3](#adr-m3--projection--engine-fold--serialize-to-sql-2026-06-02)).
+  It never throws, so a workspace the new set still can't fold simply re-halts without aborting the rest.
 
 Control is the **`wiki-server` control listener** — `GET/POST/DELETE /_server/models[/<id>]`
 ([wiki-server/DESIGN.md §8.5](../wiki-server/DESIGN.md)) — pipeline-driven, **not** an MCP tool. `wiki-server`
@@ -582,6 +590,8 @@ version **halts** affected workspaces loudly ([wiki-models §4](../wiki-models/D
 exist as built ESM **on disk at runtime** — it cannot be pre-bundled into the tsdown server image, so models
 ship **alongside** the server, not inside it. Loading a bundle is arbitrary code execution (first-party
 trusted). Per-namespace model selection + persistence stay reserved ([wiki/DESIGN.md §8](../wiki/DESIGN.md)).
-Implementation note: the `projection_offsets.fingerprint` column is already persisted per workspace
-([§5.3](#53-pglite-local-postgres-prod)), but the **compare-stored-vs-current** check that drives the rebuild
-is not yet wired — it is part of this work, not an existing path.
+Implementation note: the reset-all **reproject** IS wired — on a registry change the projection deletes every
+workspace's `projection_offsets` row, clears halts, and re-folds all from the stream with the new registry
+(`ProjectionService.reproject`). What remains a **future optimization** is the finer per-workspace
+**compare-stored-vs-current** fingerprint diff that would re-fold only the workspaces whose `projection_offsets.fingerprint`
+([§5.3](#53-pglite-local-postgres-prod)) actually changed; that column is still stamped on every apply.

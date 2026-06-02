@@ -239,6 +239,8 @@ export interface WikiServerConfig {
   readonly mcpPort: number;
   /** History ring-buffer size for `GET /_server/logs` (§8.5). Default 1000 records. */
   readonly logBuffer: number;
+  /** Initial model bundles loaded at boot (ADR-M6, [§8.5](#85-logging--the-log-api)): comma-separated `id=specifier` entries (a bare specifier derives its id from the file basename). Loaded after `wiki-mcp` starts, so the engine gains its page types via dynamic import. Default `[]` (none). */
+  readonly models: { id: string; specifier: string }[];
 }
 ```
 
@@ -253,6 +255,7 @@ export interface WikiServerConfig {
 | `--control-port` | `WIKI_SERVER_CONTROL_PORT` | `4438` | The log/health API listener ([§8.5](#85-logging--the-log-api)); behind the proxy when shared. |
 | `--mcp-port` | `WIKI_SERVER_MCP_PORT` | `4439` | The embedded `wiki-mcp` streamable-HTTP endpoint (`/mcp`, [§8.5](#85-logging--the-log-api)); behind the proxy when shared. |
 | `--log-buffer` | `WIKI_SERVER_LOG_BUFFER` | `1000` | Records retained for `GET /_server/logs` history. |
+| `--models` | `WIKI_SERVER_MODELS` | *(none)* | Comma-separated `id=specifier` page-type bundles loaded at **boot** (after `wiki-mcp` starts) — the engine gains its page types via dynamic import ([§8.5](#85-logging--the-log-api), [ADR-M6](../wiki-mcp/DESIGN.md)). A bare specifier derives its id from the file basename. |
 
 `baseUrl` is **derived, not configured**: read it back from `server.url` after `start()` (robust
 when `port: 0` auto-assigns), and that string is what goes into each client's `IStreamConfig.baseUrl`.
@@ -365,6 +368,7 @@ swap is **server-side only** — clients keep their `baseUrl`: run the upstream 
 - **Health & logs:** served by `wiki-server`'s **control listener** ([§8.5](#85-logging--the-log-api)):
   `GET /_server/health` (liveness/readiness — this closes the old "no health endpoint" gap) and
   `GET /_server/logs` (consolidated history + SSE tail of the stream host **and** `wiki-mcp`).
+- **Model bundles:** the same control listener also serves `/_server/models` ([§8.5](#85-logging--the-log-api)) — a **pipeline-driven** (non-agent) surface to load / reload / unregister page-type bundles at runtime ([ADR-M6](../wiki-mcp/DESIGN.md)); the `--models` flag ([§6](#6-configuration)) seeds the same path at boot.
 - **Capacity:** the bottlenecks at target scale are disk (monotonic, [§7.2](#72-crash-restart--retention))
   and live-tail fan-out — both gentle by design. Watch `dataDir` size.
 - **Upgrades:** the **stream-host/storage layer** stays swappable behind the wire protocol
@@ -401,7 +405,7 @@ durable, event-sourced stream plane — a bounded ring buffer, not a retained lo
 ([§4](#4-the-durable-streamsserver-it-wraps)), so `wiki-server` runs **two more `http.createServer`
 listeners** of its own beside the stream host (`port`, default `4437`): a **control listener** on
 `--control-port` (default `4438` = stream port + 1) and the embedded **`wiki-mcp`** listener on
-`--mcp-port` (default `4439` = stream port + 2). The control listener serves:
+`--mcp-port` (default `4439` = stream port + 2). The control listener serves the log/health/info API **and**, since [ADR-M6](../wiki-mcp/DESIGN.md), a **pipeline-driven** `/_server/models` control surface (a build pipeline pushes page-type bundles into the embedded `wiki-mcp` — never agent-facing). `wiki-server` stays **schema-agnostic**: it forwards a bundle's **id + module specifier** through a structural `ModelsControl` seam into `wiki-mcp`'s `ModelRegistry` and **never imports the bundle itself** (the embedded `wiki-mcp` does the dynamic `import()`, then rebinds the engine and reprojects). The call returns only after that rebind + reproject completes, so a pipeline can sequence on it; `503` when no registry is wired, `400` on a bad body, `404` on an unknown id. The control listener serves:
 
 | Method · path | Purpose | Response |
 |---|---|---|
@@ -409,6 +413,10 @@ listeners** of its own beside the stream host (`port`, default `4437`): a **cont
 | `GET /_server/logs?follow=1&since=<seq>&boot=<id>` | log **tail** (backlog then live) | `200 text/event-stream` (SSE), one `LogRecord` per event |
 | `GET /_server/health` | liveness/readiness (closes the old gap) | `200 {status:"ok"}` / `503` |
 | `GET /_server/info` | server facts | `200 { version, boot, storage, baseUrl, mcpUrl, pid, uptimeMs }` |
+| `GET /_server/models` | loaded model bundles (ADR-M6) | `200 { generation, bundles: [{ id, specifier, types }] }` |
+| `POST /_server/models` · body `{ id, specifier }` | load / hard-replace a bundle → rebind + reproject | `200 ModelEvent` `{ generation, fingerprint, reason, bundleId }`; `400` bad body |
+| `POST /_server/models/<id>/reload` | re-import a known bundle's specifier (cache-busted) | `200 ModelEvent`; `404` unknown id |
+| `DELETE /_server/models/<id>` | hard-unregister a bundle (workspaces with live events of its types then halt) | `200 ModelEvent`; `404` unknown id |
 
 The embedded **`wiki-mcp` listener** serves a single streamable-HTTP MCP endpoint at `POST/GET /mcp`
 (`mcpUrl` = `http://{host}:{mcpPort}/mcp`) that networked agents connect to. It is served over HTTP
@@ -478,9 +486,9 @@ module). It does **not** depend on `wiki` *directly* — it reaches the engine o
     ├─ Dockerfile
     └─ src/
         ├─ main.ts              # config → logger → start stream host → start wiki-mcp(logger, http transport) → control listener → signals
-        ├─ config.ts            # WikiServerConfig (+ wiki-mcp namespace/db knobs, control-port, mcp-port, log-buffer)
+        ├─ config.ts            # WikiServerConfig (+ wiki-mcp namespace/db knobs, control-port, mcp-port, log-buffer, models)
         ├─ logger.ts            # consolidating Logger: stdout + ring buffer + subscribers (§8.5)
-        └─ control.ts           # control HTTP listener: /_server/logs · /_server/health · /_server/info (§8.5)
+        └─ control.ts           # control HTTP listener: /_server/logs · /_server/health · /_server/info · /_server/models (§8.5)
 ```
 
 **Boundaries that keep it honest:**

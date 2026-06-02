@@ -1136,7 +1136,7 @@ export type CommandMap = Readonly<Record<string, ICommandDef<any, any, any, any>
 |---|---|
 | `wiki` | `createWiki`; interfaces `IWiki`, `IWorkspaceHandle`, `IPageView`, `IWikiConfig`, `IStreamConfig`; authoring `definePageType`, `defineItemType`, `t` and the `*Def` / `ISchema` / context interfaces; the data types; all error classes; the **CQRS** surface — `Committed`, `ConsistencyToken`, `IReadOpts`, `IReadModel`, the public `foldWorkspace`/`applyWorkspace`, and the token codec `encodeToken`/`decodeToken`/`ZERO_VERSION` (§8.6). |
 | `wiki/registry` | the `Registry` class (build one from a `pageTypes` set) — for an **external read model** that reuses the public `foldWorkspace` (§8.6). |
-| `wiki/pages/feature` | the worked-example page types — `FeatureBrief`, `ImplementationPlan`, `ImplementationChecklist`, `TestingPlan` (each `IPageType`) — and their exported state/command types. |
+| `wiki/authoring` | the public **authoring API** external schema packages import — `definePageType`, `defineItemType`, `t`; the Zod schema adapter (`zodSchema`/`z`); the deterministic render helpers; `InvariantViolationError`/`WikiError`; and the `api` type vocabulary (`export type * from "./api"`). Bundles author against THIS surface, never the engine's internal module paths. (The barrel `wiki` "." still re-exports the authoring fns too.) The worked-example page types now ship from a sibling package — `wiki-models/feature` (each `IPageType`; the bundle's **default export** is the page-type array). |
 | `wiki/testing` *(dev only)* | helpers to start an in-memory `DurableStreamTestServer` and an `IWiki` bound to it. |
 
 ---
@@ -1476,16 +1476,18 @@ contention, so plain optimistic concurrency suffices — **no single-writer acto
 
 ## 16. Structure: folders, files, and module boundaries
 
-A pnpm/npm workspaces monorepo. `wiki/` is this package (transport-free core); `wiki-cli/` is a
-future sibling that *consumes* it, and `wiki-server/` is the Durable Streams **host** the engine
-points at for storage — it imports neither `wiki` nor its types (`wiki-server/DESIGN.md`).
+A pnpm/npm workspaces monorepo. `wiki/` is this package (transport-free core). Siblings: **`wiki-models/`**
+holds runtime-loadable page-type **schema bundles** authored against `wiki/authoring` (the worked-example
+types now ship from `wiki-models/feature`); **`wiki-mcp/`** is the long-lived **read-model + MCP host** that
+embeds the engine; **`wiki-server/`** is the Durable Streams **host** that also hosts `wiki-mcp`; and
+**`wiki-cli/`** is a set-aside future client.
 
 ```
 .
 ├─ package.json                 # workspaces root (pnpm-workspace.yaml / "workspaces" field)
 ├─ tsconfig.base.json           # shared compiler options; each package extends it
 ├─ wiki/                        # ← THIS package — the core engine; exposes only a TS interface
-│   ├─ package.json             # name "wiki"; exports map → "." , "./pages/feature" , "./testing"
+│   ├─ package.json             # name "wiki"; exports map → "." , "./authoring" , "./testing" , "./registry"
 │   ├─ DESIGN.md                # ← this document
 │   └─ src/
 │       ├─ index.ts             # PUBLIC BARREL — re-exports the entire public surface (§10.7)
@@ -1509,16 +1511,12 @@ points at for storage — it imports neither `wiki` nor its types (`wiki-server/
 │       │   └─ determinism.ts   #   canonicalization helpers (stable sort, fixed formatting)
 │       ├─ schema/
 │       │   └─ zod-adapter.ts   #   ISchema<T> over Zod + toJsonSchema()
-│       ├─ pages/
-│       │   └─ feature/         #   worked-example page types (entity types — pluggable, §13)
-│       │       ├─ feature-brief.ts            # FeatureBrief = definePageType({ requiredChildren: […] })
-│       │       ├─ implementation-plan.ts
-│       │       ├─ implementation-checklist.ts
-│       │       ├─ testing-plan.ts
-│       │       └─ items.ts                    # shared item types: question, component, constraint, commit, step, task, case
+│       ├─ authoring.ts         #   PUBLIC `wiki/authoring` entry — re-exports the page-type authoring API (define*/t, zod adapter, render helpers, errors, api types) for external schema bundles
 │       └─ testing.ts           # dev-only: start an in-memory DurableStreamTestServer + a wired IWiki
-├─ wiki-cli/                    # FUTURE — commander CLI over `wiki`, generated from describeMutations()
-└─ wiki-server/                 # the durable Durable Streams HOST the engine points at (wiki-server/DESIGN.md)
+├─ wiki-models/                 # runtime-loadable page-type schema bundles (wiki-models/feature); authored against wiki/authoring (wiki-models/DESIGN.md)
+├─ wiki-mcp/                    # long-lived read-model + MCP host; embeds the engine (wiki-mcp/DESIGN.md)
+├─ wiki-cli/                    # set-aside future client over `wiki` (describeMutations()-generated)
+└─ wiki-server/                 # Durable Streams HOST that also hosts wiki-mcp (wiki-server/DESIGN.md)
 ```
 
 ### 16.1 What each file owns
@@ -1526,7 +1524,7 @@ points at for storage — it imports neither `wiki` nor its types (`wiki-server/
 | File | Owns | Key exports | May import |
 |---|---|---|---|
 | `api.ts` | the entire **public type surface** | all `I*` interfaces, data shapes, branded ids, type-level helpers | nothing (pure types) |
-| `index.ts` | the **public barrel** | re-exports of `api`, `core/errors`, the public `foldWorkspace`/`applyWorkspace` + the token codec `encodeToken`/`decodeToken`/`ZERO_VERSION` (§8.6), bundled page types | api, core/errors, core/workspace, core/readmodel, pages/* |
+| `index.ts` | the **public barrel** | re-exports of `api`, `core/errors`, the public `foldWorkspace`/`applyWorkspace` + the token codec `encodeToken`/`decodeToken`/`ZERO_VERSION` (§8.6), the authoring helpers (`definePageType`/`defineItemType`/`t`) and the Zod adapter | api, core/errors, core/workspace, core/readmodel, core/define, core/guard, schema/zod-adapter |
 | `core/wiki.ts` | engine entry + handle impls | `createWiki` | command-bus, registry, event-log, snapshot, api |
 | `core/command-bus.ts` | the command hot path (§5) | `CommandBus` *(internal)* | guard, registry, workspace, event-log |
 | `core/workspace.ts` | fold/apply (the reducer) — a **public, pure** fold | `foldWorkspace`, `applyWorkspace` *(exported for external read models, §8.6)* | registry, structure, api |
@@ -1540,7 +1538,7 @@ points at for storage — it imports neither `wiki` nor its types (`wiki-server/
 | `stores/event-log.ts` | Durable Streams I/O | `EventLog` | **`@durable-streams/client`**, api |
 | `render/markdown.ts` | render dispatch | `renderPage`, `renderWorkspace` | registry, determinism, api |
 | `schema/zod-adapter.ts` | runtime validation | `zodSchema(...)` → `ISchema<T>` | zod, zod-to-json-schema |
-| `pages/feature/*` | the example page/item types | `FeatureBrief`, … (each `IPageType`) | define, guard (`t`), schema, api |
+| `authoring.ts` | the public `wiki/authoring` entry — the page-type authoring API for external schema bundles | re-exports of `definePageType`/`defineItemType`/`t`, `zodSchema`/`z`, the render-determinism helpers, `InvariantViolationError`/`WikiError`, and `api` types | core/define, schema/zod-adapter, render/determinism, core/errors, api |
 
 ### 16.2 Dependency direction (a DAG pointing at `api.ts`)
 
@@ -1550,9 +1548,12 @@ The boundaries that keep the architecture honest:
   implementations (§10). Implementations live under `core/` and `stores/`.
 - **`stores/event-log.ts` is the sole importer of `@durable-streams/client`** — upgrading or
   swapping the storage client touches exactly one file ([ADR-001](#adr-001--use-durable-streams-directly-no-storage-port-2026-06-01)).
-- **Page types are plugins.** `pages/*` import only the *authoring API* (`define.ts`, `t` from
-  `guard.ts`, `schema/`) and `api.ts` types — **never** `core/wiki.ts`, `command-bus.ts`, or
-  `event-log.ts`. A page type is self-contained and could ship from its own package.
+- **Page types are plugins.** External schema bundles import only the *public authoring API* —
+  the `wiki/authoring` entry point (`definePageType`/`defineItemType`/`t`, the Zod adapter, the
+  render helpers, the `api` types) — **never** `core/wiki.ts`, `command-bus.ts`, `event-log.ts`,
+  or any internal module path. A page type is self-contained and ships from its own package: the
+  worked-example types now live in the sibling **`wiki-models`** package (`wiki-models/feature`),
+  not in `wiki`.
 - **The core is type-agnostic.** `command-bus.ts`, `workspace.ts`, and `render/markdown.ts` reach
   page-type behaviour **only** through `registry.ts`; they never name a concrete page type. Adding
   a page type touches only its own folder plus the `pageTypes` array passed to `createWiki` ([§13](#13-worked-example-an-llm-plans-and-ships-a-feature)).
@@ -1569,7 +1570,7 @@ The boundaries that keep the architecture honest:
 ### 16.3 Conventions
 
 - **Interfaces** are `I`-prefixed; type aliases, classes, and functions are not.
-- **One page type per file** under `pages/<area>/`; file names kebab-case, matching the `type` tag.
+- **One page type per file** in a schema bundle (e.g. `wiki-models/src/feature/`); file names kebab-case, matching the `type` tag.
 - **Events** are PascalCase past-tense (`PageCreated`, `QuestionAnswered`); **commands** are
   camelCase imperative (`addConstraint`, `beginImplementation`).
 - A page's **id prefix equals its `type`** (`feature-brief:01J…`) — the type is recoverable from any id.
@@ -1583,6 +1584,9 @@ tail in process; durable/external read models (e.g. a SQL one) live in downstrea
 the exported `IReadModel` seam. **No FSM dependency** — the guard is ~20 lines in
 `core/guard.ts`; `typescript-fsm` is a *design reference only*. **`@durable-streams/server`** is a
 **devDependency** (the in-memory `DurableStreamTestServer` used by `testing.ts` and the test suite).
+**`wiki-models`** is a **devDependency** — the worked-example page-type bundle (`wiki-models/feature`)
+authored against `wiki/authoring`, used by the engine's tests and as the reference schema package; it
+is not a runtime dependency of the engine (the engine is schema-agnostic).
 
 ---
 
