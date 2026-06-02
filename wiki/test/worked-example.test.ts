@@ -21,7 +21,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { IWiki, IWorkspaceHandle, PageId } from "../src/api";
 import { InvariantViolationError } from "../src/core/errors";
-import { featurePageTypes } from "../src/pages/feature";
+import { featurePageTypes } from "wiki-models/feature";
 import { createTestWiki, type ITestWiki } from "../src/testing";
 
 describe("worked example: plan → build → ship a feature", () => {

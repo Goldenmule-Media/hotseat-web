@@ -23,7 +23,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { IWiki, IWorkspaceHandle, PageId, WorkspaceId } from "../src/api";
 import { MutationNotAllowedError } from "../src/core/errors";
-import { featurePageTypes } from "../src/pages/feature";
+import { featurePageTypes } from "wiki-models/feature";
 import { startTestServer, wikiOn, type ITestServer } from "../src/testing";
 
 describe("concurrency: two handles on one workspace", () => {

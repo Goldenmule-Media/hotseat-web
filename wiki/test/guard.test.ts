@@ -9,8 +9,8 @@
 import { describe, expect, it } from "vitest";
 
 import { makeGuard, t } from "../src/core/guard";
-import { FeatureBrief } from "../src/pages/feature/feature-brief";
-import { question, task, testCase } from "../src/pages/feature/items";
+import { FeatureBrief } from "wiki-models/feature";
+import { question, task, testCase } from "wiki-models/feature";
 
 const briefTransitions = FeatureBrief.__def.statusTransitions;
 const guard = makeGuard(briefTransitions);

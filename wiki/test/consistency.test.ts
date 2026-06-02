@@ -25,7 +25,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ConsistencyToken, IWiki, IWorkspaceHandle, WorkspaceId } from "../src/api";
 import { ConsistencyTimeoutError } from "../src/core/errors";
 import { encodeToken, InMemoryReadModel } from "../src/core/readmodel";
-import { featurePageTypes } from "../src/pages/feature";
+import { featurePageTypes } from "wiki-models/feature";
 import { createTestWiki, type ITestWiki } from "../src/testing";
 
 // ────────────────────────────────────────────────────────────────────────────

@@ -18,10 +18,10 @@ import type {
   IRenderCtx,
   PageId,
   PageState,
-} from "../../api";
-import { definePageType, t } from "../../core/define";
-import { InvariantViolationError } from "../../core/errors";
-import { zodSchema, z } from "../../schema/zod-adapter";
+} from "wiki/authoring";
+import { definePageType, t } from "wiki/authoring";
+import { InvariantViolationError } from "wiki/authoring";
+import { zodSchema, z } from "wiki/authoring";
 import {
   bulletList,
   heading,
@@ -30,7 +30,7 @@ import {
   placeholder,
   section,
   statusBadge,
-} from "../../render/determinism";
+} from "wiki/authoring";
 import { commit, component, constraint, question } from "./items";
 
 // ────────────────────────────────────────────────────────────────────────────

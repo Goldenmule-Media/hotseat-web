@@ -16,7 +16,7 @@ import { definePageType, t } from "../src/core/define";
 import { Registry } from "../src/core/registry";
 import { foldWorkspace } from "../src/core/workspace";
 import { zodSchema, z } from "../src/schema/zod-adapter";
-import { featurePageTypes } from "../src/pages/feature";
+import { featurePageTypes } from "wiki-models/feature";
 
 const WS = "ws:test" as WorkspaceId;
 

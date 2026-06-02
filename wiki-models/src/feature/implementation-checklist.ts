@@ -4,10 +4,10 @@
  * ids/time via `ctx.newId`/`ctx.now`, no host clock or RNG; `apply` owns all
  * mutation including item.status.
  */
-import type { DomainEvent, IRenderCtx, PageState } from "../../api";
-import { definePageType, t } from "../../core/define";
-import { zodSchema, z } from "../../schema/zod-adapter";
-import { bulletList, heading, joinBlocks, placeholder, section, statusBadge } from "../../render/determinism";
+import type { DomainEvent, IRenderCtx, PageState } from "wiki/authoring";
+import { definePageType, t } from "wiki/authoring";
+import { zodSchema, z } from "wiki/authoring";
+import { bulletList, heading, joinBlocks, placeholder, section, statusBadge } from "wiki/authoring";
 import { task } from "./items";
 
 const empty = z.object({}).strict();

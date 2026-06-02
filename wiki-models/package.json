@@ -1,0 +1,23 @@
+{
+  "name": "wiki-models",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Runtime-loadable page-type schema bundles for the wiki engine. Authored against wiki's public authoring API; loaded by reference (dynamic import) and hot-reloaded — see DESIGN.md.",
+  "exports": {
+    "./feature": "./src/feature/index.ts"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "tsdown",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "wiki": "*"
+  }
+}

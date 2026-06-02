@@ -13,8 +13,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { IWorkspaceHandle, JsonSchema, PageId } from "../src/api";
-import { FeatureBrief } from "../src/pages/feature/feature-brief";
-import { featurePageTypes } from "../src/pages/feature";
+import { FeatureBrief } from "wiki-models/feature";
+import { featurePageTypes } from "wiki-models/feature";
 import { createTestWiki, type ITestWiki } from "../src/testing";
 
 /** Full command set declared by the feature-brief page type. */

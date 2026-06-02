@@ -39,7 +39,7 @@ import {
 } from "../src/core/structure";
 import type { Services } from "../src/core/types";
 import { applyWorkspace, foldWorkspace } from "../src/core/workspace";
-import { featurePageTypes } from "../src/pages/feature";
+import { featurePageTypes } from "wiki-models/feature";
 
 const WS = "ws:test" as WorkspaceId;
 const registry = new Registry(featurePageTypes);

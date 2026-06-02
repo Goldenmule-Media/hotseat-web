@@ -23,7 +23,7 @@ import type { IEventEnvelope, IWiki, IWorkspaceHandle, PageId } from "../src/api
 import { Registry } from "../src/core/registry";
 import { deserializeState, serializeState } from "../src/core/snapshot";
 import { foldWorkspace } from "../src/core/workspace";
-import { featurePageTypes } from "../src/pages/feature";
+import { featurePageTypes } from "wiki-models/feature";
 import { createTestWiki, type ITestWiki } from "../src/testing";
 
 describe("snapshot round-trip & fold equivalence", () => {

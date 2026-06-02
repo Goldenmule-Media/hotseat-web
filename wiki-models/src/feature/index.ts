@@ -6,6 +6,7 @@ export { FeatureBrief } from "./feature-brief";
 export { ImplementationPlan } from "./implementation-plan";
 export { ImplementationChecklist } from "./implementation-checklist";
 export { TestingPlan } from "./testing-plan";
+export { question, task, testCase, component, constraint, commit, step } from "./items";
 
 import { FeatureBrief } from "./feature-brief";
 import { ImplementationPlan } from "./implementation-plan";

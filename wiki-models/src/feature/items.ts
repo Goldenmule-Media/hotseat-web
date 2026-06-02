@@ -7,7 +7,7 @@
  * `t()` builds the transitions; `defineItemType` wraps each spec into its
  * registration object. No host clock / RNG here — these are pure declarations.
  */
-import { defineItemType, t } from "../../core/define";
+import { defineItemType, t } from "wiki/authoring";
 
 /** `question`: open → resolved (answerQuestion). Cannot be answered twice. */
 export const question = defineItemType({

@@ -4,13 +4,14 @@
   "type": "module",
   "workspaces": [
     "wiki",
+    "wiki-models",
     "wiki-server",
     "wiki-mcp"
   ],
   "scripts": {
-    "typecheck": "npm run typecheck -w wiki -w wiki-server -w wiki-mcp",
-    "test": "npm run test -w wiki -w wiki-server -w wiki-mcp",
-    "build": "npm run build -w wiki -w wiki-server -w wiki-mcp"
+    "typecheck": "npm run typecheck -w wiki -w wiki-models -w wiki-server -w wiki-mcp",
+    "test": "npm run test -w wiki -w wiki-models -w wiki-server -w wiki-mcp",
+    "build": "npm run build -w wiki -w wiki-models -w wiki-server -w wiki-mcp"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

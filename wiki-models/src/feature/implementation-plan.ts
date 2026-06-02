@@ -3,9 +3,9 @@
  * draft → ready, owning `step` and `question` items. Pure throughout — ids/time
  * via `ctx.newId`/`ctx.now`, no host clock or RNG; `apply` owns all mutation.
  */
-import type { DomainEvent, IRenderCtx, PageState } from "../../api";
-import { definePageType, t } from "../../core/define";
-import { zodSchema, z } from "../../schema/zod-adapter";
+import type { DomainEvent, IRenderCtx, PageState } from "wiki/authoring";
+import { definePageType, t } from "wiki/authoring";
+import { zodSchema, z } from "wiki/authoring";
 import {
   bulletList,
   heading,
@@ -14,7 +14,7 @@ import {
   placeholder,
   section,
   statusBadge,
-} from "../../render/determinism";
+} from "wiki/authoring";
 import { question, step } from "./items";
 
 const empty = z.object({}).strict();
