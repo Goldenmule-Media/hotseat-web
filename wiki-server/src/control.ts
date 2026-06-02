@@ -9,7 +9,7 @@
  * | `GET /_server/logs?since=&boot=&limit=&level=&source=` | log **history** (ring buffer) |
  * | `GET /_server/logs?follow=1&since=&boot=` | log **tail** (backlog then live SSE) |
  * | `GET /_server/health` | liveness/readiness |
- * | `GET /_server/info` | `{ version, boot, storage, baseUrl, pid, uptimeMs }` |
+ * | `GET /_server/info` | `{ version, boot, storage, baseUrl, mcpUrl?, pid, uptimeMs }` |
  *
  * It is NOT a durable stream — it reads from the consolidating logger's ring buffer
  * and subscribes to its live feed (DESIGN §8.5). It has no built-in auth, so for a
@@ -35,6 +35,8 @@ export interface ControlInfo {
   readonly storage: "file" | "memory";
   /** The stream host's base URL (read back from `server.url` after start). */
   readonly baseUrl: string;
+  /** The embedded MCP server's streamable-HTTP endpoint, if one is hosted (DESIGN §6.1). */
+  readonly mcpUrl?: string;
 }
 
 /** What {@link startControlServer} needs to wire the API to the running host. */
@@ -130,6 +132,7 @@ function handle(req: IncomingMessage, res: ServerResponse, ctx: HandlerCtx): voi
       boot: ctx.logger.boot,
       storage: ctx.info.storage,
       baseUrl: ctx.info.baseUrl,
+      ...(ctx.info.mcpUrl !== undefined ? { mcpUrl: ctx.info.mcpUrl } : {}),
       pid: process.pid,
       uptimeMs: Date.now() - ctx.startedAt,
     });

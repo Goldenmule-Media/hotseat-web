@@ -12,15 +12,21 @@ import { defineConfig } from "tsdown";
  * The entry's `#!` shebang is preserved (the package `bin` is `dist/main.js`).
  */
 export default defineConfig({
-  entry: ["src/main.ts"],
+  // The `bin` wrapper is the entry; it pulls in `./main` (the library) and the engine.
+  // Building the wrapper (not the library) keeps the self-exec guard OUT of any host
+  // that bundles `./main` from source (DESIGN §3.1).
+  entry: ["src/bin.ts"],
   format: ["esm"],
   platform: "node",
   target: "node20",
   // Emit `.js` (ESM — the package is `type: module`) so the `bin` path stays stable.
   outExtensions: () => ({ js: ".js" }),
   deps: {
-    // Inline the workspace engine (consumed as source); keep npm deps external.
-    alwaysBundle: ["wiki"],
+    // Inline the workspace engine (consumed as source); keep npm deps external. The
+    // regex (not the bare string "wiki") is REQUIRED so the `wiki/registry` SUBPATH
+    // export is bundled too — otherwise it stays external and Node tries to load the
+    // engine's extensionless TS source at runtime (ERR_MODULE_NOT_FOUND).
+    alwaysBundle: [/^wiki(\/|$)/],
     neverBundle: [
       /^@durable-streams\//,
       /^@electric-sql\//,

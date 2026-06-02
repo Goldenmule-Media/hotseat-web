@@ -1,6 +1,8 @@
-#!/usr/bin/env node
 /**
- * The `wiki-mcp` library API + `bin` entry (DESIGN §6, §7, §8, ADR-M5).
+ * The `wiki-mcp` library API (DESIGN §6, §7, §8, ADR-M5). The standalone `bin`
+ * wrapper lives in `./bin` — kept SEPARATE so a host that bundles this module
+ * (`wiki-server` inlines it from source, DESIGN §3.1) does not drag in a self-exec
+ * guard that would auto-boot a second, rogue server.
  *
  * `createWikiMcp(config)` assembles the whole runtime: the embedded write-side
  * engine (hot-handle LRU, DESIGN §7), the durable SQL read model + its migrations
@@ -157,14 +159,16 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// bin entry (standalone)
+// standalone runtime (invoked by the `./bin` wrapper)
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
- * Standalone `bin` entry: resolve config from `process.argv`/`process.env`, build a
+ * Standalone runtime: resolve config from `process.argv`/`process.env`, build a
  * runtime with NO page types registered (a host injects real ones), and serve over
- * stdio. Useful for smoke-testing the wiring; production runs through a host that
- * supplies its page-type set via {@link createWikiMcp}.
+ * stdio. Invoked by the `./bin` entry; production runs through a host that supplies
+ * its page-type set via {@link createWikiMcp}. NOTE: there is intentionally no
+ * `import.meta.url` self-exec guard here — it lives in `./bin`, so bundling this
+ * library into a host never auto-starts it (DESIGN §3.1).
  */
 export async function main(argv = process.argv.slice(2), env = process.env): Promise<void> {
   const config = resolveConfig(argv, env);
@@ -177,13 +181,4 @@ export async function main(argv = process.argv.slice(2), env = process.env): Pro
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
   logger.info("wiki-mcp started", { namespace: config.namespace });
-}
-
-// Run when invoked directly as the bin (not when imported as a library).
-if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((err: unknown) => {
-    // eslint-disable-next-line no-console
-    console.error(err);
-    process.exit(1);
-  });
 }

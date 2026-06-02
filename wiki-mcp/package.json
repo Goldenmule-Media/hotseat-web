@@ -7,7 +7,7 @@
     ".": "./src/main.ts"
   },
   "bin": {
-    "wiki-mcp": "dist/main.js"
+    "wiki-mcp": "dist/bin.js"
   },
   "files": [
     "dist"
@@ -18,7 +18,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "tsdown",
-    "start": "tsx src/main.ts",
+    "start": "tsx src/bin.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

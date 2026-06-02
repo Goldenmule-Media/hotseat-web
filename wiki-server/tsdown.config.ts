@@ -18,7 +18,11 @@ export default defineConfig({
   outExtensions: () => ({ js: ".js" }),
   deps: {
     // Inline the hosted module + engine (consumed as source); keep npm deps external.
-    alwaysBundle: ["wiki", "wiki-mcp"],
+    // Regexes (not bare strings) so SUBPATH exports — notably `wiki/registry` — are
+    // bundled too; left external, Node would load the engine's extensionless TS
+    // source at runtime (ERR_MODULE_NOT_FOUND). `^wiki(/|$)` does NOT match
+    // "wiki-mcp" (next char is "-"), so the two patterns stay disjoint.
+    alwaysBundle: [/^wiki(\/|$)/, /^wiki-mcp(\/|$)/],
     neverBundle: [
       /^@durable-streams\//,
       /^@electric-sql\//,

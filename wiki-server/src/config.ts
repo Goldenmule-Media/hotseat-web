@@ -29,6 +29,13 @@ export interface WikiServerConfig {
    */
   readonly controlPort: number;
   /**
+   * Port for the embedded `wiki-mcp` server over streamable HTTP (DESIGN §6.1) — a
+   * THIRD `http.createServer` (separate from the stream host and the control
+   * listener), serving the MCP endpoint clients connect to at `/mcp`. Default
+   * `port + 2` (i.e. 4439).
+   */
+  readonly mcpPort: number;
+  /**
    * History ring-buffer size for `GET /_server/logs` (DESIGN §8.5): the most
    * recent N records the consolidating logger retains for replay. Default 1000.
    */
@@ -118,9 +125,12 @@ export function resolveConfig(
     pick("control-port", "WIKI_SERVER_CONTROL_PORT", String(port + 1)),
     "--control-port",
   );
+  // The embedded MCP server (streamable HTTP, DESIGN §6.1) defaults to the stream
+  // port + 2 so it never collides with the stream host (+0) or the control listener (+1).
+  const mcpPort = toInt(pick("mcp-port", "WIKI_SERVER_MCP_PORT", String(port + 2)), "--mcp-port");
   const logBuffer = toInt(pick("log-buffer", "WIKI_SERVER_LOG_BUFFER", "1000"), "--log-buffer");
 
-  return { host, port, storage, dataDir, longPollTimeout, logFormat, controlPort, logBuffer };
+  return { host, port, storage, dataDir, longPollTimeout, logFormat, controlPort, mcpPort, logBuffer };
 }
 
 /**

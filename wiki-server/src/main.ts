@@ -22,7 +22,7 @@
  * resolves config, starts them, and traps signals (DESIGN §8.1).
  */
 import { DurableStreamTestServer, type StreamLifecycleEvent } from "@durable-streams/server";
-import { createWikiMcp, resolveConfig as resolveMcpConfig, type WikiMcp, type WikiMcpConfig } from "wiki-mcp";
+import { createWikiMcp, resolveConfig as resolveMcpConfig, type McpTransport, type WikiMcp, type WikiMcpConfig } from "wiki-mcp";
 
 // NOTE: `.js` extensions are required because wiki-server is COMPILED and run via
 // `node dist/main.js` (raw Node ESM needs explicit extensions). This differs from
@@ -68,6 +68,7 @@ export interface WikiServerDeps {
   readonly startMcp?: (
     baseUrl: string,
     logger: IConsolidatingLogger,
+    transport: McpTransport,
   ) => Promise<{ readonly mcp?: WikiMcp; readonly config: WikiMcpConfig }>;
   /** Process start time (ms epoch) for `uptimeMs`; defaults to "now". */
   readonly startedAt?: number;
@@ -79,6 +80,8 @@ export interface RunningWikiServer {
   readonly baseUrl: string;
   /** The control listener's base URL (log/health/info API, DESIGN §8.5). */
   readonly controlUrl: string;
+  /** The embedded MCP server's streamable-HTTP endpoint clients connect to (DESIGN §6.1). */
+  readonly mcpUrl: string;
   /** The consolidating logger backing the log API (DESIGN §8.5). */
   readonly logger: IConsolidatingLogger;
   /** The hosted `wiki-mcp`, if one was started (DESIGN §3.1). */
@@ -91,13 +94,16 @@ export interface RunningWikiServer {
 async function defaultStartMcp(
   baseUrl: string,
   logger: IConsolidatingLogger,
+  transport: McpTransport,
 ): Promise<{ mcp: WikiMcp; config: WikiMcpConfig }> {
   // Derive wiki-mcp's wire config from env/flags via its own resolver, then point its
   // `streamBaseUrl` at THIS host's localhost URL (read back from `server.url`, robust
   // when `port: 0` auto-assigns). wiki-server supplies NO page types of its own
-  // (it imports `wiki-mcp`, never `wiki`); a real host injects its set here.
+  // (it imports `wiki-mcp`, never `wiki`); a real host injects its set here. The
+  // `transport` (streamable HTTP, built from cfg) makes the MCP endpoint network-
+  // reachable — an embedded host can't use stdio (that's its own terminal, DESIGN §6.1).
   const config: WikiMcpConfig = { ...resolveMcpConfig(process.argv.slice(2), process.env), streamBaseUrl: baseUrl };
-  const mcp = await createWikiMcp({ config, pageTypes: [], logger });
+  const mcp = await createWikiMcp({ config, pageTypes: [], logger, transport });
   return { mcp, config };
 }
 
@@ -130,17 +136,26 @@ export async function startWikiServer(
     dataDir: cfg.storage === "file" ? cfg.dataDir : undefined,
   });
 
-  // ── 3. start wiki-mcp in-process (DESIGN §3.1) ──
-  const started = await startMcp(baseUrl, logger.forSource("mcp"));
+  // ── 3. start wiki-mcp in-process over streamable HTTP (DESIGN §3.1, §6.1) ──
+  // The embedded MCP is served over HTTP — NOT stdio — on its own listener so a
+  // networked MCP client connects to `mcpUrl`. (stdio would bind the host process's
+  // own terminal, unreachable by a separate client.)
+  const mcpTransport: McpTransport = { kind: "http", host: cfg.host, port: cfg.mcpPort, path: "/mcp" };
+  const mcpUrl = `http://${cfg.host}:${cfg.mcpPort}/mcp`;
+  const started = await startMcp(baseUrl, logger.forSource("mcp"), mcpTransport);
   const mcp = started.mcp;
-  serverLog.info("wiki-mcp up", { namespace: started.config.namespace, streamBaseUrl: started.config.streamBaseUrl });
+  serverLog.info("wiki-mcp up", {
+    namespace: started.config.namespace,
+    streamBaseUrl: started.config.streamBaseUrl,
+    mcpUrl,
+  });
 
   // ── 4. start the control listener (DESIGN §8.5) ──
   const control: ControlServer = await startControlServer({
     host: cfg.host,
     port: cfg.controlPort,
     logger,
-    info: { version: serverVersion(), storage: cfg.storage, baseUrl },
+    info: { version: serverVersion(), storage: cfg.storage, baseUrl, mcpUrl },
     startedAt,
   });
   serverLog.info("control listener up", { url: control.url });
@@ -148,6 +163,7 @@ export async function startWikiServer(
   serverLog.info("wiki-server ready", {
     baseUrl,
     controlUrl: control.url,
+    mcpUrl,
     storage: cfg.storage,
     namespace: started.config.namespace,
   });
@@ -155,6 +171,7 @@ export async function startWikiServer(
   return {
     baseUrl,
     controlUrl: control.url,
+    mcpUrl,
     logger,
     mcp,
     /**
