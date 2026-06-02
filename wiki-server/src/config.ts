@@ -22,6 +22,17 @@ export interface WikiServerConfig {
   readonly longPollTimeout: number;
   /** Log format. "auto" resolves to "pretty" on a TTY, else "json". */
   readonly logFormat: "pretty" | "json";
+  /**
+   * Port for the control listener (the log/health API, DESIGN §8.5) — a SEPARATE
+   * `http.createServer` from the stream host, since the wrapped server hosts no
+   * extra paths (DESIGN §4). Default `port + 1` (i.e. 4438).
+   */
+  readonly controlPort: number;
+  /**
+   * History ring-buffer size for `GET /_server/logs` (DESIGN §8.5): the most
+   * recent N records the consolidating logger retains for replay. Default 1000.
+   */
+  readonly logBuffer: number;
 }
 
 /** Loopback hosts that need no reverse proxy / auth to stay private. */
@@ -101,7 +112,15 @@ export function resolveConfig(
     throw new Error(`invalid --log-format "${rawLog}" (expected "pretty", "json", or "auto")`);
   }
 
-  return { host, port, storage, dataDir, longPollTimeout, logFormat };
+  // The control listener (log/health API, DESIGN §8.5) defaults to the stream
+  // port + 1 so the two never collide; explicit flag/env wins.
+  const controlPort = toInt(
+    pick("control-port", "WIKI_SERVER_CONTROL_PORT", String(port + 1)),
+    "--control-port",
+  );
+  const logBuffer = toInt(pick("log-buffer", "WIKI_SERVER_LOG_BUFFER", "1000"), "--log-buffer");
+
+  return { host, port, storage, dataDir, longPollTimeout, logFormat, controlPort, logBuffer };
 }
 
 /**

@@ -2,7 +2,7 @@
   "name": "wiki-server",
   "version": "0.1.0",
   "type": "module",
-  "description": "Durable Streams host for the wiki engine — runs @durable-streams/server with durable storage. Imports @durable-streams/server, never `wiki`.",
+  "description": "Durable Streams host for the wiki engine — runs @durable-streams/server with durable storage AND hosts wiki-mcp in-process. Imports @durable-streams/server and wiki-mcp, never `wiki` directly.",
   "bin": {
     "wiki-server": "dist/main.js"
   },
@@ -20,7 +20,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@durable-streams/server": "^0.3.5"
+    "@durable-streams/server": "^0.3.5",
+    "wiki-mcp": "*"
   },
   "devDependencies": {
     "@durable-streams/client": "^0.2.6"
