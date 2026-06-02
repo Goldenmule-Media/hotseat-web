@@ -80,7 +80,7 @@ export interface RunningWikiServer {
   readonly baseUrl: string;
   /** The control listener's base URL (log/health/info API, DESIGN §8.5). */
   readonly controlUrl: string;
-  /** The embedded MCP server's streamable-HTTP endpoint clients connect to (DESIGN §6.1). */
+  /** The embedded MCP server's streamable-HTTP endpoint clients connect to (DESIGN §8.5). */
   readonly mcpUrl: string;
   /** The consolidating logger backing the log API (DESIGN §8.5). */
   readonly logger: IConsolidatingLogger;
@@ -101,7 +101,7 @@ async function defaultStartMcp(
   // when `port: 0` auto-assigns). wiki-server supplies NO page types of its own
   // (it imports `wiki-mcp`, never `wiki`); a real host injects its set here. The
   // `transport` (streamable HTTP, built from cfg) makes the MCP endpoint network-
-  // reachable — an embedded host can't use stdio (that's its own terminal, DESIGN §6.1).
+  // reachable — an embedded host can't use stdio (that's its own terminal, DESIGN §8.5).
   const config: WikiMcpConfig = { ...resolveMcpConfig(process.argv.slice(2), process.env), streamBaseUrl: baseUrl };
   const mcp = await createWikiMcp({ config, pageTypes: [], logger, transport });
   return { mcp, config };

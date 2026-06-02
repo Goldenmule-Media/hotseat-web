@@ -35,7 +35,7 @@ export interface ControlInfo {
   readonly storage: "file" | "memory";
   /** The stream host's base URL (read back from `server.url` after start). */
   readonly baseUrl: string;
-  /** The embedded MCP server's streamable-HTTP endpoint, if one is hosted (DESIGN §6.1). */
+  /** The embedded MCP server's streamable-HTTP endpoint, if one is hosted (DESIGN §8.5). */
   readonly mcpUrl?: string;
 }
 

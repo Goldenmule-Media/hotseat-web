@@ -390,17 +390,21 @@ A consumer sibling. **New dependencies** (none currently in the repo — version
         ├─ main.ts              # LIBRARY (side-effect-free): exports createWikiMcp/main/types; config → createWikiMcp({ …, logger }) → start (stdio|http). No shebang, no self-exec guard.
         ├─ bin.ts               # bin entry: #!/usr/bin/env node; runs main() over stdio; holds the self-exec guard (kept out of the library so a host bundling wiki-mcp from source can't auto-boot a rogue server)
         ├─ config.ts            # namespace, stream baseUrl, db (pglite|pg), timeouts, injected Logger (§9)
-        ├─ engine.ts            # build the embedded IWiki (write side), hot-handle LRU, token surface
+        ├─ logger.ts            # the injected Logger interface + console/silent defaults (§9)
+        ├─ engine.ts            # build the embedded IWiki (write side), hot-handle LRU, token surface; rebind for ADR-M6
         ├─ readmodel/
         │   ├─ schema.ts        #   Kysely table types
         │   ├─ migrations/      #   Kysely migrations
-        │   ├─ store.ts         #   Kysely + dialect (PGlite | pg) wiring
+        │   ├─ store.ts         #   open + migrate the Kysely store (PGlite | pg)
+        │   ├─ pglite-dialect.ts #  hand-rolled Kysely dialect for PGlite
         │   ├─ project.ts       #   fold → serialize state → SQL (one txn/commit)
         │   └─ readmodel.ts     #   IReadModel: appliedToken / waitFor + typed queries
         ├─ models/
         │   ├─ registry.ts      #   live ModelRegistry: generation-counted, mutable page-type set (ADR-M6)
         │   └─ loader.ts        #   cache-busted dynamic import() of a model bundle (ADR-M6)
-        ├─ tail/projection.ts   # catalog + per-workspace tailers driving project.ts
+        ├─ tail/
+        │   ├─ projection.ts    #   catalog + per-workspace tailers driving project.ts (rebind/reproject, ADR-M6)
+        │   └─ engine-source.ts #   EventSource over the embedded engine — history() + subscribe()
         └─ mcp/
             ├─ tools.ts         #   command catalog + queries → MCP tools (from argsSchema)
             ├─ resources.ts     #   wiki:// resources from the read model
