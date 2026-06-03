@@ -135,6 +135,7 @@ describe("availableMutations() — FSM lifecycle ∪ mutableIn content per statu
     const { brief, plan, testPlan } = await freshBrief("Status building");
     await ws.mutate(brief, "beginPlanning", {});
     await ws.mutate(plan, "addStep", { text: "do the thing" });
+    await ws.mutate(plan, "addDataModel", { language: "ts", source: "export interface Thing {}" });
     await ws.mutate(testPlan, "addCase", { text: "verify the thing" });
     const { token } = await ws.mutate(brief, "beginImplementation", {});
     const view = await ws.page(brief, { consistentWith: token });
@@ -145,6 +146,7 @@ describe("availableMutations() — FSM lifecycle ∪ mutableIn content per statu
     const { brief, plan, testPlan } = await freshBrief("Status review");
     await ws.mutate(brief, "beginPlanning", {});
     await ws.mutate(plan, "addStep", { text: "step" });
+    await ws.mutate(plan, "addDataModel", { language: "ts", source: "export interface T {}" });
     await ws.mutate(testPlan, "addCase", { text: "case" });
     await ws.mutate(brief, "beginImplementation", {});
     const { token } = await ws.mutate(brief, "submitForReview", {});

@@ -64,6 +64,10 @@ async function buildBuildingBrief(
   // ── planning ──
   await ws.mutate(brief, "beginPlanning", {});
   await ws.mutate(plan, "addStep", { text: "Stream a ReadableStream from a new /export endpoint." });
+  await ws.mutate(plan, "addDataModel", {
+    language: "ts",
+    source: 'export interface ExportRequest {\n  format: "csv" | "json";\n}',
+  });
   await ws.mutate(testPlan, "addCase", { text: "10k-row export < 2s, memory flat." });
 
   // A planning-detail question moved off the brief onto the plan (atomic cross-page move).

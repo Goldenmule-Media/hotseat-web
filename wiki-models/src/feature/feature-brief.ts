@@ -42,6 +42,13 @@ const testPlanHasCase: Precondition = (page, related) => {
   return listElements(testPlan, "cases", "items").length >= 1 ? true : { unmet: "needs ≥1 testing-plan case" };
 };
 
+const planHasDataModel: Precondition = (page, related) => {
+  const plan = childOfType(related, related.self, "implementation-plan");
+  const f = plan?.sections.find((s) => s.key === "dataModels")?.fields["models"];
+  const n = f !== undefined && f.kind === "blocks" ? f.blocks.filter((b) => b.kind === "code").length : 0;
+  return n >= 1 ? true : { unmet: "needs ≥1 implementation-plan data-model/interface code block" };
+};
+
 const checklistComplete: Precondition = (page, related) => {
   const checklist = childOfType(related, related.self, "implementation-checklist");
   const tasks = listElements(checklist, "tasks", "items");
@@ -185,7 +192,7 @@ export const FeatureBrief = definePageType({
     beginImplementation: {
       args: zodSchema(empty),
       transition: { level: "page", event: "beginImplementation" },
-      preconditions: [planHasStep, testPlanHasCase],
+      preconditions: [planHasStep, planHasDataModel, testPlanHasCase],
     },
     submitForReview: { args: zodSchema(empty), transition: { level: "page", event: "submitForReview" } },
     reopenPlanning: { args: zodSchema(empty), transition: { level: "page", event: "reopenPlanning" } },

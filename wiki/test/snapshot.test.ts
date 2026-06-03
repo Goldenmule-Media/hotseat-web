@@ -73,6 +73,7 @@ describe("snapshot round-trip & fold equivalence", () => {
     })).value as { questionId: string };
     await ws.moveItem({ from: brief, to: plan, section: "questions", field: "items", itemId: q2 });
 
+    await ws.mutate(plan, "addDataModel", { language: "ts", source: "export interface Snapshotted {}" });
     await ws.mutate(brief, "beginImplementation", {});
     const { taskId } = (await ws.mutate(checklist, "addTask", {
       text: "Endpoint",

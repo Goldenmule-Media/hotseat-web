@@ -604,23 +604,16 @@ export class CommandBus {
 
   private commandResult(cmd: DeclarativeCommand, args: Record<string, unknown>, ops: readonly SectionOp[]): unknown {
     if (cmd.result === undefined) return undefined;
-    // Surface a created element id when the command added one.
-    const added = ops.find((o) => o.op === "addElement");
-    if (added !== undefined && added.op === "addElement") {
-      // try to satisfy common result shapes ({ <x>Id: id }).
-      const schema = cmd.result.toJsonSchema() as { properties?: Record<string, unknown> };
-      const props = Object.keys(schema.properties ?? {});
-      if (props.length === 1 && props[0]!.endsWith("Id")) {
-        return { [props[0]!]: added.id };
-      }
-    }
-    // echo an id arg if the result shape names one.
+    // A single `<x>Id` result shape is satisfied by a created element/block id, else an echoed arg.
     const schema = cmd.result.toJsonSchema() as { properties?: Record<string, unknown> };
     const props = Object.keys(schema.properties ?? {});
-    if (props.length === 1 && props[0]!.endsWith("Id")) {
-      const argKey = props[0]!;
-      if (args[argKey] !== undefined) return { [argKey]: args[argKey] };
-    }
+    const key = props.length === 1 && props[0]!.endsWith("Id") ? props[0]! : undefined;
+    if (key === undefined) return undefined;
+    const addedEl = ops.find((o) => o.op === "addElement");
+    if (addedEl !== undefined && addedEl.op === "addElement") return { [key]: addedEl.id };
+    const addedBlock = ops.find((o) => o.op === "addBlock");
+    if (addedBlock !== undefined && addedBlock.op === "addBlock") return { [key]: addedBlock.block.id };
+    if (args[key] !== undefined) return { [key]: args[key] };
     return undefined;
   }
 

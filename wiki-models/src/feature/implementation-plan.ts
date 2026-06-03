@@ -2,11 +2,21 @@
  * `implementation-plan` page type — declarative. An ordered plan of attack:
  * draft → ready, with `step` and `question` list elements.
  */
-import type { SectionOp } from "wiki/authoring";
+import type { BlockId, DeepReadonly, PageState, Precondition, SectionOp } from "wiki/authoring";
 import { arg, definePageType, t } from "wiki/authoring";
 import { z, zodSchema } from "wiki/authoring";
 
 const empty = z.object({});
+
+/** Count `code` blocks in the plan's "Data models & interfaces" section. */
+function dataModelCodeBlocks(page: DeepReadonly<PageState>): number {
+  const f = page.sections.find((s) => s.key === "dataModels")?.fields["models"];
+  return f !== undefined && f.kind === "blocks" ? f.blocks.filter((b) => b.kind === "code").length : 0;
+}
+
+/** A plan is not ready until it shows ≥1 major data model / interface as a code block. */
+const planHasDataModel: Precondition = (page) =>
+  dataModelCodeBlocks(page) >= 1 ? true : { unmet: "needs ≥1 data-model/interface code block" };
 
 export const ImplementationPlan = definePageType({
   type: "implementation-plan",
@@ -15,6 +25,12 @@ export const ImplementationPlan = definePageType({
   statusTransitions: [t("draft", "markReady", "ready")],
   sections: {
     steps: { name: "Steps", required: true, mutableIn: ["draft"], fields: { items: { kind: "list", element: "step", ordered: true } } },
+    dataModels: {
+      name: "Data models & interfaces",
+      required: true,
+      mutableIn: ["draft"],
+      fields: { models: { kind: "blocks" } },
+    },
     questions: {
       name: "Questions",
       required: true,
@@ -69,12 +85,46 @@ export const ImplementationPlan = definePageType({
       set: { answer: arg("answer") },
       transition: { level: "element", event: "answer" },
     },
-    markReady: { args: zodSchema(empty), transition: { level: "page", event: "markReady" } },
+    addDataModel: {
+      args: zodSchema(z.object({ language: z.string(), source: z.string() })),
+      result: zodSchema(z.object({ blockId: z.string() })),
+      target: { section: "dataModels", field: "models" },
+      produces: (_page, args, ctx) => {
+        const a = args as { language: string; source: string };
+        const id = ctx.newId() as BlockId;
+        return [
+          {
+            op: "addBlock",
+            section: "dataModels",
+            field: "models",
+            block: { kind: "code", id, lang: a.language, source: a.source, hash: "" },
+          },
+        ];
+      },
+    },
+    removeDataModel: {
+      args: zodSchema(z.object({ blockId: z.string() })),
+      target: { section: "dataModels", field: "models" },
+      produces: (_page, args) => [
+        {
+          op: "removeBlock",
+          section: "dataModels",
+          field: "models",
+          block: (args as { blockId: string }).blockId as BlockId,
+        },
+      ],
+    },
+    markReady: {
+      args: zodSchema(empty),
+      transition: { level: "page", event: "markReady" },
+      preconditions: [planHasDataModel],
+    },
   },
   render: {
     title: "{title}",
     sections: [
       { section: "steps", heading: "Steps", field: "items", as: "numbered", item: "{text}" },
+      { section: "dataModels", heading: "Data models & interfaces", field: "models", as: "blocks", placeholder: "_None yet._" },
       {
         section: "questions",
         heading: "Questions",

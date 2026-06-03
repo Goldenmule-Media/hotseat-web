@@ -165,7 +165,7 @@ describe("worked example: plan → build → ship a feature", () => {
     expect(elFieldValue(resolved[0]!, "answer")).toBe("CSV and JSON; Parquet later.");
   });
 
-  it("blocks beginImplementation (InvariantViolationError) until plan ≥1 step AND testing-plan ≥1 case", async () => {
+  it("blocks beginImplementation until plan ≥1 step + ≥1 data model AND testing-plan ≥1 case", async () => {
     const { token: planningToken } = await ws.mutate(brief, "beginPlanning", {});
     expect(await (await ws.page(brief, { consistentWith: planningToken })).status()).toBe(
       "planning",
@@ -184,15 +184,26 @@ describe("worked example: plan → build → ship a feature", () => {
       PreconditionUnmetError,
     );
 
-    // Add the second step and a test case — now both halves of the gate pass.
+    // Add the second step and a test case — two of the three gate halves now pass.
     await ws.mutate(plan, "addStep", { text: "Add `wiki export` CLI wrapping the endpoint." });
     const addCase = await ws.mutate(testPlan, "addCase", {
       text: "10k-row export < 2s, memory flat.",
     });
     c1 = (addCase.value as { caseId: string }).caseId;
 
+    // ...but the plan shows no data model / interface yet → the gate STILL fails.
+    await expect(ws.mutate(brief, "beginImplementation", {})).rejects.toBeInstanceOf(
+      PreconditionUnmetError,
+    );
+
+    // Show a major data model as a code block → the final half of the gate passes.
+    const addModel = await ws.mutate(plan, "addDataModel", {
+      language: "ts",
+      source: 'export interface ExportRequest {\n  format: "csv" | "json";\n}',
+    });
+
     // The brief is still in planning (the failed attempts did not transition it).
-    expect(await (await ws.page(brief, { consistentWith: addCase.token })).status()).toBe(
+    expect(await (await ws.page(brief, { consistentWith: addModel.token })).status()).toBe(
       "planning",
     );
   });
