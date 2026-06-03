@@ -609,9 +609,11 @@ export interface SectionRender {
   readonly placeholder?: string;
   /** Which field of the section to render as the body. */
   readonly field?: string;
-  readonly as?: "block" | "inline" | "fenced" | "link" | "bullets" | "numbered" | "table" | "blocks";
+  readonly as?: "block" | "inline" | "fenced" | "link" | "bullets" | "numbered" | "table" | "blocks" | "checklist";
   /** Element template, e.g. "{text}" / "{field?}". */
   readonly item?: string;
+  /** For `as: "checklist"`: the element status value that renders a checked box `[x]` (else `[ ]`). */
+  readonly checkedWhen?: string;
   readonly groupBy?: string;
   readonly groups?: readonly { when: string; heading?: string; item: string }[];
 }

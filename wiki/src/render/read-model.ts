@@ -110,8 +110,16 @@ function renderListField(
     return blocks.join("\n\n");
   }
   const template = sr.item ?? "{text}";
+  if (f.elements.length === 0) return placeholder();
+  if (sr.as === "checklist") {
+    // Declarative status→checkbox glyph (no logic): `[x]` when status === checkedWhen, else `[ ]`.
+    return bulletList(
+      f.elements.map(
+        (el) => `[${el.status === sr.checkedWhen ? "x" : " "}] ${fillTemplate(template, el, label)}`,
+      ),
+    );
+  }
   const items = f.elements.map((el) => fillTemplate(template, el, label));
-  if (items.length === 0) return placeholder();
   if (sr.as === "numbered") return numbered(items);
   return bulletList(items);
 }

@@ -219,3 +219,35 @@ describe("workspace render — deterministic tree", () => {
     expect(a).toContain("Testing plan (testing-plan, draft)");
   });
 });
+
+describe("implementation-checklist render — GitHub-style task checkboxes", () => {
+  let tw: ITestWiki;
+  let ws: IWorkspaceHandle;
+  let checklist: PageId;
+  let token: string;
+
+  beforeAll(async () => {
+    tw = await createTestWiki(featurePageTypes);
+    ws = await tw.wiki.createWorkspace({ name: "Acme platform" });
+    ({ checklist } = await buildBuildingBrief(ws));
+    const a = (await ws.mutate(checklist, "addTask", { text: "Wire the export endpoint" })).value as {
+      taskId: string;
+    };
+    await ws.mutate(checklist, "addTask", { text: "Add the CLI flag" });
+    ({ token } = await ws.mutate(checklist, "checkTask", { taskId: a.taskId }));
+  });
+
+  afterAll(async () => {
+    await tw.stop();
+  });
+
+  it("renders tasks as `- [x]` / `- [ ]` under ## Tasks, with no graph sections", async () => {
+    const md = await ws.toMarkdown(checklist, { consistentWith: token });
+    expect(md).toContain("## Tasks");
+    expect(md).toContain("- [x] Wire the export endpoint");
+    expect(md).toContain("- [ ] Add the CLI flag");
+    // graphSections: false ⇒ no References / Child pages on a checklist page.
+    expect(md).not.toContain("## References");
+    expect(md).not.toContain("## Child pages");
+  });
+});

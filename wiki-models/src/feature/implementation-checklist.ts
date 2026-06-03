@@ -55,17 +55,9 @@ export const ImplementationChecklist = definePageType({
   },
   render: {
     title: "{title}",
+    graphSections: false,
     sections: [
-      {
-        section: "tasks",
-        heading: "Tasks",
-        field: "items",
-        groupBy: "status",
-        groups: [
-          { when: "todo", heading: "To do", item: "{text}" },
-          { when: "done", heading: "Done", item: "{text}" },
-        ],
-      },
+      { section: "tasks", heading: "Tasks", field: "items", as: "checklist", checkedWhen: "done", item: "{text}" },
     ],
   },
 });
