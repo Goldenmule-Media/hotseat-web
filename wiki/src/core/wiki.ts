@@ -36,7 +36,7 @@ import type {
   WorkspaceStatus,
 } from "../api";
 import { ROOT } from "../api";
-import { renderPage, renderWorkspace } from "../render/markdown";
+import { renderPage, renderWorkspace } from "../render/read-model";
 import { EventLog } from "../stores/event-log";
 import { CommandBus, type BusProjection, type CommandBusConfig, type CommitOutcome } from "./command-bus";
 import { PageNotFoundError, WorkspaceNotFoundError } from "./errors";
@@ -396,7 +396,8 @@ class WorkspaceHandle implements IWorkspaceHandle {
   async moveItem(input: {
     from: PageId;
     to: PageId;
-    itemType: string;
+    section: string;
+    field: string;
     itemId: string;
   }): Promise<Committed<void>> {
     return this.structural("moveItem", input) as Promise<Committed<void>>;
@@ -577,7 +578,29 @@ class PageView implements IPageView {
   async availableMutations(opts?: IReadOpts): Promise<readonly string[]> {
     await this.handle.awaitConsistency(opts);
     const node = this.handle.nodeOf(this.id);
-    return this.handle.registryRef().pageGuard(node.type).available(node.status);
+    const registry = this.handle.registryRef();
+    const def = registry.page(node.type);
+    const guard = registry.pageGuard(node.type);
+    const decls = registry.sectionDeclsOf(node.type);
+    const mutableNow = (sectionKey: string): boolean => {
+      const sd = decls[sectionKey];
+      return sd?.mutableIn === undefined || sd.mutableIn.includes(node.status);
+    };
+
+    const out: string[] = [];
+    for (const [name, cmd] of Object.entries(def.commands)) {
+      if (cmd.transition?.level === "page") {
+        if (guard.can(node.status, name)) out.push(name);
+      } else if (cmd.target?.section !== undefined) {
+        if (mutableNow(cmd.target.section)) out.push(name);
+      } else {
+        out.push(name);
+      }
+    }
+    for (const [name, gen] of registry.generatedCommands(node.type)) {
+      if (mutableNow(gen.section)) out.push(name);
+    }
+    return out;
   }
 
   async describeMutations(opts?: IReadOpts): Promise<readonly IMutationDescriptor[]> {
@@ -586,19 +609,39 @@ class PageView implements IPageView {
     const registry = this.handle.registryRef();
     const def = registry.page(node.type);
     const guard = registry.pageGuard(node.type);
-    const available = new Set(guard.available(node.status));
+    const decls = registry.sectionDeclsOf(node.type);
+    const mutableNow = (sectionKey: string): boolean => {
+      const sd = decls[sectionKey];
+      return sd?.mutableIn === undefined || sd.mutableIn.includes(node.status);
+    };
 
     const descriptors: IMutationDescriptor[] = [];
     for (const [name, cmd] of Object.entries(def.commands)) {
-      const meta = guard.meta(node.status, name);
+      const available =
+        cmd.transition?.level === "page"
+          ? guard.can(node.status, name)
+          : cmd.target?.section !== undefined
+            ? mutableNow(cmd.target.section)
+            : true;
       const descriptor: IMutationDescriptor = {
         name,
         argsSchema: cmd.args.toJsonSchema(),
-        available: available.has(name),
+        available,
         ...(cmd.result !== undefined ? { resultSchema: cmd.result.toJsonSchema() } : {}),
-        ...(meta?.description !== undefined ? { description: meta.description } : {}),
+        ...(cmd.description !== undefined ? { description: cmd.description } : {}),
+        ...(cmd.target !== undefined
+          ? { target: { section: cmd.target.section, ...(cmd.target.field !== undefined ? { field: cmd.target.field } : {}) } }
+          : {}),
       };
       descriptors.push(descriptor);
+    }
+    for (const [name, gen] of registry.generatedCommands(node.type)) {
+      descriptors.push({
+        name,
+        argsSchema: {},
+        available: mutableNow(gen.section),
+        target: { section: gen.section, field: gen.field },
+      });
     }
     return descriptors;
   }

@@ -71,7 +71,7 @@ describe("snapshot round-trip & fold equivalence", () => {
     const { questionId: q2 } = (await ws.mutate(brief, "askQuestion", {
       text: "Page size?",
     })).value as { questionId: string };
-    await ws.moveItem({ from: brief, to: plan, itemType: "question", itemId: q2 });
+    await ws.moveItem({ from: brief, to: plan, section: "questions", field: "items", itemId: q2 });
 
     await ws.mutate(brief, "beginImplementation", {});
     const { taskId } = (await ws.mutate(checklist, "addTask", {

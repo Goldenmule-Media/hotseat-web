@@ -25,8 +25,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("parent_id", "text")
     .addColumn("title", "text", (col) => col.notNull())
     .addColumn("status", "text", (col) => col.notNull())
-    .addColumn("fields", sql`jsonb`, (col) => col.notNull())
-    .addColumn("items", sql`jsonb`, (col) => col.notNull())
+    .addColumn("sections", sql`jsonb`, (col) => col.notNull())
     .addColumn("created_at", "text", (col) => col.notNull())
     .addColumn("updated_at", "text", (col) => col.notNull())
     .execute();

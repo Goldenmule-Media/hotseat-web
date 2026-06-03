@@ -1,47 +1,39 @@
 /**
- * Authoring helpers (DESIGN §10.5 / BUILD_NOTES §8).
- *
- * `definePageType` / `defineItemType` wrap a plain spec into the opaque
- * registration object the registry consumes (`{ __def }`). They perform light
- * shape validation only — the heavy lifting (FSM guard, Zod arg-validation) is
- * done at registry build / command time. `t` is re-exported so page authors
- * can build transition tables without reaching into `core/guard`.
+ * Authoring helper (structured-content §9). `definePageType` wraps a declarative
+ * page-type spec into the opaque registration object the registry consumes
+ * (`{ __def }`). It performs light shape validation only — the heavy lifting
+ * (declaration validation, FSM guard, Zod arg-validation) is done at registry
+ * build / command time. `t` is re-exported so authors can build transition tables.
  */
-import type {
-  CommandMap,
-  DomainEvent,
-  IItemType,
-  IItemTypeDef,
-  IPageType,
-  IPageTypeDef,
-} from "../api";
+import type { IPageType, IPageTypeDef } from "../api";
 import { ValidationError } from "./errors";
 
 export { t } from "./guard";
 
 /** Wrap a page-type spec into its opaque registration object. */
-export function definePageType<
-  State = unknown,
-  Status extends string = string,
-  Cmds extends CommandMap = CommandMap,
-  Ev extends DomainEvent = DomainEvent,
->(def: IPageTypeDef<State, Status, Cmds, Ev>): IPageType<State, Status, Cmds, Ev> {
+export function definePageType<Status extends string = string>(
+  def: IPageTypeDef<Status>,
+): IPageType<Status> {
+  const issues: { path: (string | number)[]; message: string }[] = [];
   if (typeof def.type !== "string" || def.type.length === 0) {
-    throw new ValidationError("definePageType: `type` must be a non-empty string.", [
-      { path: ["type"], message: "required non-empty string" },
-    ]);
+    issues.push({ path: ["type"], message: "required non-empty string" });
+  }
+  if (def.sections === undefined || typeof def.sections !== "object") {
+    issues.push({ path: ["sections"], message: "required section declarations" });
+  }
+  if (def.commands === undefined || typeof def.commands !== "object") {
+    issues.push({ path: ["commands"], message: "required command declarations" });
+  }
+  if (def.render === undefined || typeof def.render !== "object") {
+    issues.push({ path: ["render"], message: "required render config" });
+  }
+  if (issues.length > 0) {
+    throw new ValidationError("definePageType: invalid page type spec.", issues);
   }
   return { __def: def };
 }
 
-/** Wrap an item-type spec into its opaque registration object. */
-export function defineItemType<Status extends string = never>(
-  def: IItemTypeDef<Status>,
-): IItemType<Status> {
-  if (typeof def.type !== "string" || def.type.length === 0) {
-    throw new ValidationError("defineItemType: `type` must be a non-empty string.", [
-      { path: ["type"], message: "required non-empty string" },
-    ]);
-  }
-  return { __def: def };
+/** `arg("name")` sugar — maps a command arg to a field value (§9.8). */
+export function arg(name: string): { readonly __arg: string } {
+  return { __arg: name };
 }

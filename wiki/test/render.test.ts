@@ -70,7 +70,7 @@ async function buildBuildingBrief(
   const { questionId: q2 } = (await ws.mutate(brief, "askQuestion", {
     text: "Page size while streaming?",
   })).value as { questionId: string };
-  await ws.moveItem({ from: brief, to: plan, itemType: "question", itemId: q2 });
+  await ws.moveItem({ from: brief, to: plan, section: "questions", field: "items", itemId: q2 });
 
   // ── implementation (gated) ──
   await ws.mutate(brief, "beginImplementation", {});

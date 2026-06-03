@@ -30,9 +30,6 @@ export type JsonValue =
  */
 export type JsonObject = { [key: string]: JsonValue } | JsonValue[] | null;
 
-/** `{ component: [...], question: [...], commit: [...] }` — items keyed by item type. */
-export type ItemsJson = Record<string, Array<Record<string, unknown>>>;
-
 /**
  * `workspaces(id PK, name, status, updated_at)`. The applied version lives in
  * {@link ProjectionOffsetsTable}, so it is intentionally absent here.
@@ -45,8 +42,9 @@ export interface WorkspacesTable {
 }
 
 /**
- * `pages(id PK, workspace_id FK, type, parent_id, title, status, fields JSONB,
- * items JSONB, created_at, updated_at)`.
+ * `pages(id PK, workspace_id FK, type, parent_id, title, status, sections JSONB,
+ * created_at, updated_at)`. Content is the typed section tree (§2), serialized to
+ * a single `sections` JSONB column.
  */
 export interface PagesTable {
   id: string;
@@ -55,12 +53,52 @@ export interface PagesTable {
   parent_id: string | null;
   title: string;
   status: string;
-  /** The page type's typed `fields` (opaque to the read model). */
-  fields: JSONColumnType<JsonObject>;
-  /** e.g. `{ question: [...], task: [...] }`. */
-  items: JSONColumnType<ItemsJson>;
+  /** The page's typed section tree (`node.sections`), serialized to jsonb. */
+  sections: JSONColumnType<JsonObject>;
   created_at: string;
   updated_at: string;
+}
+
+/** `outline(workspace_id, page_id, section_id, parent_section_id, key, name, ord)` (§11). */
+export interface OutlineTable {
+  workspace_id: string;
+  page_id: string;
+  section_id: string;
+  parent_section_id: string | null;
+  key: string;
+  name: string;
+  ord: number;
+}
+
+/**
+ * `symbol_index(...)` — a STUB (§11/§12): one row per `code` field/block with its
+ * canonical source location + hash. `name`/`kind`/`range` are filled in Phase 3 by
+ * the LanguageRegistry; null in Phase 1 (no parser).
+ */
+export interface SymbolIndexTable {
+  workspace_id: string;
+  page_id: string;
+  section_id: string;
+  field: string;
+  block_id: string | null;
+  lang: string;
+  source_hash: string;
+  name: string | null;
+  kind: string | null;
+  range: string | null;
+}
+
+/** `xref_index(...)` — every `ref` field and inline `ref`, harvested deep (§7). */
+export interface XrefIndexTable {
+  workspace_id: string;
+  from_page: string;
+  from_section: string;
+  from_field: string;
+  target_kind: string;
+  target_page: string | null;
+  target_section: string | null;
+  target_block: string | null;
+  target_name: string | null;
 }
 
 /** `tree_edges(workspace_id, parent_id, child_id, ord)` — ordered children. */
@@ -112,6 +150,9 @@ export interface ReadModelDatabase {
   links: LinksTable;
   events: EventsTable;
   projection_offsets: ProjectionOffsetsTable;
+  outline: OutlineTable;
+  symbol_index: SymbolIndexTable;
+  xref_index: XrefIndexTable;
 }
 
 /** Convenience: a column that is text both in and out (no JSON parsing). */

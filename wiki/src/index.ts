@@ -46,10 +46,23 @@ export type {
   DomainEvent,
   // workspace aggregate state
   WorkspaceStatus,
-  IItemRecord,
   IPageNode,
   IWorkspaceState,
   PageState,
+  // content tree (§2, §3)
+  SectionId,
+  BlockId,
+  ISection,
+  IField,
+  FieldKind,
+  RefTarget,
+  IItem,
+  IBlock,
+  IInline,
+  Mark,
+  SectionOp,
+  SectionOpsAppliedPayload,
+  TextEdit,
   // entry point & configuration
   IStreamConfig,
   IWikiConfig,
@@ -76,16 +89,23 @@ export type {
   ICommandContext,
   IRelatedReader,
   IRenderCtx,
-  ICommandDef,
-  CommandMap,
+  FieldDecl,
+  SectionDecl,
+  ElementDecl,
+  SectionSetContract,
+  ArgRef,
+  FieldValueSpec,
+  Precondition,
+  DeclarativeCommand,
+  DeclarativeCommandMap,
+  RenderConfig,
+  SectionRender,
   IPageTypeDef,
-  IItemTypeDef,
   IPageType,
-  IItemType,
 } from "./api";
 
 // ── authoring helpers ─────────────────────────────────────────────────────────
-export { definePageType, defineItemType } from "./core/define";
+export { definePageType, arg } from "./core/define";
 
 // ── FSM guard helpers ─────────────────────────────────────────────────────────
 export { t, makeGuard, renderMermaid } from "./core/guard";
@@ -108,6 +128,13 @@ export {
   InvariantViolationError,
   UnknownPageTypeError,
   ConsistencyTimeoutError,
+  SectionNotFoundError,
+  DuplicateSectionKeyError,
+  SectionContractError,
+  FieldKindError,
+  RefIntegrityError,
+  BlockNormalFormError,
+  PreconditionUnmetError,
 } from "./core/errors";
 export type { SchemaIssue } from "./core/errors";
 

@@ -14,8 +14,9 @@
 import {
   ROOT,
   type DomainEvent,
+  type IField,
+  type IItem,
   type IPageNode,
-  type IItemRecord,
   type IWorkspaceState,
   type PageId,
   type RootId,
@@ -29,6 +30,7 @@ import {
   PageNotFoundError,
   ParentNotFoundError,
 } from "./errors";
+import { SECTION_OPS_EVENT } from "./workspace";
 import type { Registry } from "./registry";
 import type { Services } from "./types";
 
@@ -360,16 +362,17 @@ export const unlink: StructureHandler = (state, args) => {
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
- * Move an item (by id) of `itemType` from one page to another, atomically. The
- * item must exist on `from` (else {@link ItemNotFoundError}). Emits a generic
- * `ItemRemoved{pageId:from,itemType,item}` + `ItemAdded{pageId:to,itemType,item}`
- * in ONE batch so the move is all-or-nothing (BUILD_NOTES §5).
+ * Move a list element (by id) from one page's `(section, field)` list to another's,
+ * atomically. The element must exist on `from` (else {@link ItemNotFoundError}).
+ * Emits one `SectionOpsApplied{removeElement}` on `from` + one
+ * `SectionOpsApplied{addElement}` on `to` in ONE batch (§2.3).
  */
 export const moveItem: StructureHandler = (state, args) => {
-  const { from, to, itemType, itemId } = args as {
+  const { from, to, section, field, itemId } = args as {
     from: PageId;
     to: PageId;
-    itemType: string;
+    section: string;
+    field: string;
     itemId: string;
   };
 
@@ -378,17 +381,28 @@ export const moveItem: StructureHandler = (state, args) => {
   assertPageActive(fromNode);
   assertPageActive(toNode);
 
-  const bucket: IItemRecord[] = fromNode.items[itemType] ?? [];
-  const item = bucket.find((i) => i.id === itemId);
-  if (item === undefined) throw new ItemNotFoundError(itemType, itemId);
+  const fromSec = fromNode.sections.find((s) => s.key === section);
+  const listField: IField | undefined = fromSec?.fields[field];
+  const moved: IItem | undefined =
+    listField !== undefined && listField.kind === "list"
+      ? listField.elements.find((e) => e.id === itemId)
+      : undefined;
+  if (moved === undefined) throw new ItemNotFoundError(`${section}.${field}`, itemId);
 
-  // Carry the full item record across so status/typed fields are preserved.
-  const moved: IItemRecord = { ...item };
+  const added = {
+    op: "addElement" as const,
+    section,
+    field,
+    id: moved.id,
+    fields: structuredClone(moved.fields),
+    ...(moved.status !== undefined ? { status: moved.status } : {}),
+    ...(moved.meta !== undefined ? { meta: structuredClone(moved.meta) } : {}),
+  };
 
   return {
     events: [
-      { type: "ItemRemoved", pageId: from, payload: { itemType, item: moved } },
-      { type: "ItemAdded", pageId: to, payload: { itemType, item: moved } },
+      { type: SECTION_OPS_EVENT, pageId: from, payload: { ops: [{ op: "removeElement", section, field, id: itemId }] } },
+      { type: SECTION_OPS_EVENT, pageId: to, payload: { ops: [added] } },
     ],
   };
 };

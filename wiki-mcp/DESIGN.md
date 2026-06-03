@@ -19,14 +19,16 @@
 3. [The core CQRS contract (engine-level)](#3-the-core-cqrs-contract-engine-level)
 4. [Architecture](#4-architecture)
 5. [The SQL read model (Kysely · PGlite/pg)](#5-the-sql-read-model-kysely--pglitepg)
-6. [The MCP server & token management](#6-the-mcp-server--token-management)
-7. [Staying hydrated (the runtime)](#7-staying-hydrated-the-runtime)
-8. [wiki-server integration](#8-wiki-server-integration)
-9. [Failure & operational concerns](#9-failure--operational-concerns)
-10. [Package structure](#10-package-structure)
-11. [Testing strategy](#11-testing-strategy)
-12. [Future work](#12-future-work)
-13. [References](#13-references)
+6. [Derived projections (outline · symbols · cross-references)](#6-derived-projections-outline--symbols--cross-references)
+7. [The LanguageRegistry (runtime analyzer plugins)](#7-the-languageregistry-runtime-analyzer-plugins)
+8. [The MCP server & token management](#8-the-mcp-server--token-management)
+9. [Staying hydrated (the runtime)](#9-staying-hydrated-the-runtime)
+10. [wiki-server integration](#10-wiki-server-integration)
+11. [Failure & operational concerns](#11-failure--operational-concerns)
+12. [Package structure](#12-package-structure)
+13. [Testing strategy](#13-testing-strategy)
+14. [Future work](#14-future-work)
+15. [References](#15-references)
 - [Appendix A: Decision records](#appendix-a-decision-records)
 
 ---
@@ -47,14 +49,14 @@ and **manages the tokens** so MCP reads always reflect the caller's own prior MC
 ### Goals
 
 - **G1 — Stay hydrated.** A long-lived process: hot write-side handles (live tail, no per-call refold)
-  and an always-current read model. Reads never re-fold history ([§7](#7-staying-hydrated-the-runtime)).
+  and an always-current read model. Reads never re-fold history ([§9](#9-staying-hydrated-the-runtime)).
 - **G2 — Strict CQRS with tokens, in the core.** Write/read separation + eventual consistency are an
   **engine** contract: writes return a token, reads optionally wait on it ([§3](#3-the-core-cqrs-contract-engine-level)).
 - **G3 — A durable SQL read model.** Projections in Postgres via **Kysely** — **PGlite** locally,
   **pg** in production (same SQL, dev/prod parity). Survives restart; resumes without re-folding from
   zero ([§5](#5-the-sql-read-model-kysely--pglitepg)).
 - **G4 — An MCP surface.** The engine's command catalog → MCP **tools** (it is LLM-first by design,
-  [wiki/DESIGN.md §12](../wiki/DESIGN.md)); workspaces/pages → MCP **resources** ([§6](#6-the-mcp-server--token-management)).
+  [wiki/DESIGN.md §12](../wiki/DESIGN.md)); workspaces/pages → MCP **resources** ([§8](#8-the-mcp-server--token-management)).
 - **G5 — Automatic read-your-writes.** The MCP server tracks each session's tokens and threads them
   into reads, so an agent's reads always reflect its own writes — without the agent managing tokens.
 - **G6 — Clean layering.** Engine contract (core) ⟂ read model (SQL) ⟂ MCP surface — each replaceable.
@@ -138,14 +140,14 @@ read(query, { consistentWith?: ConsistencyToken; timeoutMs?: number })
 
 This is the whole CQRS bargain: **fast writes, eventually-consistent reads, and a token to convert
 "eventual" into "after my write" on demand.** A `waitFor` that times out surfaces a typed error so the
-caller can retry or read stale-with-a-flag ([§9](#9-failure--operational-concerns)).
+caller can retry or read stale-with-a-flag ([§11](#11-failure--operational-concerns)).
 
 **Undiscovered workspaces & halts.** `waitFor(token)` must not depend on the read model having already
 *discovered* the token's workspace — the namespace catalog is only eventually consistent
 ([wiki/DESIGN.md §9.3](../wiki/DESIGN.md)), so a just-created workspace's first token can arrive before its
 tailer exists. `waitFor` therefore **lazily ensures a tail** for the referenced workspace (opening one
 directly) rather than waiting on catalog discovery, and `appliedToken` of an unknown workspace is the zero
-token. If a workspace's projection has **halted** ([§9](#9-failure--operational-concerns)), `waitFor`
+token. If a workspace's projection has **halted** ([§11](#11-failure--operational-concerns)), `waitFor`
 **rejects with a non-retryable error** instead of blocking to the timeout.
 
 ### 3.4 The default read model (engine-internal)
@@ -172,13 +174,19 @@ that same seam ([§5](#5-the-sql-read-model-kysely--pglitepg)).
    │  embedded `wiki` engine            SQL READ MODEL (IReadModel, §5)                │
    │  (WRITE side: hot handles,          ├─ Kysely → PGlite (local) | pg (prod)        │
    │   validate → append, returns ──┐    ├─ appliedToken / waitFor                     │
-   │   a token §3.2)                │    └─ queries: page, tree, render, search,       │
-   │      │ append                  │        "open questions" across workspaces        │
+   │   a token §3.2)                │    ├─ section tree + typed fields + blocks (jsonb)│
+   │      │ append                  │    └─ queries: page, tree, render, search,       │
+   │      ▼                         │        "open questions" across workspaces        │
+   │      │                         │   DERIVED PROJECTIONS (§6, same tailer):         │
+   │      │                         │    ├─ outline (section tree)                     │
+   │      │                         │    ├─ symbol index (code fields + code blocks)   │
+   │      │                         │    └─ cross-reference index (ref fields + spans) │
+   │      │                         │   LanguageRegistry (§7): per-language analyzers  │
    │      ▼                         │                    ▲                             │
    │  ════ workspace streams ═══════╪════════════════════╪═══ projection tailer ═══════│
    │       (Durable Streams)        └── token (version) ──┘   (live tail → apply → SQL) │
    └──────────────────────────────────────────────────────────────────────────────────┘
-        ▲ append/read over @durable-streams/client          (wiki-server hosts both, §8)
+        ▲ append/read over @durable-streams/client         (wiki-server hosts both, §10)
    ┌────┴───────────────────────┐
    │ wiki-server (stream host)   │
    └─────────────────────────────┘
@@ -189,8 +197,8 @@ tailer** later reads `version N` off the stream and applies it to SQL, advancing
 a `waitFor(N)` resolves exactly then.
 
 **Dependency direction:** `wiki-mcp` → `wiki` (engine, library), **Kysely**, **PGlite**/**pg**, and an
-**MCP SDK** — all *new* dependencies ([§10](#10-package-structure)). `wiki-server` → `wiki-mcp` (hosts it,
-[§8](#8-wiki-server-integration)).
+**MCP SDK** — all *new* dependencies ([§12](#12-package-structure)). `wiki-server` → `wiki-mcp` (hosts it,
+[§10](#10-wiki-server-integration)).
 
 ---
 
@@ -204,46 +212,75 @@ A **projection service** owns the SQL read model and implements `IReadModel` ([�
   workspaces; for each, hold a live tail of its stream ([wiki/DESIGN.md §8.4](../wiki/DESIGN.md)).
 - **Apply = fold then serialize.** For each commit (an ordered event batch), fold it with the engine's
   **reducer** to the resulting `IWorkspaceState`, then **serialize that state into SQL** ([ADR-M3](#adr-m3--projection--engine-fold--serialize-to-sql-2026-06-02)).
-  Reusing the fold means the read model can never *semantically* diverge from the write model (same
-  upcasting, same unknown-type policy) — the only mapping we own is state→rows. **This requires the engine
-  to expose a *public, pure* fold** (`foldWorkspace`/`applyWorkspace` are internal today —
+  In the section model a commit is an array of **section operations** ([structured-content §9.4](../docs/structured-content.md))
+  — `setField` / `addSection` / `addBlock` / `setBlock` / `addElement` / `applyTextEdits` / `setMeta` /
+  `transition` — folded by the engine's **one built-in section reducer**; there are no per-type events or
+  author reducers to special-case. Reusing the fold means the read model can never *semantically* diverge
+  from the write model (same upcasting, same unknown-type policy, same `reduceMeta` hook —
+  [structured-content §9.5](../docs/structured-content.md)) — the only mapping we own is state→rows. **This
+  requires the engine to expose a *public, pure* fold** (`foldWorkspace`/`applyWorkspace` are internal today —
   [wiki/DESIGN.md §16.1](../wiki/DESIGN.md)); exporting a read-only fold for external read models is part of
   the coordinated engine changes.
 - **Atomic per commit.** Each commit's row writes **and** the new `applied version` for that workspace are
-  written in **one SQL transaction**, so `appliedToken` never reports ahead of the data.
+  written in **one SQL transaction**, so `appliedToken` never reports ahead of the data. The derived
+  projections (§6) — outline, symbol index, cross-reference index — are recomputed from the **same folded
+  state** in the **same transaction**, so they never lead or lag the base rows.
 - **Idempotent + resumable.** `projection_offsets` stores, per workspace, the applied `version` and the
   Durable Streams resume cursor. On restart, resume each tail from the cursor and **skip events with
   `version ≤ applied`** — no re-fold from zero ([wiki/DESIGN.md §8.3](../wiki/DESIGN.md)). The stream
   remains the source of truth; SQL is a rebuildable cache.
 
-### 5.2 Schema (core tables + JSONB)
+### 5.2 Schema (the section tree + typed fields + JSONB)
 
-One schema serves **every** page type — the engine's types are pluggable, so type-specific data lives in
-**JSONB**, queryable with Postgres JSON operators ([ADR-M2](#adr-m2--sql-read-model-via-kysely-pglite-local-pg-prod-2026-06-02)):
+One schema serves **every** page type — the engine's types are pluggable, and the content model is now a
+**tree of typed sections** ([structured-content §2](../docs/structured-content.md)) rather than flat
+`fields`/`items` containers. There is no longer a `fields JSONB` + `items JSONB` pair per page; instead the
+section tree is materialized one row per section, each section's ordered **typed fields** living in JSONB
+keyed by `fieldKey`, with the field-kind tag preserved so a query can discriminate `scalar` / `prose` /
+`code` / `attachment-ref` / `ref` / `blocks` / `list` ([structured-content §3](../docs/structured-content.md)).
+Type-specific shape stays in **JSONB**, queryable with Postgres JSON operators
+([ADR-M2](#adr-m2--sql-read-model-via-kysely-pglite-local-pg-prod-2026-06-02)):
 
 ```sql
 workspaces(id PK, name, status, updated_at)                       -- applied position lives in projection_offsets (one source of truth)
 pages(id PK, workspace_id FK, type, parent_id, title, status,
-      fields JSONB, items JSONB, created_at, updated_at)          -- items e.g. {question:[...],task:[...]}
-tree_edges(workspace_id, parent_id, child_id, ord)                -- ordered children
+      created_at, updated_at)                                     -- page-level only; content lives in sections
+sections(id PK, workspace_id FK, page_id FK, parent_id,           -- the intra-page section tree (§2 nests)
+         key, name, ord,                                          -- key: stable, model-declared; ord: explicit order
+         fields JSONB, meta JSONB)                                -- fields keyed by fieldKey, each {kind, …}; meta bag (§9.5)
+tree_edges(workspace_id, parent_id, child_id, ord)                -- ordered page children (workspace tree)
 links(workspace_id, from_id, to_id, role)
-events(workspace_id, version, type, page_id, payload JSONB, occurred_at)   -- the log, queryable
+events(workspace_id, version, type, page_id, command, payload JSONB, occurred_at)  -- the log; `command` is the originating command recorded in metadata (§9.4)
 projection_offsets(workspace_id PK, applied_version, cursor, fingerprint)  -- resume + IReadModel
 ```
+
+- **Sections, not fields/items.** A `list` field's elements (items) live **inside** that field's JSONB
+  (`{ kind: "list", elementType, elements: [...] }`), so a `question` element keeps its `id`, optional
+  status, fields, and meta in one place; there is no separate `items` table. A `blocks` field's block/inline
+  tree lives in the **same** field JSONB (`{ kind: "blocks", blocks: [...] }`) as a typed,
+  `structuredClone`-/`jsonb`-safe tree ([structured-content §3.1](../docs/structured-content.md)) — never an
+  opaque Markdown blob. Both fold deterministically (explicit array order, stable injected ids), so the
+  serialized JSONB is byte-stable for equal state.
+- **The section tree is queryable.** `sections.parent_id` + `ord` materialize the intra-page tree directly
+  (the §6 outline is read straight off it); `(page_id, key)` is unique per page, so a `(sectionKey, fieldKey)`
+  address resolves with one indexed lookup.
+- **No render column.** Markdown is itself a read model now ([structured-content §8](../docs/structured-content.md))
+  — the configurable Markdown render read model, a sibling of this SQL one — so `renderPage` is served by that
+  projection from folded state + the model's static render config, not from a stored string.
 
 `waitFor({ws, version})` resolves when `projection_offsets.applied_version ≥ version` (the load-bearing
 semantic). In every v1 topology the tailer that writes SQL and the reader that serves `waitFor` share one
 process and DB, so an **in-process notify-on-commit** wakes waiters with a short **poll** as backstop;
 cross-process `LISTEN/NOTIFY` is reserved for a future multi-process `pg` topology (PGlite has no
 cross-process notify) — a build-time detail. Typed cross-workspace query tables (e.g. `open_questions`)
-are an opt-in **hybrid** extension maintained by registered projectors ([§12](#12-future-work)) — the
+are an opt-in **hybrid** extension maintained by registered projectors ([§14](#14-future-work)) — the
 core+JSONB layer needs none to function.
 
 ### 5.3 PGlite local, Postgres prod
 
 Kysely speaks the **Postgres dialect** to both, so SQL is the same across environments — close to
 drift-free, though PGlite and a Postgres server aren't byte-identical, so a `pg` smoke subset guards the
-gap ([§11](#11-testing-strategy)). **PGlite** ([@electric-sql/pglite](https://pglite.dev)) is embedded Postgres-in-process — zero
+gap ([§13](#13-testing-strategy)). **PGlite** ([@electric-sql/pglite](https://pglite.dev)) is embedded Postgres-in-process — zero
 infra for dev/test/single-node, persisting to a data dir (or memory for tests). **pg** is a real
 Postgres for production. The choice is one config knob, mirroring `wiki-server`'s file/managed tiers and
 completing the **ElectricSQL** stack (Durable Streams + PGlite). Schema changes ship as **Kysely
@@ -252,31 +289,162 @@ rebuild-from-stream when it changes.
 
 ---
 
-## 6. The MCP server & token management
+## 6. Derived projections (outline · symbols · cross-references)
+
+The section model makes content **first-class, uniform, and introspectable**
+([structured-content §1](../docs/structured-content.md)), so deterministic, language-aware tooling lives
+**here in the host as read-side projections** over canonical content
+([structured-content §11](../docs/structured-content.md)), fed by the **same projection tailer** as the SQL
+read model (§5.1). Each is a pure function of the **folded state** for a commit, recomputed and written in
+the **same per-commit transaction** (§5.1) so it advances with the same `appliedToken` — a `waitFor` that
+sees the base rows sees the indexes too. None of these touch `wiki`: the engine stores canonical text and a
+content hash only ([structured-content §4/§13](../docs/structured-content.md)).
+
+### 6.1 Outline — the section tree
+
+The **outline** is the section names/tree straight from folded state
+([structured-content §11](../docs/structured-content.md)) — no parsing. It is materialized directly off
+`sections(page_id, parent_id, key, name, ord)` (§5.2): a token-gated `outline(pageId)` read returns the
+nested `(key, name, order)` tree. Outline-organizing **headings are sections**; a `heading` *block* is
+intra-section presentation and is **not** an outline entry
+([structured-content §2/§3.1](../docs/structured-content.md)).
+
+### 6.2 Symbol index — over `code` fields **and** `code` blocks
+
+A **symbol index** is derived by parsing canonical `code` source through the §7 `LanguageRegistry`
+([structured-content §11](../docs/structured-content.md)). Crucially it indexes **both** code-bearing
+shapes, because a `code` block **is** a `code` field with a `blockId` — same `{ lang, source, hash }`, same
+analyzer ([structured-content §3.1](../docs/structured-content.md)):
+
+```sql
+symbols(workspace_id, page_id, section_id, field_key,
+        block_id,                                  -- NULL for a `code` field; the BlockId for a `code` block (§3.1)
+        name, kind, lang, range, def_hash)         -- range over canonical source; def_hash = the field/block content hash
+```
+
+The key `(section_id, field_key, block_id?)` reaches code embedded in a `blocks` document with **zero new
+machinery** — the same path serves both. `def_hash` carries the §5/§9.4 content hash, so the rename
+worked-example ([structured-content §5](../docs/structured-content.md)) reads canonical source and the hash
+straight from this projection and issues a hash-preconditioned `applyTextEdits` (§6.4). A parser upgrade
+re-projects the index; it never rewrites history ([structured-content §4](../docs/structured-content.md)).
+
+### 6.3 Cross-reference index — walks **into** block/inline trees
+
+A **cross-reference index** records every `ref` ([structured-content §3](../docs/structured-content.md)) so
+reorders/renames/renumbers and integrity are tool-decidable. A `ref` exists at **two depths** — a `ref`
+*field*, and an inline **`ref` span** inside a prose block (paragraph / heading / list item / table cell)
+([structured-content §3.2](../docs/structured-content.md)) — so the projector **recurses into the block and
+inline trees**, exactly as the engine's ingestion integrity walk does
+([structured-content §7](../docs/structured-content.md)). Because the same walk runs read-side, **an inline
+reference can never dangle undetected**:
+
+```sql
+xrefs(workspace_id, page_id, src_section_id, src_field_key,
+      src_block_id, src_inline_path,              -- where the ref lives: field-level (blocks NULL) or a block/inline path
+      target_kind,                                -- section | page | symbol | block (RefTarget, §2)
+      target_id, target_section_id, target_field, target_symbol_or_block,
+      resolved BOOLEAN)                            -- integrity flag; the engine rejects unresolved at write (§7), this is the read-side mirror
+```
+
+The displayed label of a `ref` is **render-derived** (a section number, page title, or symbol name —
+[structured-content §3](../docs/structured-content.md)), so this index never stores a label; it stores the
+*target*, and the Markdown render read model (§5.2) derives the text. This is the load-bearing payoff of the
+document model: a reference *inside a sentence* stays correct under reordering
+([structured-content §3.2](../docs/structured-content.md)).
+
+### 6.4 Semantic operations are guarded `applyTextEdits`
+
+`outline` and the indexes are **read-only**; a refactor that *changes* content is still
+**FSM-gated + event-sourced** ([structured-content §5/§11](../docs/structured-content.md)). A
+language-aware op (rename, extract) is **computed host-side** — the host reads canonical source + content
+hash from the symbol index (§6.2), parses via the §7 analyzer, and computes the new source plus the
+in-scope edit ranges — then applies the result as **one guarded `applyTextEdits` section operation**
+([structured-content §9.4](../docs/structured-content.md)) carrying a **content-hash precondition**
+([structured-content §5](../docs/structured-content.md)): the pure command rejects an edit computed against
+source made stale by an OCC rebase. Even a refactor is therefore one attributed event in `history()`
+(recorded under e.g. `renameSymbol`, §5.2 `events.command`), folded by the one built-in reducer; render
+fences the new source verbatim. Cross-page references within one workspace ride one atomic multi-page append
+(the `moveItem` precedent); cross-workspace references are reported, not silently touched
+([structured-content §5](../docs/structured-content.md)). This package never parses inside `produces` — all
+language work is host-side ([structured-content §5](../docs/structured-content.md)).
+
+---
+
+## 7. The LanguageRegistry (runtime analyzer plugins)
+
+Parsers (tree-sitter / Roslyn / LSP) are **heavy and version-sensitive**, so they live **in the host, never
+in `wiki`** ([structured-content §4/§11/§13](../docs/structured-content.md)). They load through a runtime
+**`LanguageRegistry`** that **mirrors the `ModelRegistry` dynamic-import pattern**
+([ADR-M6](#adr-m6--live-modelregistry-with-cache-busted-hot-reload-2026-06-02)): per-language analyzers are
+loaded **by module specifier** via cache-busted `import()`, registered/loaded/reloaded/unregistered behind a
+generation counter, and selected per `lang` tag at projection time.
+
+Each plugin exposes a narrow **`ILanguageAnalyzer`** ([structured-content §11](../docs/structured-content.md)):
+
+```ts
+interface ILanguageAnalyzer {
+  readonly lang: string;                                  // matches a `code` field/block's lang tag (§3)
+  parse(source: string): Ast;                             // read-model AST — derived, never stored (§4)
+  symbols(source: string): SymbolEntry[];                 // feeds the symbol index (§6.2)
+  references(source: string): ReferenceEntry[];           // in-source refs; complements the §6.3 ref index
+  rename(source: string, symbol: string, to: string):     // computes edits host-side (§6.4) — no write
+    { edits: TextEdit[]; unresolved: Site[] };
+}
+```
+
+- **AST is a read-model projection.** An analyzer parses canonical source **inside a projection** in this
+  host — exactly as the SQL read model serializes state — and the result feeds §6.2/§6.3. The **canonical
+  text stays the write-model source of truth** ([structured-content §4/§10](../docs/structured-content.md));
+  the engine never stores or folds an AST. A parser upgrade re-projects; it never rewrites history.
+- **Mirrors ADR-M6, separately.** The `LanguageRegistry` is a *sibling* of the `ModelRegistry`, not the same
+  object: `ModelRegistry` swaps **page-type schema** (and triggers a re-fold/reproject); `LanguageRegistry`
+  swaps **analyzers** and triggers a re-projection of the §6.2/§6.3 indexes only (write-model state is
+  untouched — analyzers never fold). Both share the cache-busting `import(fileURL + '?v=' + hash)` trick and
+  a generation counter; control is **pipeline-driven** off the `wiki-server` control listener
+  (a `/_server/languages` sibling of `/_server/models`, [wiki-server/DESIGN.md §8.5](../wiki-server/DESIGN.md)),
+  not an MCP tool — same trust/operability stance as ADR-M6.
+- **`rename` returns, never writes.** An analyzer is **pure-ish input→edits**; it returns the `TextEdit[]`
+  (and any unresolved/ambiguous sites, [structured-content §5](../docs/structured-content.md)) which §6.4
+  then applies as a guarded, hash-preconditioned `applyTextEdits`. The analyzer has no write authority.
+
+Phasing follows the spec ([structured-content §12](../docs/structured-content.md)): **outline + symbol-index
+read-only projections first** (Phase 2, establishing the analyzer contract and token-gating before any
+write-back), then **semantic operations** (Phase 3, one language first). Until an analyzer for a `lang` is
+loaded, a `code` field is an opaque canonical blob served verbatim — the outline and the structural
+cross-reference index still work, since they need no parser.
+
+---
+
+## 8. The MCP server & token management
 
 The MCP surface turns the engine into agent-callable tools/resources, and is where the two CQRS planes
 are **plugged together**.
 
-### 6.1 Tools & resources
+### 8.1 Tools & resources
 
 - **Tools (writes + queries).** The engine's command catalog becomes MCP tools. **Page** mutations take
   their input schema straight from the command's `argsSchema` (`IPageView.describeMutations()` —
-  [wiki/DESIGN.md §10.4](../wiki/DESIGN.md)). **Structural** commands (`createPage`, `reparent`, `link`, …)
-  aren't covered by `describeMutations()` today (it is page-scoped in `api.ts`), so their tool schemas need
-  a small engine addition (a structural-command catalog) or hand-authored schemas in v1. Plus read tools
-  (`getPage`, `renderPage`, `tree`, `listWorkspaces`, `search`, `openQuestions`).
+  [wiki/DESIGN.md §10.4](../wiki/DESIGN.md)); in the section model these are the generated structural
+  commands (set a field, add/move a section, add/set a block, add/set an element) plus declared commands,
+  each surfaced with the `(section, field)` it touches ([structured-content §9.4](../docs/structured-content.md)).
+  **Structural** commands (`createPage`, `reparent`, `link`, …) aren't covered by `describeMutations()` today
+  (it is page-scoped in `api.ts`), so their tool schemas need a small engine addition (a structural-command
+  catalog) or hand-authored schemas in v1. Plus read tools (`getPage`, `renderPage`, `tree`, `listWorkspaces`,
+  `search`, `openQuestions`) and the **derived-projection** read tools `outline`, `symbols`, and `references`
+  (§6) — token-gated like every read.
 - **Resources (reads).** Workspaces/pages as resources — `wiki://{ns}/workspace/{id}` (rendered Markdown
-  for the tree) and `…/page/{pageId}` — served from the SQL read model.
+  for the tree) and `…/page/{pageId}` — served from the SQL read model. Page Markdown is produced by the
+  **render read model** (§5.2), not a stored render column.
 - **Only-legal-actions.** The full catalog is exposed; the engine's guard rejects illegal calls with
   **structured errors** (status + legal set, [wiki/DESIGN.md §12/§14](../wiki/DESIGN.md)) the agent
   self-corrects on. A `describeMutations`-style tool reports the *currently* legal set per page; dynamic
-  per-resource tool lists are a refinement ([§12](#12-future-work)).
+  per-resource tool lists are a refinement ([§14](#14-future-work)).
 - **Transport.** **stdio** for a local agent; **HTTP/SSE** (streamable HTTP) when networked/embedded in
   `wiki-server`. The transport is a `CreateWikiMcpOptions.transport` field the **embedding host chooses**:
   the standalone `bin` defaults to stdio, while `wiki-server` passes the http transport. (MCP SDK specifics
-  confirmed at build — [§10](#10-package-structure).)
+  confirmed at build — [§12](#12-package-structure).)
 
-### 6.2 Token management (automatic read-your-writes)
+### 8.2 Token management (automatic read-your-writes)
 
 This realizes the owner's "the MCP server manages the tokens so MCP commands always return updated
 read-model data":
@@ -289,23 +457,24 @@ read-model data":
   SQL read model to catch up ([§3.3](#33-reads-wait-on-a-token)) before serving.
 - A **cross-workspace read** (`search`, `openQuestions`) **fans out** — it waits on the high-water token of
   *each* workspace the session has written, so the result reflects all of the session's writes, not just
-  one (a single combined token *vector* is [§12](#12-future-work)).
+  one (a single combined token *vector* is [§14](#14-future-work)).
 
 The agent therefore always sees its own prior writes (session read-your-writes + monotonic reads), while
 distinct sessions stay independent and the model stays eventually consistent. Session high-water marks are
 per-session: a **reconnect resets** them (subsequent reads are eventually-consistent until the session
 writes again, or the client threads a returned token). A `waitFor` timeout maps to a retryable MCP error,
-or an explicit `stale: true` result ([§9](#9-failure--operational-concerns)).
+or an explicit `stale: true` result ([§11](#11-failure--operational-concerns)).
 
 ---
 
-## 7. Staying hydrated (the runtime)
+## 9. Staying hydrated (the runtime)
 
 The answer to "rehydration per call is a non-starter":
 
-- **Read side — never re-folds.** The SQL read model is kept current by the projection tailer and is
-  **durable**; on restart it resumes from `applied_version` ([§5.1](#51-projection-mechanism)), not from
-  zero. Reads (the bulk of agent traffic, including cross-workspace queries) hit SQL directly.
+- **Read side — never re-folds.** The SQL read model — and the §6 derived projections it co-maintains — is
+  kept current by the projection tailer and is **durable**; on restart it resumes from `applied_version`
+  ([§5.1](#51-projection-mechanism)), not from zero. Reads (the bulk of agent traffic, including
+  cross-workspace queries, outline, and symbol/cross-reference lookups) hit SQL directly.
 - **Write side — stays hot.** The embedded engine keeps active workspace **handles open** (live tail keeps
   their write-side aggregate fresh), bounded by an LRU (`IWikiConfig.cache.maxWorkspaces` —
   [wiki/DESIGN.md §10.1](../wiki/DESIGN.md)). A command on a hot workspace appends with **no refold**; a
@@ -315,7 +484,7 @@ The answer to "rehydration per call is a non-starter":
 
 ---
 
-## 8. wiki-server integration
+## 10. wiki-server integration
 
 `wiki-mcp` is the **module that holds the engine and the logic**; `wiki-server` is the **process that hosts
 streams and hosts `wiki-mcp`**. There are **no modes** — one process does both. `wiki-server` stays a thin
@@ -326,7 +495,7 @@ host on `port` and the control/log listener on `port`+1) on `--mcp-port` (env `W
 `port`+2, e.g. `4439`), exposing the endpoint at `http://<host>:<mcpPort>/mcp`. It builds the
 `{ kind: "http", host, port: mcpPort, path: "/mcp" }` transport and passes it into `createWikiMcp` — an
 embedded host **cannot** use stdio, which binds the host process's own terminal and is unreachable by a
-separate MCP client ([§6.1](#61-tools--resources)). `wiki-server` logs `mcpUrl` on boot and surfaces it on
+separate MCP client ([§8.1](#81-tools--resources)). `wiki-server` logs `mcpUrl` on boot and surfaces it on
 `GET /_server/info` (and on its `RunningWikiServer` handle), so a client can discover where to connect (see
 [`wiki-server/DESIGN.md` §8.5](../wiki-server/DESIGN.md)).
 
@@ -338,18 +507,20 @@ management, and MCP surface all live in `wiki-mcp`** ([ADR-M5](#adr-m5--wiki-mcp
 that it hosts `wiki-mcp`.)
 
 **Logging.** `wiki-mcp` does not own a log API; it emits all telemetry through a `Logger` the **host
-injects** (`createWikiMcp({ logger })`, [§9](#9-failure--operational-concerns)). `wiki-server` passes its
+injects** (`createWikiMcp({ logger })`, [§11](#11-failure--operational-concerns)). `wiki-server` passes its
 **consolidating** logger, so engine / projection / MCP logs land in one stream with the stream host's and
 are exposed by the host's log API ([wiki-server/DESIGN.md §8.5](../wiki-server/DESIGN.md)).
 
 ---
 
-## 9. Failure & operational concerns
+## 11. Failure & operational concerns
 
 - **Projection lag & backpressure.** Reads with a token wait up to `timeoutMs`; on timeout, a typed
   error (retryable) or an explicit `stale: true` result — never a silent stale read presented as fresh.
 - **Rebuild.** The read model is a cache: drop the tables and re-fold every workspace from its stream
-  (the source of truth). Triggered manually or by a `fingerprint` change ([§5.3](#53-pglite-local-postgres-prod)).
+  (the source of truth) — base rows **and** the §6 derived projections together. Triggered manually or by a
+  `fingerprint` change ([§5.3](#53-pglite-local-postgres-prod)); a `LanguageRegistry` (§7) swap re-projects
+  the symbol/cross-reference indexes only, without re-folding the write model.
 - **Poison events.** An event the configured page types can't fold fails closed (`UnknownPageTypeError`,
   [wiki/DESIGN.md §8.5](../wiki/DESIGN.md)); the affected workspace's projection halts (and is reported)
   rather than corrupting SQL — register the type or a shim to proceed.
@@ -374,41 +545,49 @@ export interface Logger {
 
 ---
 
-## 10. Package structure
+## 12. Package structure
 
 A consumer sibling. **New dependencies** (none currently in the repo — versions/APIs pinned at build):
-`wiki`, `kysely`, `@electric-sql/pglite`, `pg`, and an MCP SDK (`@modelcontextprotocol/sdk`).
+`wiki`, `kysely`, `@electric-sql/pglite`, `pg`, and an MCP SDK (`@modelcontextprotocol/sdk`). Per-language
+**analyzer** packages (tree-sitter / Roslyn / LSP) are **not** deps of `wiki-mcp` — they load at runtime
+behind the `LanguageRegistry` (§7), exactly as model bundles load behind the `ModelRegistry`.
 
 ```
 .
 ├─ wiki/                         # engine (library dependency)
-├─ wiki-server/                  # stream host: hosts wiki-mcp (§8)
+├─ wiki-server/                  # stream host: hosts wiki-mcp (§10)
 └─ wiki-mcp/                     # ← THIS package
     ├─ package.json             # bin: wiki-mcp → dist/bin.js; deps above
     ├─ DESIGN.md
     └─ src/
         ├─ main.ts              # LIBRARY (side-effect-free): exports createWikiMcp/main/types; config → createWikiMcp({ …, logger }) → start (stdio|http). No shebang, no self-exec guard.
         ├─ bin.ts               # bin entry: #!/usr/bin/env node; runs main() over stdio; holds the self-exec guard (kept out of the library so a host bundling wiki-mcp from source can't auto-boot a rogue server)
-        ├─ config.ts            # namespace, stream baseUrl, db (pglite|pg), timeouts, injected Logger (§9)
-        ├─ logger.ts            # the injected Logger interface + console/silent defaults (§9)
+        ├─ config.ts            # namespace, stream baseUrl, db (pglite|pg), timeouts, injected Logger (§11)
+        ├─ logger.ts            # the injected Logger interface + console/silent defaults (§11)
         ├─ engine.ts            # build the embedded IWiki (write side), hot-handle LRU, token surface; rebind for ADR-M6
         ├─ readmodel/
-        │   ├─ schema.ts        #   Kysely table types
+        │   ├─ schema.ts        #   Kysely table types (pages, sections, symbols, xrefs, …; §5.2/§6)
         │   ├─ migrations/      #   Kysely migrations
         │   ├─ store.ts         #   open + migrate the Kysely store (PGlite | pg)
         │   ├─ pglite-dialect.ts #  hand-rolled Kysely dialect for PGlite
-        │   ├─ project.ts       #   fold → serialize state → SQL (one txn/commit)
-        │   └─ readmodel.ts     #   IReadModel: appliedToken / waitFor + typed queries
+        │   ├─ project.ts       #   fold → serialize state → SQL (one txn/commit): section tree + typed fields + blocks
+        │   ├─ derive.ts        #   derived projections from folded state: outline · symbol index · xref index (§6)
+        │   ├─ render.ts        #   Markdown render read model — folded state + static render config (§5.2; structured-content §8)
+        │   └─ readmodel.ts     #   IReadModel: appliedToken / waitFor + typed queries (incl. outline/symbols/references)
         ├─ models/
         │   ├─ registry.ts      #   live ModelRegistry: generation-counted, mutable page-type set (ADR-M6)
         │   └─ loader.ts        #   cache-busted dynamic import() of a model bundle (ADR-M6)
+        ├─ lang/
+        │   ├─ registry.ts      #   live LanguageRegistry: generation-counted analyzer set (§7, mirrors models/registry.ts)
+        │   ├─ loader.ts        #   cache-busted dynamic import() of an analyzer plugin (§7, mirrors models/loader.ts)
+        │   └─ analyzer.ts      #   ILanguageAnalyzer contract: parse / symbols / references / rename (§7)
         ├─ tail/
-        │   ├─ projection.ts    #   catalog + per-workspace tailers driving project.ts (rebind/reproject, ADR-M6)
+        │   ├─ projection.ts    #   catalog + per-workspace tailers driving project.ts + derive.ts (rebind/reproject, ADR-M6)
         │   └─ engine-source.ts #   EventSource over the embedded engine — history() + subscribe()
         └─ mcp/
-            ├─ tools.ts         #   command catalog + queries → MCP tools (from argsSchema)
+            ├─ tools.ts         #   command catalog + queries → MCP tools (from argsSchema; incl. outline/symbols/references)
             ├─ resources.ts     #   wiki:// resources from the read model
-            ├─ tokens.ts        #   per-session high-water token manager (§6.2)
+            ├─ tokens.ts        #   per-session high-water token manager (§8.2)
             └─ server.ts        #   MCP server (stdio | http/sse)
 ```
 
@@ -427,7 +606,7 @@ Add `wiki-mcp` to the root `workspaces`. It imports `wiki`'s **public** surface 
 
 ---
 
-## 11. Testing strategy
+## 13. Testing strategy
 
 Tests target the **CQRS seam** and the **projection**, using an in-memory `DurableStreamTestServer`
 ([wiki/testing](../wiki/DESIGN.md)) and a **PGlite** instance (in-memory) for the read model.
@@ -438,7 +617,15 @@ Tests target the **CQRS seam** and the **projection**, using an in-memory `Durab
 - **Read-your-writes via MCP.** Through the MCP server: a write tool then a read tool (same session) always
   reflects the write — and `waitFor` is what makes it pass (prove by injecting projection lag).
 - **Projection correctness.** For a scripted history, the serialized SQL equals the engine's folded
-  `IWorkspaceState` (page/item/tree/link rows + JSONB); cross-workspace queries (`openQuestions`) match.
+  `IWorkspaceState` (page/section/field/tree/link rows + JSONB, with `list` elements and `blocks` trees in
+  field JSONB, §5.2); cross-workspace queries (`openQuestions`) match.
+- **Derived projections (§6).** For a scripted history, `outline` equals the folded section tree; the symbol
+  index covers symbols in **both** `code` fields and `code` blocks (keyed by `block_id`); the cross-reference
+  index resolves every `ref` field **and** inline ref-span (the walk descends into block/inline trees), and
+  flags a deliberately-dangled inline ref — proving an inline reference can never dangle undetected.
+- **Semantic ops are guarded (§6.4).** A host-computed rename applies as one `applyTextEdits` with a content-hash
+  precondition; a stale hash (post-rebase) is rejected; render fences the new source byte-identically; `history()`
+  attributes the event to the originating command.
 - **Resume.** Apply N commits → stop → restart → the projection resumes from `applied_version` (no re-fold)
   and converges; idempotent re-delivery causes no double-apply.
 - **MCP surface.** Tool input schemas equal the engine's `argsSchema`; resources render the read model;
@@ -447,10 +634,13 @@ Tests target the **CQRS seam** and the **projection**, using an in-memory `Durab
 
 ---
 
-## 12. Future work
+## 14. Future work
 
 - **Hybrid per-type projection tables** (e.g. `open_questions`, full-text search) via registered projectors,
-  beyond core+JSONB ([§5.2](#52-schema-core-tables--jsonb)).
+  beyond core+JSONB ([§5.2](#52-schema-the-section-tree--typed-fields--jsonb)).
+- **Richer analysis projections** beyond outline/symbols/cross-references — call graph and type index over
+  `code` fields/blocks ([structured-content §11](../docs/structured-content.md)), once the §7 analyzer contract
+  and per-workspace re-projection on a `LanguageRegistry` swap are proven.
 - **Dynamic MCP tool lists** scoped to a page's currently-legal commands (push `tools/list_changed`).
 - **Cross-workspace / cross-namespace** read models and dashboards (the read model makes these natural —
   [wiki/DESIGN.md §18](../wiki/DESIGN.md)).
@@ -459,11 +649,13 @@ Tests target the **CQRS seam** and the **projection**, using an in-memory `Durab
 
 ---
 
-## 13. References
+## 15. References
 
 - Engine (embedded; the CQRS contract must land here): [`wiki/DESIGN.md`](../wiki/DESIGN.md) — §8 (event sourcing), §8.4 (live projection), §10 (API), §12 (LLM), §14 (errors).
+- **Content model (authoritative)**: [`docs/structured-content.md`](../docs/structured-content.md) — §2 (section tree), §3 (field-kinds + blocks/inline), §4 (write model vs read models), §5 (code edits), §9.4 (section operations), §11 (host projections + `LanguageRegistry`).
 - Stream host (hosts wiki-mcp): [`wiki-server/DESIGN.md`](../wiki-server/DESIGN.md).
-- Schema layer (runtime-loaded page-type bundles): [`wiki-models/DESIGN.md`](../wiki-models/DESIGN.md) — the `ModelRegistry` loads these ([ADR-M6](#adr-m6--live-modelregistry-with-cache-busted-hot-reload-2026-06-02)).
+- Schema layer (runtime-loaded page-type bundles): [`wiki-models/DESIGN.md`](../wiki-models/DESIGN.md) — the `ModelRegistry` loads these ([ADR-M6](#adr-m6--live-modelregistry-with-cache-busted-hot-reload-2026-06-02)); the `LanguageRegistry` (§7) mirrors it for analyzers.
+- Parsers (load behind the `LanguageRegistry`, §7): tree-sitter <https://tree-sitter.github.io> · LSP <https://microsoft.github.io/language-server-protocol/> · Roslyn.
 - Kysely: <https://kysely.dev> · PGlite: <https://pglite.dev> · node-postgres: <https://node-postgres.com>
 - Model Context Protocol: <https://modelcontextprotocol.io> · TS SDK: `@modelcontextprotocol/sdk`.
 - CQRS / read models: Fowler, <https://martinfowler.com/bliki/CQRS.html>.
@@ -497,11 +689,14 @@ own it.
 
 **Decision.** Materialize the read model in **Postgres via Kysely**, on **PGlite** locally and **pg** in
 production — identical Postgres SQL both places. Schema is **core relational tables + JSONB** for the
-engine's pluggable type-specific data, so one schema serves all page types with no per-type code.
+engine's pluggable type-specific data, so one schema serves all page types with no per-type code. With the
+section model ([structured-content §2/§3](../docs/structured-content.md)) the core tables are the **section
+tree** (`sections(page_id, parent_id, key, ord, fields JSONB, meta JSONB)`), with `list` elements and
+`blocks`/inline trees living **inside** field JSONB — not a separate flat `fields`/`items` pair (§5.2).
 
 **Why.** Type-safe queries, dev/prod parity with zero local infra (embedded PGlite), and it completes the
 **ElectricSQL** stack (Durable Streams + PGlite). JSONB keeps the schema type-agnostic while staying
-queryable; typed per-type tables remain an opt-in optimization ([§5.2](#52-schema-core-tables--jsonb)).
+queryable; typed per-type tables remain an opt-in optimization ([§5.2](#52-schema-the-section-tree--typed-fields--jsonb)).
 
 **Consequences.** The read model is a rebuildable cache (drop + re-fold from the stream); a `fingerprint`
 guards schema/page-type drift; Kysely migrations manage the schema.
@@ -517,10 +712,12 @@ to **export a public, pure `fold`** (today `foldWorkspace`/`applyWorkspace` are 
 **Why.** Reusing the fold guarantees the read model matches write-model semantics exactly (upcasting,
 unknown-type policy, item/FSM effects) — the only thing we own is the state→rows mapping, which is
 mechanical. Atomic apply keeps `appliedToken` honest. The cost (holding a fold to serialize) coincides with
-keeping workspaces hydratable anyway ([§7](#7-staying-hydrated-the-runtime)).
+keeping workspaces hydratable anyway ([§9](#9-staying-hydrated-the-runtime)).
 
 **Consequences.** Per-type *rich query* tables, when wanted, are derived from the same serialized state by
-opt-in projectors; the base layer needs no per-type code.
+opt-in projectors; the base layer needs no per-type code. The **derived projections** (outline · symbol
+index · cross-reference index, §6) are derived from the *same* folded state in the *same* per-commit
+transaction — engine-defined and language-defined respectively, but all read-side, none folded by `wiki`.
 
 ### ADR-M4 — The MCP server manages tokens for automatic read-your-writes (2026-06-02)
 
@@ -599,3 +796,57 @@ workspace's `projection_offsets` row, clears halts, and re-folds all from the st
 (`ProjectionService.reproject`). What remains a **future optimization** is the finer per-workspace
 **compare-stored-vs-current** fingerprint diff that would re-fold only the workspaces whose `projection_offsets.fingerprint`
 ([§5.3](#53-pglite-local-postgres-prod)) actually changed; that column is still stamped on every apply.
+
+### ADR-M7 — AST/analysis as read-side projections + a runtime LanguageRegistry (2026-06-03)
+
+**Context.** The section content model makes structure first-class
+([structured-content §1/§2](../docs/structured-content.md)) and `code` first-class (a `code` field, and a
+`code` *block* with a `blockId`, [structured-content §3.1](../docs/structured-content.md)), so the host can
+offer deterministic, language-aware tooling: an outline, a symbol index, a cross-reference index, and
+eventually semantic refactors (rename, extract). That tooling needs **parsers** (tree-sitter / Roslyn / LSP)
+— heavy, version-sensitive, and language-specific. The engine ([`wiki`](../wiki/DESIGN.md)) is, by tenet,
+**schema-agnostic, dependency-free, and deterministic** (`CLAUDE.md`, [structured-content §13](../docs/structured-content.md)):
+it must own neither a parser nor an AST.
+
+**Decision.** **ASTs and all static analysis are read-side projections in this host, and parsers load at
+runtime through a `LanguageRegistry` — never in `wiki`** ([structured-content §4/§11](../docs/structured-content.md)).
+Concretely:
+
+- The engine stores **canonical text + a content hash** only; the **AST is derived** by parsing that source
+  inside a projection here, exactly as the SQL read model serializes folded state. The canonical text stays
+  the write-model source of truth; a parser upgrade **re-projects** and never rewrites history.
+- The §6 derived projections — **outline** (no parser; straight from the folded section tree),
+  **symbol index** (over `code` fields **and** `code` blocks, keyed including `block_id`), and
+  **cross-reference index** (over `ref` fields **and** inline ref-spans, the walk recursing **into**
+  block/inline trees so an inline reference can never dangle undetected) — are co-maintained by the **same
+  projection tailer** (§5.1), in the **same per-commit transaction**, advancing the same `appliedToken`.
+- Per-language analyzers expose a narrow `ILanguageAnalyzer` (`parse / symbols / references / rename`,
+  [structured-content §11](../docs/structured-content.md)) and load through a **`LanguageRegistry` that
+  mirrors the `ModelRegistry`** ([ADR-M6](#adr-m6--live-modelregistry-with-cache-busted-hot-reload-2026-06-02)):
+  generation-counted, loaded **by module specifier** via cache-busted `import()`, controlled
+  pipeline-side (`/_server/languages`, a sibling of `/_server/models`), never an MCP tool. The two
+  registries are siblings: a `ModelRegistry` swap re-folds the write-model-derived read model; a
+  `LanguageRegistry` swap re-projects only the analyzer-derived indexes (§7).
+- A **semantic operation is still FSM-gated + event-sourced.** The host computes the edits (parse + analyze),
+  then applies them as **one guarded `applyTextEdits` section operation** with a **content-hash precondition**
+  ([structured-content §5/§9.4](../docs/structured-content.md)): the pure command rejects edits computed
+  against source made stale by an OCC rebase. Even a refactor is one attributed event in `history()`. The
+  analyzer **returns** edits; it has no write authority, and `produces` never parses.
+
+**Why.** It keeps `wiki` dep-free and deterministic (no parser, no AST in the fold or log —
+[structured-content §10/§13](../docs/structured-content.md)) while putting language machinery exactly where
+versioned, replaceable, language-specific code belongs. Reusing the projection tailer means the indexes
+inherit token-gating, resume, and atomicity for free; reusing ADR-M6's loader pattern means analyzers
+hot-reload with the same proven mechanism. Routing every refactor through `applyTextEdits` means even
+content-rewriting tools are audited, OCC-safe, and rebuildable — not a side channel around the event log.
+
+**Consequences.** A new package boundary inside the host: `src/lang/` (registry + loader + analyzer
+contract) and `src/readmodel/derive.ts` (the §6 projections), both read-side. Analyzer plugins are loaded
+arbitrary code (first-party trusted), and cache-busting **leaks** old analyzer modules until GC — acceptable
+for a local/dev loop, same caveat as ADR-M6. The guarantee for semantic ops is **scoped** (sound for
+in-scope lexical references in supported languages within one workspace; dynamic/reflective/cross-workspace
+sites are reported, not guessed — [structured-content §5](../docs/structured-content.md)). Phasing follows
+[structured-content §12](../docs/structured-content.md): read-only outline+symbols first (Phase 2), semantic
+operations one language at a time (Phase 3). Until an analyzer for a `lang` loads, a `code` field/block is an
+opaque canonical blob served verbatim, and the parser-free outline + structural cross-reference index still
+work.

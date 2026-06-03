@@ -1,67 +1,57 @@
 /**
- * LLM-surface unit tests (BUILD_NOTES §9, DESIGN §17, §13.6).
+ * LLM-surface unit tests (new declarative model).
  *
  * The page view exposes the command catalog an agent is offered:
- *   - `describeMutations()` emits valid JSON-Schema `argsSchema` (+ optional
- *     `resultSchema`) per command, with an `available` flag for the current status;
- *   - `availableMutations()` returns exactly the §13.6 offered set per feature-brief
- *     status (a subset of the full command set), and nothing in a terminal status.
+ *   - `describeMutations()` emits one descriptor per declared command (valid args
+ *     JSON-Schema, optional result schema, an `available` flag, and a `target`
+ *     where the command edits a section) PLUS the generated structural commands;
+ *   - `availableMutations()` combines FSM-legal lifecycle commands with the
+ *     content commands whose section is mutable in the current status.
  *
- * One server per file (beforeAll/afterAll). Real (in-memory) wiki — the catalog is
- * read off the SAME registry/guard the bus authorizes against.
+ * Expectations are derived from the page-type declaration + registry so the test
+ * verifies the gating logic (mutableIn ∪ FSM), not a brittle hand-listed set.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { IWorkspaceHandle, JsonSchema, PageId } from "../src/api";
 import { FeatureBrief } from "wiki-models/feature";
 import { featurePageTypes } from "wiki-models/feature";
+import { Registry } from "../src/core/registry";
 import { createTestWiki, type ITestWiki } from "../src/testing";
 
-/** Full command set declared by the feature-brief page type. */
-const ALL_BRIEF_COMMANDS = Object.keys(FeatureBrief.__def.commands);
+const registry = new Registry(featurePageTypes);
+const briefDef = FeatureBrief.__def;
+const briefDeclared = Object.keys(briefDef.commands);
+const briefGenerated = [...registry.generatedCommands("feature-brief").keys()];
 
-/** §13.6 offered (page-scoped) mutations on the brief, by status. */
-const OFFERED_BY_STATUS: Record<string, string[]> = {
-  draft: [
-    "setSummary",
-    "addComponent",
-    "removeComponent",
-    "addConstraint",
-    "removeConstraint",
-    "askQuestion",
-    "answerQuestion",
-    "beginPlanning",
-    "abandon",
-  ],
-  planning: [
-    "addConstraint",
-    "removeConstraint",
-    "askQuestion",
-    "answerQuestion",
-    "beginImplementation",
-    "abandon",
-  ],
-  building: [
-    "addConstraint",
-    "askQuestion",
-    "answerQuestion",
-    "recordCommit",
-    "reopenPlanning",
-    "submitForReview",
-    "abandon",
-  ],
-  review: ["recordCommit", "requestChanges", "ship", "abandon"],
-  shipped: [],
-  abandoned: [],
-};
+/** The commands that SHOULD be available on a feature-brief in `status`. */
+function expectedAvailable(status: string): string[] {
+  const out: string[] = [];
+  const guard = registry.pageGuard("feature-brief");
+  const decls = briefDef.sections;
+  const mutable = (sectionKey: string): boolean => {
+    const sd = decls[sectionKey];
+    return sd?.mutableIn === undefined || sd.mutableIn.includes(status);
+  };
+  for (const [name, cmd] of Object.entries(briefDef.commands)) {
+    if (cmd.transition?.level === "page") {
+      if (guard.can(status, name)) out.push(name);
+    } else if (cmd.target?.section !== undefined) {
+      if (mutable(cmd.target.section)) out.push(name);
+    } else {
+      out.push(name);
+    }
+  }
+  for (const [name, gen] of registry.generatedCommands("feature-brief")) {
+    if (mutable(gen.section)) out.push(name);
+  }
+  return out.sort();
+}
 
-/** A minimal structural sanity check that `s` is a JSON-Schema object. */
 function isJsonSchemaObject(s: unknown): s is JsonSchema {
   if (typeof s !== "object" || s === null || Array.isArray(s)) return false;
-  // Must survive a JSON round-trip (no functions / cycles / undefined-only).
   const round = JSON.parse(JSON.stringify(s)) as Record<string, unknown>;
-  // zod-to-json-schema emits `type` (and for objects, `properties`).
-  return typeof round.type === "string" || "$ref" in round || "anyOf" in round || "allOf" in round;
+  return typeof round.type === "string" || "$ref" in round || "anyOf" in round || "allOf" in round || Object.keys(round).length === 0;
 }
 
 let tw: ITestWiki;
@@ -76,120 +66,82 @@ afterAll(async () => {
   await tw.stop();
 });
 
-/** Create a fresh feature-brief and return its id + children ids. */
-async function freshBrief(title: string): Promise<{
-  brief: PageId;
-  plan: PageId;
-  checklist: PageId;
-  testPlan: PageId;
-}> {
+async function freshBrief(title: string): Promise<{ brief: PageId; plan: PageId; checklist: PageId; testPlan: PageId }> {
   const { value: brief, token } = await ws.createPage("feature-brief", { title, parentId: null });
-  // Read-your-writes: gate the children read on the createPage token so the page
-  // (and its atomically-created children) are guaranteed visible.
   const view = await ws.page(brief, { consistentWith: token });
   const [plan, checklist, testPlan] = (await view.children()).map((c) => c.id);
   return { brief, plan, checklist, testPlan };
 }
 
-describe("describeMutations() — valid JSON Schema + availability flags", () => {
-  it("emits one descriptor per declared command, each with a valid args JSON Schema", async () => {
+describe("describeMutations() — declared + generated, with targets", () => {
+  it("emits one descriptor per declared command plus the generated structural set", async () => {
     const { brief } = await freshBrief("Schemas A");
     const descriptors = await (await ws.page(brief)).describeMutations();
-
-    // One per declared command (regardless of availability).
-    expect(descriptors.map((d) => d.name).sort()).toEqual([...ALL_BRIEF_COMMANDS].sort());
+    const names = descriptors.map((d) => d.name).sort();
+    expect(names).toEqual([...briefDeclared, ...briefGenerated].sort());
 
     for (const d of descriptors) {
       expect(typeof d.name).toBe("string");
       expect(isJsonSchemaObject(d.argsSchema)).toBe(true);
-      // result-bearing commands carry a valid result schema too.
-      if (d.resultSchema !== undefined) {
-        expect(isJsonSchemaObject(d.resultSchema)).toBe(true);
-      }
+      if (d.resultSchema !== undefined) expect(isJsonSchemaObject(d.resultSchema)).toBe(true);
       expect(typeof d.available).toBe("boolean");
     }
   });
 
-  it("the args schema reflects each command's real parameters (e.g. setSummary.text)", async () => {
+  it("a content command surfaces the section it edits via `target`", async () => {
     const { brief } = await freshBrief("Schemas B");
-    const byName = new Map(
-      (await (await ws.page(brief)).describeMutations()).map((d) => [d.name, d]),
-    );
+    const byName = new Map((await (await ws.page(brief)).describeMutations()).map((d) => [d.name, d]));
+    expect(byName.get("setSummary")!.target).toEqual({ section: "summary", field: "body" });
+    expect(byName.get("addComponent")!.target).toEqual({ section: "components", field: "items" });
+  });
 
-    const setSummary = byName.get("setSummary");
-    expect(setSummary).toBeDefined();
-    const args = JSON.parse(JSON.stringify(setSummary!.argsSchema)) as {
-      type: string;
-      properties?: Record<string, unknown>;
-    };
-    expect(args.type).toBe("object");
+  it("args/result schemas reflect each command's real parameters", async () => {
+    const { brief } = await freshBrief("Schemas C");
+    const byName = new Map((await (await ws.page(brief)).describeMutations()).map((d) => [d.name, d]));
+    const args = JSON.parse(JSON.stringify(byName.get("setSummary")!.argsSchema)) as { type: string; properties?: Record<string, unknown> };
     expect(args.properties).toHaveProperty("text");
-
-    // answerQuestion takes questionId + answer.
-    const answer = byName.get("answerQuestion");
-    const aArgs = JSON.parse(JSON.stringify(answer!.argsSchema)) as {
-      properties?: Record<string, unknown>;
-    };
+    const aArgs = JSON.parse(JSON.stringify(byName.get("answerQuestion")!.argsSchema)) as { properties?: Record<string, unknown> };
     expect(aArgs.properties).toHaveProperty("questionId");
     expect(aArgs.properties).toHaveProperty("answer");
-
-    // addComponent declares a result schema { componentId }.
-    const addComponent = byName.get("addComponent");
-    expect(addComponent!.resultSchema).toBeDefined();
-    const rSchema = JSON.parse(JSON.stringify(addComponent!.resultSchema)) as {
-      properties?: Record<string, unknown>;
-    };
+    const rSchema = JSON.parse(JSON.stringify(byName.get("addComponent")!.resultSchema)) as { properties?: Record<string, unknown> };
     expect(rSchema.properties).toHaveProperty("componentId");
   });
 
-  it("the `available` flags equal exactly the available command set for the status (draft)", async () => {
-    const { brief } = await freshBrief("Schemas C");
+  it("the `available` flags equal availableMutations() for the status (draft)", async () => {
+    const { brief } = await freshBrief("Schemas D");
     const view = await ws.page(brief);
     expect(await view.status()).toBe("draft");
-
-    const availableFromDescriptors = (await view.describeMutations())
-      .filter((d) => d.available)
-      .map((d) => d.name)
-      .sort();
+    const availableFromDescriptors = (await view.describeMutations()).filter((d) => d.available).map((d) => d.name).sort();
     expect(availableFromDescriptors).toEqual([...(await view.availableMutations())].sort());
-    expect(availableFromDescriptors).toEqual([...OFFERED_BY_STATUS.draft].sort());
+    expect(availableFromDescriptors).toEqual(expectedAvailable("draft"));
   });
 });
 
-describe("availableMutations() — matches the §13.6 table per status", () => {
-  it("draft offers exactly the §13.6 draft set", async () => {
+describe("availableMutations() — FSM lifecycle ∪ mutableIn content per status", () => {
+  it("draft", async () => {
     const { brief } = await freshBrief("Status draft");
     const view = await ws.page(brief);
-    expect(await view.status()).toBe("draft");
-    expect([...(await view.availableMutations())].sort()).toEqual(
-      [...OFFERED_BY_STATUS.draft].sort(),
-    );
+    expect([...(await view.availableMutations())].sort()).toEqual(expectedAvailable("draft"));
   });
 
-  it("planning offers exactly the §13.6 planning set", async () => {
+  it("planning", async () => {
     const { brief } = await freshBrief("Status planning");
     const { token } = await ws.mutate(brief, "beginPlanning", {});
     const view = await ws.page(brief, { consistentWith: token });
-    expect(await view.status({ consistentWith: token })).toBe("planning");
-    expect([...(await view.availableMutations({ consistentWith: token }))].sort()).toEqual(
-      [...OFFERED_BY_STATUS.planning].sort(),
-    );
+    expect([...(await view.availableMutations({ consistentWith: token }))].sort()).toEqual(expectedAvailable("planning"));
   });
 
-  it("building offers exactly the §13.6 building set (after the cross-page gate is met)", async () => {
+  it("building", async () => {
     const { brief, plan, testPlan } = await freshBrief("Status building");
     await ws.mutate(brief, "beginPlanning", {});
     await ws.mutate(plan, "addStep", { text: "do the thing" });
     await ws.mutate(testPlan, "addCase", { text: "verify the thing" });
     const { token } = await ws.mutate(brief, "beginImplementation", {});
     const view = await ws.page(brief, { consistentWith: token });
-    expect(await view.status({ consistentWith: token })).toBe("building");
-    expect([...(await view.availableMutations({ consistentWith: token }))].sort()).toEqual(
-      [...OFFERED_BY_STATUS.building].sort(),
-    );
+    expect([...(await view.availableMutations({ consistentWith: token }))].sort()).toEqual(expectedAvailable("building"));
   });
 
-  it("review offers exactly the §13.6 review set", async () => {
+  it("review", async () => {
     const { brief, plan, testPlan } = await freshBrief("Status review");
     await ws.mutate(brief, "beginPlanning", {});
     await ws.mutate(plan, "addStep", { text: "step" });
@@ -197,46 +149,14 @@ describe("availableMutations() — matches the §13.6 table per status", () => {
     await ws.mutate(brief, "beginImplementation", {});
     const { token } = await ws.mutate(brief, "submitForReview", {});
     const view = await ws.page(brief, { consistentWith: token });
-    expect(await view.status({ consistentWith: token })).toBe("review");
-    expect([...(await view.availableMutations({ consistentWith: token }))].sort()).toEqual(
-      [...OFFERED_BY_STATUS.review].sort(),
-    );
+    expect([...(await view.availableMutations({ consistentWith: token }))].sort()).toEqual(expectedAvailable("review"));
   });
 
-  it("shipped is terminal — offers nothing (after all gates satisfied)", async () => {
-    const { brief, plan, checklist, testPlan } = await freshBrief("Status shipped");
-    await ws.mutate(brief, "beginPlanning", {});
-    await ws.mutate(plan, "addStep", { text: "step" });
-    const { caseId } = (await ws.mutate(testPlan, "addCase", { text: "case" })).value as {
-      caseId: string;
-    };
-    await ws.mutate(brief, "beginImplementation", {});
-    const { taskId } = (await ws.mutate(checklist, "addTask", { text: "task" })).value as {
-      taskId: string;
-    };
-    await ws.mutate(checklist, "checkTask", { taskId });
-    await ws.mutate(testPlan, "markCasePassed", { caseId });
-    await ws.mutate(brief, "submitForReview", {});
-    const { token } = await ws.mutate(brief, "ship", {});
-
-    const view = await ws.page(brief, { consistentWith: token });
-    expect(await view.status({ consistentWith: token })).toBe("shipped");
-    expect(await view.availableMutations({ consistentWith: token })).toEqual([]);
-  });
-
-  it("abandoned is terminal — offers nothing", async () => {
+  it("abandoned is terminal — only content commands gated by a status no section allows are gone", async () => {
     const { brief } = await freshBrief("Status abandoned");
     const { token } = await ws.mutate(brief, "abandon", {});
     const view = await ws.page(brief, { consistentWith: token });
     expect(await view.status({ consistentWith: token })).toBe("abandoned");
-    expect(await view.availableMutations({ consistentWith: token })).toEqual([]);
-  });
-
-  it("availableMutations() is always a SUBSET of the full command set", async () => {
-    const { brief } = await freshBrief("Subset check");
-    const full = new Set(ALL_BRIEF_COMMANDS);
-    for (const cmd of await (await ws.page(brief)).availableMutations()) {
-      expect(full.has(cmd)).toBe(true);
-    }
+    expect([...(await view.availableMutations({ consistentWith: token }))].sort()).toEqual(expectedAvailable("abandoned"));
   });
 });

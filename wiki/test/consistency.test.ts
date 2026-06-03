@@ -78,8 +78,11 @@ describe("handle: a token-gated read reflects a prior write", () => {
     // The latest token names a head ≥ every earlier write, so a read gated on it
     // reflects BOTH the summary and the component.
     const state = await (await ws.page(brief, { consistentWith: last.token })).state();
-    expect((state.fields as { summary?: string }).summary).toBe("first");
-    expect(state.items.component.map((c) => c.name)).toEqual(["web-app"]);
+    const summary = state.sections.find((s) => s.key === "summary")?.fields.body;
+    expect(summary?.kind === "prose" ? summary.value : undefined).toBe("first");
+    const comps = state.sections.find((s) => s.key === "components")?.fields.items;
+    const names = comps?.kind === "list" ? comps.elements.map((e) => { const n = e.fields.name; return n?.kind === "scalar" ? n.value : undefined; }) : [];
+    expect(names).toEqual(["web-app"]);
   });
 });
 

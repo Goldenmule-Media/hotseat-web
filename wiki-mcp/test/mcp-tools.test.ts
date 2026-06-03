@@ -16,6 +16,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  arg,
   decodeToken,
   definePageType,
   encodeToken,
@@ -38,40 +39,19 @@ import { readResource, workspaceUri, pageUri, type WikiResourceContext } from ".
 
 // ── a tiny `note` page type with a body field ──────────────────────────────────
 
-interface NoteFields {
-  body?: string;
-}
-
-const Note = definePageType<NoteFields>({
+const Note = definePageType({
   type: "note",
-  initialStatus: "draft",
-  initialFields: {},
   version: 1,
-  items: {},
-  statusTransitions: [
-    t("draft", "setBody", "draft"),
-    t("draft", "publish", "published"),
-    t("published", "setBody", "published"),
-  ],
+  initialStatus: "draft",
+  statusTransitions: [t("draft", "publish", "published")],
+  sections: {
+    body: { name: "Body", required: true, mutableIn: ["draft", "published"], fields: { text: { kind: "prose" } } },
+  },
   commands: {
-    setBody: {
-      args: zodSchema(z.object({ text: z.string() })),
-      transition: { level: "page", event: "setBody" },
-      produces: (_p, a) => ({ events: [{ type: "BodySet", payload: { text: a.text } }], result: undefined }),
-    },
-    publish: {
-      args: zodSchema(z.object({}).strict()),
-      transition: { level: "page", event: "publish" },
-      produces: () => ({ events: [{ type: "Published", payload: {} }], result: undefined }),
-    },
+    setBody: { args: zodSchema(z.object({ text: z.string() })), target: { section: "body", field: "text" }, set: { text: arg("text") } },
+    publish: { args: zodSchema(z.object({})), transition: { level: "page", event: "publish" } },
   },
-  apply: (page, event) => {
-    const p = (event.payload ?? {}) as Record<string, unknown>;
-    if (event.type === "BodySet") page.fields.body = p.text as string;
-    else if (event.type === "Published") page.status = "published";
-    return page;
-  },
-  render: (page) => `# ${page.title}\n\n${page.fields.body ?? ""}`,
+  render: { sections: [{ section: "body", heading: "Body", field: "text", as: "block" }] },
 });
 
 const PAGE_TYPES = [Note] as const;
@@ -206,7 +186,7 @@ describe("MCP tools + token manager + resources", () => {
     // describeMutations reports the legal set for the page's CURRENT status.
     const desc = await tools.get("describeMutations")!.handle({ workspaceId: wsId, pageId }, ctx(session));
     const names = (desc.data as Array<{ name: string }>).map((d) => d.name).sort();
-    expect(names).toEqual(["publish", "setBody"]);
+    expect(names).toEqual(["publish", "setBody", "setBodyText"]);
 
     // renderPage shows the body (engine renderer, token-gated by the session).
     const rendered = await tools.get("renderPage")!.handle({ workspaceId: wsId, pageId }, ctx(session));

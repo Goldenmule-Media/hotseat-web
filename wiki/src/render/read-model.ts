@@ -1,0 +1,238 @@
+/**
+ * The configurable Markdown render READ MODEL (structured-content §8). Walks a
+ * page's section tree in render-config order and dispatches on each target field's
+ * field-kind to a per-kind default renderer. Pure over folded state + static config,
+ * so equal state renders byte-identically (§10). The per-type `render` is retired.
+ */
+import type {
+  IField,
+  IItem,
+  IPageNode,
+  IRenderCtx,
+  ISection,
+  IWorkspaceState,
+  PageId,
+  RefTarget,
+  RenderConfig,
+  SectionRender,
+  RootId,
+} from "../api";
+import { ROOT } from "../api";
+import type { Registry } from "../core/registry";
+import { renderBlocks, type LabelResolver } from "./blocks";
+import { bulletList, heading, joinBlocks, numbered, placeholder, section, statusBadge } from "./determinism";
+
+// ────────────────────────────────────────────────────────────────────────────
+// Render context (cross-page label resolution)
+// ────────────────────────────────────────────────────────────────────────────
+
+export function buildRenderCtx(state: IWorkspaceState, _registry: Registry): IRenderCtx {
+  const nodeOf = (id: PageId): IPageNode | undefined => state.pages.get(id);
+  return {
+    titleOf: (id) => nodeOf(id)?.title,
+    typeOf: (id) => nodeOf(id)?.type,
+    statusOf: (id) => nodeOf(id)?.status,
+    childrenOf: (id) => [...(state.children.get(id) ?? [])],
+    linksOf: (id) => state.links.filter((l) => l.from === id).map((l) => ({ to: l.to, role: l.role })),
+    backlinksOf: (id) => state.links.filter((l) => l.to === id).map((l) => ({ from: l.from, role: l.role })),
+  };
+}
+
+/** Resolve a ref target to its render-derived label (§3.2). */
+function makeLabelResolver(state: IWorkspaceState, page: IPageNode, ctx: IRenderCtx): LabelResolver {
+  return (target: RefTarget): string => {
+    switch (target.kind) {
+      case "page":
+        return ctx.titleOf(target.id) ?? String(target.id);
+      case "section": {
+        const sec = page.sections.find((s) => s.id === target.id);
+        return sec?.name ?? String(target.id);
+      }
+      case "symbol":
+        return target.name;
+      case "block":
+        return String(target.block);
+    }
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Field-kind rendering
+// ────────────────────────────────────────────────────────────────────────────
+
+function scalarToString(f: IField): string {
+  if (f.kind === "scalar") return String(f.value);
+  if (f.kind === "prose") return f.value;
+  return "";
+}
+
+/** Substitute `{field}` / `{field?}` against an element's fields. */
+function fillTemplate(template: string, el: IItem, label: LabelResolver): string {
+  return template.replace(/\{(\w+)(\?)?\}/g, (_m, key: string, optional: string) => {
+    const f = el.fields[key];
+    if (f === undefined) return optional === "?" ? "" : "";
+    return fieldInlineValue(f, label);
+  });
+}
+
+function fieldInlineValue(f: IField, label: LabelResolver): string {
+  switch (f.kind) {
+    case "scalar":
+      return String(f.value);
+    case "prose":
+      return f.value;
+    case "code":
+      return f.source;
+    case "attachment-ref":
+      return f.name;
+    case "ref":
+      return label(f.target);
+    case "blocks":
+      return renderBlocks(f.blocks, label);
+    case "list":
+      return "";
+  }
+}
+
+function renderListField(
+  f: { kind: "list"; elementType: string; elements: IItem[] },
+  sr: SectionRender,
+  label: LabelResolver,
+): string {
+  if (sr.groupBy !== undefined && sr.groups !== undefined) {
+    const blocks: string[] = [];
+    for (const g of sr.groups) {
+      const matched = f.elements.filter((el) => (el.status ?? "") === g.when);
+      const body =
+        matched.length === 0 ? placeholder() : bulletList(matched.map((el) => fillTemplate(g.item, el, label)));
+      blocks.push(section(heading(2, g.heading ?? g.when), body));
+    }
+    return blocks.join("\n\n");
+  }
+  const template = sr.item ?? "{text}";
+  const items = f.elements.map((el) => fillTemplate(template, el, label));
+  if (items.length === 0) return placeholder();
+  if (sr.as === "numbered") return numbered(items);
+  return bulletList(items);
+}
+
+function renderFieldBody(
+  f: IField,
+  sr: SectionRender,
+  label: LabelResolver,
+): string {
+  switch (f.kind) {
+    case "scalar":
+      return String(f.value).length === 0 ? placeholder() : String(f.value);
+    case "prose":
+      return f.value.length === 0 ? placeholder() : f.value;
+    case "code":
+      return "```" + f.lang + "\n" + f.source + "\n```";
+    case "attachment-ref":
+      return `[${f.name}](${f.ref})`;
+    case "ref":
+      return label(f.target);
+    case "blocks":
+      return f.blocks.length === 0 ? placeholder() : renderBlocks(f.blocks, label);
+    case "list":
+      return renderListField(f, sr, label);
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Page rendering
+// ────────────────────────────────────────────────────────────────────────────
+
+export function renderPage(state: IWorkspaceState, pageId: PageId, registry: Registry): string {
+  const node = state.pages.get(pageId);
+  if (node === undefined) {
+    return joinBlocks([heading(1, "Unknown page"), placeholder("_Page not found._")]);
+  }
+  const ctx = buildRenderCtx(state, registry);
+  const def = registry.page(node.type);
+  const config: RenderConfig = def.render;
+  const label = makeLabelResolver(state, node, ctx);
+
+  const blocks: string[] = [];
+  const title = config.title !== undefined ? config.title.replace("{title}", node.title) : node.title;
+  blocks.push(heading(1, title));
+  blocks.push(statusBadge(node.status));
+
+  for (const sr of config.sections) {
+    // Engine-derived sections (links / tree), positionable in render order.
+    if (sr.section === "@references") {
+      blocks.push(section(heading(2, sr.heading ?? "References"), renderReferences(node.id, ctx)));
+      continue;
+    }
+    if (sr.section === "@children") {
+      blocks.push(section(heading(2, sr.heading ?? "Child pages"), renderChildList(node.id, ctx)));
+      continue;
+    }
+    const sec: ISection | undefined = node.sections.find((s) => s.key === sr.section);
+    const headingText = sr.heading ?? (sec?.name ?? sr.section);
+
+    // grouped list → emit each group as its own H2 section (no parent heading).
+    if (sr.groupBy !== undefined && sr.groups !== undefined && sec !== undefined && sr.field !== undefined) {
+      const f = sec.fields[sr.field];
+      if (f !== undefined && f.kind === "list") {
+        blocks.push(renderListField(f, sr, label));
+        continue;
+      }
+    }
+
+    let body: string;
+    if (sec === undefined) {
+      body = sr.placeholder ?? placeholder();
+    } else {
+      const fieldKey = sr.field ?? Object.keys(sec.fields)[0];
+      const f = fieldKey !== undefined ? sec.fields[fieldKey] : undefined;
+      body = f === undefined ? (sr.placeholder ?? placeholder()) : renderFieldBody(f, sr, label);
+      if (body.length === 0) body = sr.placeholder ?? placeholder();
+    }
+    blocks.push(section(heading(2, headingText), body));
+  }
+
+  if (config.graphSections !== false) {
+    blocks.push(section(heading(2, "References"), renderReferences(node.id, ctx)));
+    blocks.push(section(heading(2, "Child pages"), renderChildList(node.id, ctx)));
+  }
+
+  return joinBlocks(blocks);
+}
+
+function renderReferences(id: PageId, ctx: IRenderCtx): string {
+  const links = ctx.linksOf(id);
+  if (links.length === 0) return placeholder();
+  return bulletList(links.map((l) => `${l.role} → ${ctx.titleOf(l.to) ?? l.to}`));
+}
+
+function renderChildList(id: PageId, ctx: IRenderCtx): string {
+  const children = ctx.childrenOf(id);
+  if (children.length === 0) return placeholder();
+  return bulletList(children.map((childId) => ctx.titleOf(childId) ?? childId));
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Workspace rendering
+// ────────────────────────────────────────────────────────────────────────────
+
+export function renderWorkspace(state: IWorkspaceState, registry: Registry): string {
+  const ctx = buildRenderCtx(state, registry);
+  const blocks: string[] = [heading(1, state.name)];
+
+  const visit = (id: PageId, level: number): void => {
+    const type = ctx.typeOf(id);
+    const status = ctx.statusOf(id);
+    const annotation = type !== undefined ? ` (${type}, ${status ?? ""})` : "";
+    blocks.push(heading(level, (ctx.titleOf(id) ?? id) + annotation));
+    for (const childId of ctx.childrenOf(id)) visit(childId, level + 1);
+  };
+
+  const roots: readonly (PageId | RootId)[] = ctx.childrenOf(ROOT);
+  if (roots.length === 0) {
+    blocks.push(placeholder("_No pages yet._"));
+  } else {
+    for (const rootId of roots) visit(rootId as PageId, 2);
+  }
+  return joinBlocks(blocks);
+}

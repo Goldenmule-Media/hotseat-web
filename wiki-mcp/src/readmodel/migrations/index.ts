@@ -7,10 +7,12 @@
 import type { Migration, MigrationProvider } from "kysely";
 
 import * as initial from "./001-initial.js";
+import * as sections from "./002-sections.js";
 
 /** All read-model migrations, keyed by name (Kysely sorts by key, ascending). */
 const MIGRATIONS: Record<string, Migration> = {
   "001-initial": { up: initial.up, down: initial.down },
+  "002-sections": { up: sections.up, down: sections.down },
 };
 
 /** A provider that returns the bundled {@link MIGRATIONS}. */

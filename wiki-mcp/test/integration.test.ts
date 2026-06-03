@@ -23,6 +23,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  arg,
   ConsistencyTimeoutError,
   decodeToken,
   definePageType,
@@ -34,6 +35,13 @@ import {
   type WorkspaceId,
 } from "wiki";
 import { Registry } from "wiki/registry";
+
+/** Read the `body.text` prose value out of a projected page row's `sections`. */
+function bodyOf(row: { sections?: unknown } | undefined): string | undefined {
+  const sections = (row?.sections ?? []) as Array<{ key?: string; fields?: Record<string, { kind?: string; value?: string }> }>;
+  const f = sections.find((s) => s.key === "body")?.fields?.text;
+  return f?.kind === "prose" ? f.value : undefined;
+}
 import { DurableStreamTestServer } from "@durable-streams/server";
 
 import { silentLogger } from "../src/logger.js";
@@ -48,40 +56,19 @@ import { wikiTools, type WikiTool, type WikiToolContext } from "../src/mcp/tools
 
 // ── a tiny `note` page type with a body field ──────────────────────────────────
 
-interface NoteFields {
-  body?: string;
-}
-
-const Note = definePageType<NoteFields>({
+const Note = definePageType({
   type: "note",
-  initialStatus: "draft",
-  initialFields: {},
   version: 1,
-  items: {},
-  statusTransitions: [
-    t("draft", "setBody", "draft"),
-    t("draft", "publish", "published"),
-    t("published", "setBody", "published"),
-  ],
+  initialStatus: "draft",
+  statusTransitions: [t("draft", "publish", "published")],
+  sections: {
+    body: { name: "Body", required: true, mutableIn: ["draft", "published"], fields: { text: { kind: "prose" } } },
+  },
   commands: {
-    setBody: {
-      args: zodSchema(z.object({ text: z.string() })),
-      transition: { level: "page", event: "setBody" },
-      produces: (_p, a) => ({ events: [{ type: "BodySet", payload: { text: a.text } }], result: undefined }),
-    },
-    publish: {
-      args: zodSchema(z.object({}).strict()),
-      transition: { level: "page", event: "publish" },
-      produces: () => ({ events: [{ type: "Published", payload: {} }], result: undefined }),
-    },
+    setBody: { args: zodSchema(z.object({ text: z.string() })), target: { section: "body", field: "text" }, set: { text: arg("text") } },
+    publish: { args: zodSchema(z.object({})), transition: { level: "page", event: "publish" } },
   },
-  apply: (page, event) => {
-    const p = (event.payload ?? {}) as Record<string, unknown>;
-    if (event.type === "BodySet") page.fields.body = p.text as string;
-    else if (event.type === "Published") page.status = "published";
-    return page;
-  },
-  render: (page) => `# ${page.title}\n\n${page.fields.body ?? ""}`,
+  render: { sections: [{ section: "body", heading: "Body", field: "text", as: "block" }] },
 });
 
 const PAGE_TYPES = [Note] as const;
@@ -174,7 +161,7 @@ describe("wiki-mcp integration: token semantics + read-your-writes + resume", ()
     //    (it predates the setBody, which we have NOT drained yet). ──
     const staleRow = await readModel.getPage(wsId, pageId);
     expect(staleRow?.title).toBe("Alpha");
-    expect(staleRow?.fields).toEqual({}); // body not yet projected → stale, but no error
+    expect(bodyOf(staleRow)).toBe(""); // body not yet projected → stale, but no error
 
     // ── read WITH the write's token: waitFor parks until we apply that version,
     //    then the read reflects the write. ──
@@ -191,7 +178,7 @@ describe("wiki-mcp integration: token semantics + read-your-writes + resume", ()
 
     // Now the token-consistent read reflects the write.
     const freshRow = await readModel.getPage(wsId, pageId);
-    expect(freshRow?.fields).toEqual({ body: "v1" });
+    expect(bodyOf(freshRow)).toBe("v1");
 
     // appliedToken now names exactly the applied head == the write token.
     expect(await readModel.appliedToken(wsId)).toBe(bodyToken);
@@ -314,7 +301,7 @@ describe("wiki-mcp integration: token semantics + read-your-writes + resume", ()
     // read-your-writes through the restarted read model: token2 is applied.
     await readModel2.waitFor(token2, { timeoutMs: 500 });
     const gamma = await readModel2.getPage(wsId, b2);
-    expect(gamma?.fields).toEqual({ body: "second" });
+    expect(bodyOf(gamma)).toBe("second");
     expect(gamma?.title).toBe("Gamma");
 
     const pages2 = await readModel2.listPages(wsId);
@@ -424,13 +411,13 @@ describe("wiki-mcp integration: token semantics + read-your-writes + resume", ()
     await projection.drain(scripted);
     expect(await appliedVersion(store.db, wsId)).toBe(prefixLen);
     const afterPrefix = await readModel.getPage(wsId, p);
-    expect(afterPrefix?.fields).toEqual({}); // body events not yet delivered
+    expect(bodyOf(afterPrefix)).toBe(""); // body events not yet delivered
 
     phase = "full";
     await projection.drain(scripted);
     expect(await appliedVersion(store.db, wsId)).toBe(fullHistory.length);
     const afterFull = await readModel.getPage(wsId, p);
-    expect(afterFull?.fields).toEqual({ body: "two" }); // resumed + applied the tail
+    expect(bodyOf(afterFull)).toBe("two"); // resumed + applied the tail
 
     // Event log has exactly one row per version — the offset-skip prevented
     // re-appending the prefix events on the second drain.
@@ -461,7 +448,7 @@ describe("wiki-mcp integration: token semantics + read-your-writes + resume", ()
     const { token: t2 } = await ws.mutate(pageId, "setBody", { text: "live" });
     projection.notify(ws.id);
     await readModel.waitFor(t2, { timeoutMs: 2000 });
-    expect((await readModel.getPage(ws.id, pageId))?.fields).toEqual({ body: "live" });
+    expect(bodyOf(await readModel.getPage(ws.id, pageId))).toBe("live");
   });
 
   it("the live tail projects EXTERNAL writes via subscribe — no notify, no manual drain", async () => {
@@ -493,7 +480,7 @@ describe("wiki-mcp integration: token semantics + read-your-writes + resume", ()
       // A further external write propagates via subscribe (now attached), no notify.
       const { token: t2 } = await ws2.mutate(pageId, "setBody", { text: "external-body" });
       await readModel.waitFor(t2, { timeoutMs: 4000 });
-      expect((await readModel.getPage(ws2.id, pageId))?.fields).toEqual({ body: "external-body" });
+      expect(bodyOf(await readModel.getPage(ws2.id, pageId))).toBe("external-body");
     } finally {
       await engine2.close();
     }

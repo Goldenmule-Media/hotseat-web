@@ -16,7 +16,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import { definePageType, t, z, zodSchema } from "wiki";
+import { arg, definePageType, t, z, zodSchema } from "wiki";
 import { DurableStreamTestServer } from "@durable-streams/server";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -25,25 +25,18 @@ import { createWikiMcp, silentLogger, type WikiMcp } from "../src/main.js";
 
 // Minimal page type so the engine has a registered schema (createWorkspace itself
 // needs none, but this keeps the instance realistic).
-const Note = definePageType<{ body?: string }>({
+const Note = definePageType({
   type: "note",
-  initialStatus: "draft",
-  initialFields: {},
   version: 1,
-  items: {},
-  statusTransitions: [t("draft", "setBody", "draft")],
+  initialStatus: "draft",
+  statusTransitions: [t("draft", "publish", "published")],
+  sections: {
+    body: { name: "Body", required: true, mutableIn: ["draft"], fields: { text: { kind: "prose" } } },
+  },
   commands: {
-    setBody: {
-      args: zodSchema(z.object({ text: z.string() })),
-      transition: { level: "page", event: "setBody" },
-      produces: (_p, a) => ({ events: [{ type: "BodySet", payload: { text: a.text } }], result: undefined }),
-    },
+    setBody: { args: zodSchema(z.object({ text: z.string() })), target: { section: "body", field: "text" }, set: { text: arg("text") } },
   },
-  apply: (page, event) => {
-    if (event.type === "BodySet") page.fields.body = (event.payload as { text: string }).text;
-    return page;
-  },
-  render: (page) => `# ${page.title}\n\n${page.fields.body ?? ""}`,
+  render: { sections: [{ section: "body", heading: "Body", field: "text", as: "block" }] },
 });
 
 /** Reserve an OS-assigned port, then release it for the MCP server to bind. */

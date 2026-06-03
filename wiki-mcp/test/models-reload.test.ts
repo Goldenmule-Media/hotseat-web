@@ -12,7 +12,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { definePageType, t, z, zodSchema, type WorkspaceId } from "wiki";
+import { arg, definePageType, t, z, zodSchema, type WorkspaceId } from "wiki";
 import { DurableStreamTestServer } from "@durable-streams/server";
 
 import { silentLogger } from "../src/logger.js";
@@ -26,37 +26,28 @@ import { ModelRegistry } from "../src/models/registry.js";
 
 // ── two tiny page types: `note` (seeded) and `memo` (added by the reload) ──────────
 
-const Note = definePageType<{ body?: string }>({
+const Note = definePageType({
   type: "note",
-  initialStatus: "draft",
-  initialFields: {},
   version: 1,
-  items: {},
-  statusTransitions: [t("draft", "setBody", "draft")],
+  initialStatus: "draft",
+  statusTransitions: [t("draft", "publish", "published")],
+  sections: {
+    body: { name: "Body", required: true, mutableIn: ["draft"], fields: { text: { kind: "prose" } } },
+  },
   commands: {
-    setBody: {
-      args: zodSchema(z.object({ text: z.string() })),
-      transition: { level: "page", event: "setBody" },
-      produces: (_p, a) => ({ events: [{ type: "BodySet", payload: { text: a.text } }], result: undefined }),
-    },
+    setBody: { args: zodSchema(z.object({ text: z.string() })), target: { section: "body", field: "text" }, set: { text: arg("text") } },
   },
-  apply: (page, event) => {
-    if (event.type === "BodySet") page.fields.body = (event.payload as { text: string }).text;
-    return page;
-  },
-  render: (page) => `# ${page.title}\n\n${page.fields.body ?? ""}`,
+  render: { sections: [{ section: "body", heading: "Body", field: "text", as: "block" }] },
 });
 
-const Memo = definePageType<Record<string, never>>({
+const Memo = definePageType({
   type: "memo",
-  initialStatus: "open",
-  initialFields: {},
   version: 1,
-  items: {},
+  initialStatus: "open",
   statusTransitions: [],
+  sections: {},
   commands: {},
-  apply: (page) => page,
-  render: (page) => `# ${page.title}`,
+  render: { sections: [] },
 });
 
 function counterClock(): () => string {

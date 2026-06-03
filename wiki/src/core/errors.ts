@@ -141,6 +141,62 @@ export class UnknownPageTypeError extends WikiError {
   }
 }
 
+export class SectionNotFoundError extends WikiError {
+  readonly section: string;
+  constructor(section: string) {
+    super("SECTION_NOT_FOUND", `Section "${section}" does not exist on this page.`);
+    this.section = section;
+  }
+}
+
+export class DuplicateSectionKeyError extends WikiError {
+  readonly key: string;
+  constructor(key: string) {
+    super("DUPLICATE_SECTION_KEY", `A sibling section already has the key "${key}".`);
+    this.key = key;
+  }
+}
+
+export class SectionContractError extends WikiError {
+  readonly detail: string;
+  constructor(detail: string) {
+    super("SECTION_CONTRACT", detail);
+    this.detail = detail;
+  }
+}
+
+export class FieldKindError extends WikiError {
+  readonly detail: string;
+  constructor(detail: string) {
+    super("FIELD_KIND", detail);
+    this.detail = detail;
+  }
+}
+
+export class RefIntegrityError extends WikiError {
+  readonly detail: string;
+  constructor(detail: string) {
+    super("REF_INTEGRITY", detail);
+    this.detail = detail;
+  }
+}
+
+export class BlockNormalFormError extends WikiError {
+  readonly detail: string;
+  constructor(detail: string) {
+    super("BLOCK_NORMAL_FORM", detail);
+    this.detail = detail;
+  }
+}
+
+export class PreconditionUnmetError extends WikiError {
+  readonly unmet: string;
+  constructor(unmet: string) {
+    super("PRECONDITION_UNMET", `Transition blocked: ${unmet}`);
+    this.unmet = unmet;
+  }
+}
+
 /**
  * Thrown when a token-gated read's `waitFor` exceeds its timeout — the read model
  * hasn't applied the requested {@link ConsistencyToken} in time (DESIGN §8.6/§14).

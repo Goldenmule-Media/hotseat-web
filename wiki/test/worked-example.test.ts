@@ -19,10 +19,28 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import type { IWiki, IWorkspaceHandle, PageId } from "../src/api";
-import { InvariantViolationError } from "../src/core/errors";
+import type { DeepReadonly, IItem, IField, IWiki, IWorkspaceHandle, PageState, PageId } from "../src/api";
+import { PreconditionUnmetError } from "../src/core/errors";
 import { featurePageTypes } from "wiki-models/feature";
 import { createTestWiki, type ITestWiki } from "../src/testing";
+
+/** Extract the elements of a `(section, field=items)` list from a page state. */
+function elements(state: DeepReadonly<PageState>, sectionKey: string, field = "items"): readonly DeepReadonly<IItem>[] {
+  const sec = state.sections.find((s) => s.key === sectionKey);
+  const f = sec?.fields[field] as DeepReadonly<IField> | undefined;
+  return f !== undefined && f.kind === "list" ? f.elements : [];
+}
+function fieldValue(state: DeepReadonly<PageState>, sectionKey: string, field: string): unknown {
+  const f = state.sections.find((s) => s.key === sectionKey)?.fields[field] as DeepReadonly<IField> | undefined;
+  if (f === undefined) return undefined;
+  if (f.kind === "prose" || f.kind === "scalar") return f.value;
+  return undefined;
+}
+function elFieldValue(el: DeepReadonly<IItem>, key: string): unknown {
+  const f = el.fields[key] as DeepReadonly<IField> | undefined;
+  if (f !== undefined && (f.kind === "prose" || f.kind === "scalar")) return f.value;
+  return undefined;
+}
 
 describe("worked example: plan → build → ship a feature", () => {
   let harness: ITestWiki;
@@ -137,14 +155,14 @@ describe("worked example: plan → build → ship a feature", () => {
     const { token: linkToken } = await ws.link(brief, rbac, "depends-on");
 
     const state = await (await ws.page(brief, { consistentWith: linkToken })).state();
-    expect(state.fields).toEqual({ summary: "Let users export their workspace as CSV/JSON." });
-    expect(state.items.component.map((c) => c.name)).toEqual(["web-app", "cli"]);
-    expect(state.items.constraint.map((c) => c.text)).toEqual([
+    expect(fieldValue(state, "summary", "body")).toBe("Let users export their workspace as CSV/JSON.");
+    expect(elements(state, "components").map((c) => elFieldValue(c, "name"))).toEqual(["web-app", "cli"]);
+    expect(elements(state, "constraints").map((c) => elFieldValue(c, "text"))).toEqual([
       "Export must stream; never buffer >50MB in memory.",
     ]);
-    const resolved = state.items.question.filter((q) => q.status === "resolved");
+    const resolved = elements(state, "questions").filter((q) => q.status === "resolved");
     expect(resolved).toHaveLength(1);
-    expect(resolved[0]?.answer).toBe("CSV and JSON; Parquet later.");
+    expect(elFieldValue(resolved[0]!, "answer")).toBe("CSV and JSON; Parquet later.");
   });
 
   it("blocks beginImplementation (InvariantViolationError) until plan ≥1 step AND testing-plan ≥1 case", async () => {
@@ -155,7 +173,7 @@ describe("worked example: plan → build → ship a feature", () => {
 
     // No plan steps, no test cases yet → gate fails.
     await expect(ws.mutate(brief, "beginImplementation", {})).rejects.toBeInstanceOf(
-      InvariantViolationError,
+      PreconditionUnmetError,
     );
 
     // Add ONE plan step — still missing a test case → gate still fails.
@@ -163,7 +181,7 @@ describe("worked example: plan → build → ship a feature", () => {
       text: "Stream a ReadableStream from a new /export endpoint.",
     });
     await expect(ws.mutate(brief, "beginImplementation", {})).rejects.toBeInstanceOf(
-      InvariantViolationError,
+      PreconditionUnmetError,
     );
 
     // Add the second step and a test case — now both halves of the gate pass.
@@ -187,27 +205,24 @@ describe("worked example: plan → build → ship a feature", () => {
 
     // Brief currently owns BOTH questions (q1 resolved, q2 open).
     const briefBeforeMove = await ws.page(brief, { consistentWith: ask2.token });
-    expect((await briefBeforeMove.state()).items.question.map((q) => q.id).sort()).toEqual(
+    expect(elements(await briefBeforeMove.state(), "questions").map((q) => q.id).sort()).toEqual(
       [q1, q2].sort(),
     );
 
     const beforeMove = (await ws.history({ consistentWith: ask2.token })).length;
-    const moveCommit = await ws.moveItem({ from: brief, to: plan, itemType: "question", itemId: q2 });
+    const moveCommit = await ws.moveItem({ from: brief, to: plan, section: "questions", field: "items", itemId: q2 });
     const moveEvents = (await ws.history({ consistentWith: moveCommit.token })).slice(beforeMove);
 
-    // Atomic: exactly one ItemRemoved (from brief) + one ItemAdded (to plan), in
-    // ONE commit (single occurredAt), or neither.
-    expect(moveEvents.map((e) => e.type)).toEqual(["ItemRemoved", "ItemAdded"]);
+    // Atomic: two SectionOpsApplied (remove from brief, add to plan), in ONE commit.
+    expect(moveEvents.map((e) => e.type)).toEqual(["SectionOpsApplied", "SectionOpsApplied"]);
     expect(moveEvents[0]?.pageId).toBe(brief);
     expect(moveEvents[1]?.pageId).toBe(plan);
     expect(new Set(moveEvents.map((e) => e.meta.occurredAt)).size).toBe(1);
 
     // Brief no longer owns q2; the plan now does (status preserved as "open").
-    const briefQuestions = (await (await ws.page(brief, { consistentWith: moveCommit.token })).state())
-      .items.question;
+    const briefQuestions = elements(await (await ws.page(brief, { consistentWith: moveCommit.token })).state(), "questions");
     expect(briefQuestions.map((q) => q.id)).toEqual([q1]);
-    const planQuestions = (await (await ws.page(plan, { consistentWith: moveCommit.token })).state())
-      .items.question;
+    const planQuestions = elements(await (await ws.page(plan, { consistentWith: moveCommit.token })).state(), "questions");
     expect(planQuestions.map((q) => q.id)).toEqual([q2]);
     expect(planQuestions[0]?.status).toBe("open");
   });
@@ -244,14 +259,13 @@ describe("worked example: plan → build → ship a feature", () => {
     const passedCommit = await ws.mutate(testPlan, "markCasePassed", { caseId: c1 });
 
     // Two tasks done, one still todo; the single case passed.
-    const tasks = (await (await ws.page(checklist, { consistentWith: passedCommit.token })).state())
-      .items.task;
+    const tasks = elements(await (await ws.page(checklist, { consistentWith: passedCommit.token })).state(), "tasks");
     expect(tasks.filter((t) => t.status === "done").map((t) => t.id).sort()).toEqual(
       [t1, t2].sort(),
     );
     expect(tasks.find((t) => t.id === t3)?.status).toBe("todo");
     expect(
-      (await (await ws.page(testPlan, { consistentWith: passedCommit.token })).state()).items.case.find(
+      elements(await (await ws.page(testPlan, { consistentWith: passedCommit.token })).state(), "cases").find(
         (c) => c.id === c1,
       )?.status,
     ).toBe("passed");
@@ -264,7 +278,7 @@ describe("worked example: plan → build → ship a feature", () => {
     );
 
     // t3 still todo → checklist not 100% done → ship is gated.
-    await expect(ws.mutate(brief, "ship", {})).rejects.toBeInstanceOf(InvariantViolationError);
+    await expect(ws.mutate(brief, "ship", {})).rejects.toBeInstanceOf(PreconditionUnmetError);
 
     // Finish the last task, but markComplete is NOT required by the gate — the gate
     // checks task statuses directly. Completing it should now satisfy the checklist.

@@ -1,58 +1,18 @@
 /**
- * `feature-brief` page type (BUILD_NOTES §6, DESIGN §13). The brief drives a
- * feature from draft → planning → building → review → shipped (+ abandoned),
- * mandates three child pages (created atomically), owns four item types
- * (`component`, `constraint`, `question`, `commit`), and enforces two cross-page
- * gates atomically via `ctx.related`:
- *   - beginImplementation: plan ≥1 step AND testing-plan ≥1 case.
- *   - ship: checklist 100% done (≥1 task), all cases passed (≥1 case), zero open questions.
- *
- * Everything here is pure: ids/time arrive via `ctx.newId`/`ctx.now`; no host
- * clock or RNG. `apply` owns ALL mutation (page.status + items + fields). `render`
- * matches DESIGN §13.5 byte-for-byte.
+ * `feature-brief` page type (structured-content §13). Declarative: sections +
+ * elements + lifecycle FSM + declarative commands + render config. No author
+ * apply/render/produces. The two cross-page gates (beginImplementation, ship)
+ * are pure `Precondition`s reading siblings via `related`.
  */
-import type {
-  DomainEvent,
-  IItemRecord,
-  IRelatedReader,
-  IRenderCtx,
-  PageId,
-  PageState,
-} from "wiki/authoring";
-import { definePageType, t } from "wiki/authoring";
-import { InvariantViolationError } from "wiki/authoring";
-import { zodSchema, z } from "wiki/authoring";
-import {
-  bulletList,
-  heading,
-  joinBlocks,
-  numbered,
-  placeholder,
-  section,
-  statusBadge,
-} from "wiki/authoring";
-import { commit, component, constraint, question } from "./items";
+import type { DeepReadonly, IItem, IRelatedReader, PageId, PageState, Precondition } from "wiki/authoring";
+import { arg, definePageType, t } from "wiki/authoring";
+import { z, zodSchema } from "wiki/authoring";
 
 // ────────────────────────────────────────────────────────────────────────────
-// Fields (scalars only — items live in `page.items`)
+// Cross-page gate helpers (read sibling/child state via `related`)
 // ────────────────────────────────────────────────────────────────────────────
 
-export interface FeatureBriefFields {
-  summary?: string;
-}
-
-const empty = z.object({}).strict();
-
-// ────────────────────────────────────────────────────────────────────────────
-// Cross-page gate helpers (read sibling/child state via ctx.related)
-// ────────────────────────────────────────────────────────────────────────────
-
-/** First child of `self` whose page type is `type`, or undefined. */
-function childOfType(
-  related: IRelatedReader,
-  self: PageId,
-  type: string,
-): ReturnType<IRelatedReader["page"]> | undefined {
+function childOfType(related: IRelatedReader, self: PageId, type: string): DeepReadonly<PageState> | undefined {
   for (const childId of related.childrenOf(self)) {
     const child = related.page(childId);
     if (child !== undefined && child.type === type) return child;
@@ -60,454 +20,203 @@ function childOfType(
   return undefined;
 }
 
-function itemsOf(
-  page: ReturnType<IRelatedReader["page"]> | undefined,
-  itemType: string,
-): readonly IItemRecord[] {
+function listElements(
+  page: DeepReadonly<PageState> | undefined,
+  sectionKey: string,
+  fieldKey: string,
+): readonly DeepReadonly<IItem>[] {
   if (page === undefined) return [];
-  const byType = page.items as unknown as Record<string, readonly IItemRecord[]>;
-  return byType[itemType] ?? [];
+  const sec = page.sections.find((s) => s.key === sectionKey);
+  const f = sec?.fields[fieldKey];
+  if (f !== undefined && f.kind === "list") return f.elements;
+  return [];
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Render (DESIGN §13.5)
-// ────────────────────────────────────────────────────────────────────────────
+const planHasStep: Precondition = (page, related) => {
+  const plan = childOfType(related, related.self, "implementation-plan");
+  return listElements(plan, "steps", "items").length >= 1 ? true : { unmet: "needs ≥1 implementation-plan step" };
+};
 
-function renderBrief(page: PageState<FeatureBriefFields>, ctx: IRenderCtx): string {
-  const blocks: string[] = [
-    heading(1, `Feature: ${page.title}`),
-    statusBadge(page.status),
-  ];
+const testPlanHasCase: Precondition = (page, related) => {
+  const testPlan = childOfType(related, related.self, "testing-plan");
+  return listElements(testPlan, "cases", "items").length >= 1 ? true : { unmet: "needs ≥1 testing-plan case" };
+};
 
-  // Summary
-  const summary = page.fields.summary;
-  blocks.push(
-    section(
-      heading(2, "Summary"),
-      typeof summary === "string" && summary.length > 0 ? summary : placeholder(),
-    ),
-  );
+const checklistComplete: Precondition = (page, related) => {
+  const checklist = childOfType(related, related.self, "implementation-checklist");
+  const tasks = listElements(checklist, "tasks", "items");
+  if (tasks.length < 1) return { unmet: "needs ≥1 implementation-checklist task" };
+  if (tasks.some((tk) => tk.status !== "done")) return { unmet: "all implementation-checklist tasks must be done" };
+  return true;
+};
 
-  // Components affected
-  const components = page.items.component ?? [];
-  blocks.push(
-    section(
-      heading(2, "Components affected"),
-      components.length === 0
-        ? placeholder()
-        : bulletList(components.map((c) => String(c.name ?? c.id))),
-    ),
-  );
+const allCasesPassed: Precondition = (page, related) => {
+  const testPlan = childOfType(related, related.self, "testing-plan");
+  const cases = listElements(testPlan, "cases", "items");
+  if (cases.length < 1) return { unmet: "needs ≥1 testing-plan case" };
+  if (cases.some((c) => c.status !== "passed")) return { unmet: "all testing-plan cases must be passed" };
+  return true;
+};
 
-  // Design constraints (numbered)
-  const constraints = page.items.constraint ?? [];
-  blocks.push(
-    section(
-      heading(2, "Design constraints"),
-      constraints.length === 0
-        ? placeholder()
-        : numbered(constraints.map((c) => String(c.text ?? c.id))),
-    ),
-  );
+const noOpenQuestions: Precondition = (page) => {
+  const open = listElements(page, "questions", "items").filter((q) => q.status !== "resolved");
+  return open.length === 0 ? true : { unmet: "zero open questions on the brief" };
+};
 
-  // Questions: Open / Resolved split
-  const questions = page.items.question ?? [];
-  const open = questions.filter((q) => q.status !== "resolved");
-  const resolved = questions.filter((q) => q.status === "resolved");
-  blocks.push(
-    section(
-      heading(2, "Open questions"),
-      open.length === 0
-        ? placeholder()
-        : bulletList(open.map((q) => `**${String(q.text ?? q.id)}**`)),
-    ),
-  );
-  blocks.push(
-    section(
-      heading(2, "Resolved questions"),
-      resolved.length === 0
-        ? placeholder()
-        : bulletList(
-            resolved.map((q) => {
-              const answer = typeof q.answer === "string" ? q.answer : "";
-              return `**${String(q.text ?? q.id)}** → ${answer}`;
-            }),
-          ),
-    ),
-  );
+const empty = z.object({});
 
-  // References (graph links)
-  const links = ctx.linksOf(page.id);
-  blocks.push(
-    section(
-      heading(2, "References"),
-      links.length === 0
-        ? placeholder()
-        : bulletList(links.map((l) => `${l.role} → ${ctx.titleOf(l.to) ?? l.to}`)),
-    ),
-  );
-
-  // Child pages (tree order)
-  const children = ctx.childrenOf(page.id);
-  blocks.push(
-    section(
-      heading(2, "Child pages"),
-      children.length === 0
-        ? placeholder()
-        : bulletList(children.map((id) => ctx.titleOf(id) ?? id)),
-    ),
-  );
-
-  // Commits
-  const commits = page.items.commit ?? [];
-  blocks.push(
-    section(
-      heading(2, "Commits"),
-      commits.length === 0
-        ? placeholder()
-        : bulletList(commits.map((c) => `\`${String(c.sha ?? "")}\` ${String(c.message ?? "")}`)),
-    ),
-  );
-
-  return joinBlocks(blocks);
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Apply (owns page.status + items + fields)
-// ────────────────────────────────────────────────────────────────────────────
-
-function applyBrief(
-  page: PageState<FeatureBriefFields>,
-  event: DomainEvent,
-): PageState<FeatureBriefFields> {
-  const p = event.payload as Record<string, unknown>;
-  switch (event.type) {
-    // ── status transitions ──
-    case "PlanningBegan":
-      page.status = "planning";
-      break;
-    case "ImplementationBegan":
-      page.status = "building";
-      break;
-    case "PlanningReopened":
-      page.status = "planning";
-      break;
-    case "SubmittedForReview":
-      page.status = "review";
-      break;
-    case "ChangesRequested":
-      page.status = "building";
-      break;
-    case "Shipped":
-      page.status = "shipped";
-      break;
-    case "Abandoned":
-      page.status = "abandoned";
-      break;
-
-    // ── content: fields ──
-    case "SummarySet":
-      page.fields.summary = p.text as string;
-      break;
-
-    // ── content: components ──
-    case "ComponentAdded":
-      page.items.component.push({ id: p.id as string, name: p.name as string });
-      break;
-    case "ComponentRemoved":
-      page.items.component = page.items.component.filter((c) => c.id !== (p.id as string));
-      break;
-
-    // ── content: constraints ──
-    case "ConstraintAdded":
-      page.items.constraint.push({ id: p.id as string, text: p.text as string });
-      break;
-    case "ConstraintRemoved":
-      page.items.constraint = page.items.constraint.filter((c) => c.id !== (p.id as string));
-      break;
-
-    // ── content: questions ──
-    case "QuestionAsked":
-      page.items.question.push({ id: p.id as string, text: p.text as string, status: "open" });
-      break;
-    case "QuestionAnswered": {
-      const q = page.items.question.find((x) => x.id === (p.id as string));
-      if (q !== undefined) {
-        q.status = "resolved";
-        q.answer = p.answer as string;
-      }
-      break;
-    }
-
-    // ── content: commits ──
-    case "CommitRecorded":
-      page.items.commit.push({
-        id: p.id as string,
-        sha: p.sha as string,
-        message: p.message as string,
-        ...(p.url !== undefined ? { url: p.url as string } : {}),
-      });
-      break;
-  }
-  return page;
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Page type
-// ────────────────────────────────────────────────────────────────────────────
-
-export const FeatureBrief = definePageType<FeatureBriefFields>({
+export const FeatureBrief = definePageType({
   type: "feature-brief",
-  initialStatus: "draft",
-  initialFields: {},
   version: 1,
-  requiredChildren: ["implementation-plan", "implementation-checklist", "testing-plan"],
-  items: { component, constraint, question, commit },
+  initialStatus: "draft",
   statusTransitions: [
-    // draft self-transitions
-    t("draft", "setSummary", "draft"),
-    t("draft", "addComponent", "draft"),
-    t("draft", "removeComponent", "draft"),
-    t("draft", "addConstraint", "draft"),
-    t("draft", "removeConstraint", "draft"),
-    t("draft", "askQuestion", "draft"),
-    t("draft", "answerQuestion", "draft"),
     t("draft", "beginPlanning", "planning"),
-    t("draft", "abandon", "abandoned"),
-    // planning self-transitions
-    t("planning", "addConstraint", "planning"),
-    t("planning", "removeConstraint", "planning"),
-    t("planning", "askQuestion", "planning"),
-    t("planning", "answerQuestion", "planning"),
     t("planning", "beginImplementation", "building"),
-    t("planning", "abandon", "abandoned"),
-    // building self-transitions
-    t("building", "addConstraint", "building"),
-    t("building", "askQuestion", "building"),
-    t("building", "answerQuestion", "building"),
-    t("building", "recordCommit", "building"),
     t("building", "reopenPlanning", "planning"),
     t("building", "submitForReview", "review"),
-    t("building", "abandon", "abandoned"),
-    // review self-transitions
-    t("review", "recordCommit", "review"),
     t("review", "requestChanges", "building"),
     t("review", "ship", "shipped"),
+    t("draft", "abandon", "abandoned"),
+    t("planning", "abandon", "abandoned"),
+    t("building", "abandon", "abandoned"),
     t("review", "abandon", "abandoned"),
   ],
+  sections: {
+    summary: {
+      name: "Summary",
+      required: true,
+      mutableIn: ["draft", "planning"],
+      fields: { body: { kind: "prose", required: true } },
+    },
+    components: {
+      name: "Components affected",
+      required: true,
+      mutableIn: ["draft", "planning", "building"],
+      fields: { items: { kind: "list", element: "component" } },
+    },
+    constraints: {
+      name: "Design constraints",
+      required: true,
+      mutableIn: ["draft", "planning", "building"],
+      fields: { items: { kind: "list", element: "constraint", ordered: true } },
+    },
+    questions: {
+      name: "Questions",
+      required: true,
+      mutableIn: ["draft", "planning", "building", "review"],
+      fields: { items: { kind: "list", element: "question" } },
+    },
+    commits: {
+      name: "Commits",
+      required: true,
+      mutableIn: ["building", "review"],
+      fields: { items: { kind: "list", element: "commit" } },
+    },
+  },
+  elements: {
+    component: { fields: { name: { kind: "scalar", required: true } } },
+    constraint: { fields: { text: { kind: "prose", required: true } } },
+    question: {
+      fields: { text: { kind: "prose", required: true }, answer: { kind: "prose" } },
+      status: { initial: "open", transitions: [t("open", "answer", "resolved")] },
+    },
+    commit: {
+      fields: {
+        sha: { kind: "scalar", required: true },
+        message: { kind: "scalar", required: true },
+        url: { kind: "scalar" },
+      },
+    },
+  },
+  sectionSet: { mode: "closed" },
+  requiredChildren: ["implementation-plan", "implementation-checklist", "testing-plan"],
   commands: {
     setSummary: {
       args: zodSchema(z.object({ text: z.string() })),
-      transition: { level: "page", event: "setSummary" },
-      produces: (_page, args, _ctx) => ({
-        events: [{ type: "SummarySet", payload: { text: args.text } }],
-        result: undefined,
-      }),
+      target: { section: "summary", field: "body" },
+      set: { body: arg("text") },
     },
-
     addComponent: {
       args: zodSchema(z.object({ name: z.string() })),
       result: zodSchema(z.object({ componentId: z.string() })),
-      transition: { level: "page", event: "addComponent" },
-      produces: (_page, args, ctx) => {
-        const id = ctx.newId();
-        return {
-          events: [{ type: "ComponentAdded", payload: { id, name: args.name } }],
-          result: { componentId: id },
-        };
-      },
+      target: { section: "components", field: "items" },
+      set: { name: arg("name") },
     },
-
     removeComponent: {
       args: zodSchema(z.object({ componentId: z.string() })),
-      transition: { level: "page", event: "removeComponent" },
-      produces: (_page, args, _ctx) => ({
-        events: [{ type: "ComponentRemoved", payload: { id: args.componentId } }],
-        result: undefined,
-      }),
+      target: { section: "components", field: "items" },
+      produces: (_page, args) => [
+        { op: "removeElement", section: "components", field: "items", id: (args as { componentId: string }).componentId },
+      ],
     },
-
     addConstraint: {
       args: zodSchema(z.object({ text: z.string() })),
       result: zodSchema(z.object({ constraintId: z.string() })),
-      transition: { level: "page", event: "addConstraint" },
-      produces: (_page, args, ctx) => {
-        const id = ctx.newId();
-        return {
-          events: [{ type: "ConstraintAdded", payload: { id, text: args.text } }],
-          result: { constraintId: id },
-        };
-      },
+      target: { section: "constraints", field: "items" },
+      set: { text: arg("text") },
     },
-
     removeConstraint: {
       args: zodSchema(z.object({ constraintId: z.string() })),
-      transition: { level: "page", event: "removeConstraint" },
-      produces: (_page, args, _ctx) => ({
-        events: [{ type: "ConstraintRemoved", payload: { id: args.constraintId } }],
-        result: undefined,
-      }),
+      target: { section: "constraints", field: "items" },
+      produces: (_page, args) => [
+        { op: "removeElement", section: "constraints", field: "items", id: (args as { constraintId: string }).constraintId },
+      ],
     },
-
     askQuestion: {
       args: zodSchema(z.object({ text: z.string() })),
       result: zodSchema(z.object({ questionId: z.string() })),
-      transition: { level: "page", event: "askQuestion" },
-      produces: (_page, args, ctx) => {
-        const id = ctx.newId();
-        return {
-          events: [{ type: "QuestionAsked", payload: { id, text: args.text } }],
-          result: { questionId: id },
-        };
-      },
+      target: { section: "questions", field: "items" },
+      set: { text: arg("text") },
     },
-
     answerQuestion: {
       args: zodSchema(z.object({ questionId: z.string(), answer: z.string() })),
       result: zodSchema(z.object({ questionId: z.string() })),
-      transition: {
-        level: "item",
-        itemType: "question",
-        idArg: "questionId",
-        event: "answerQuestion",
-      },
-      produces: (_page, args, _ctx) => ({
-        events: [
-          { type: "QuestionAnswered", payload: { id: args.questionId, answer: args.answer } },
-        ],
-        result: { questionId: args.questionId },
-      }),
+      target: { section: "questions", field: "items", element: { idArg: "questionId" } },
+      set: { answer: arg("answer") },
+      transition: { level: "element", event: "answer" },
     },
-
     recordCommit: {
-      args: zodSchema(
-        z.object({ sha: z.string(), message: z.string(), url: z.string().optional() }),
-      ),
+      args: zodSchema(z.object({ sha: z.string(), message: z.string(), url: z.string().optional() })),
       result: zodSchema(z.object({ commitId: z.string() })),
-      transition: { level: "page", event: "recordCommit" },
-      produces: (_page, args, ctx) => {
-        const id = ctx.newId();
-        return {
-          events: [
-            {
-              type: "CommitRecorded",
-              payload: {
-                id,
-                sha: args.sha,
-                message: args.message,
-                ...(args.url !== undefined ? { url: args.url } : {}),
-              },
-            },
-          ],
-          result: { commitId: id },
-        };
-      },
+      target: { section: "commits", field: "items" },
+      set: { sha: arg("sha"), message: arg("message"), url: arg("url") },
     },
-
-    beginPlanning: {
-      args: zodSchema(empty),
-      transition: { level: "page", event: "beginPlanning" },
-      produces: (_page, _args, _ctx) => ({
-        events: [{ type: "PlanningBegan", payload: {} }],
-        result: undefined,
-      }),
-    },
-
+    beginPlanning: { args: zodSchema(empty), transition: { level: "page", event: "beginPlanning" } },
     beginImplementation: {
       args: zodSchema(empty),
       transition: { level: "page", event: "beginImplementation" },
-      produces: (_page, _args, ctx) => {
-        const { related } = ctx;
-        const plan = childOfType(related, related.self, "implementation-plan");
-        const testPlan = childOfType(related, related.self, "testing-plan");
-        const steps = itemsOf(plan, "step");
-        const cases = itemsOf(testPlan, "case");
-        const missing: string[] = [];
-        if (steps.length < 1) missing.push("≥1 implementation-plan step");
-        if (cases.length < 1) missing.push("≥1 testing-plan case");
-        if (missing.length > 0) {
-          throw new InvariantViolationError(
-            `Cannot begin implementation: needs ${missing.join(" and ")}.`,
-          );
-        }
-        return {
-          events: [{ type: "ImplementationBegan", payload: {} }],
-          result: undefined,
-        };
-      },
+      preconditions: [planHasStep, testPlanHasCase],
     },
-
-    reopenPlanning: {
-      args: zodSchema(empty),
-      transition: { level: "page", event: "reopenPlanning" },
-      produces: (_page, _args, _ctx) => ({
-        events: [{ type: "PlanningReopened", payload: {} }],
-        result: undefined,
-      }),
-    },
-
-    submitForReview: {
-      args: zodSchema(empty),
-      transition: { level: "page", event: "submitForReview" },
-      produces: (_page, _args, _ctx) => ({
-        events: [{ type: "SubmittedForReview", payload: {} }],
-        result: undefined,
-      }),
-    },
-
-    requestChanges: {
-      args: zodSchema(empty),
-      transition: { level: "page", event: "requestChanges" },
-      produces: (_page, _args, _ctx) => ({
-        events: [{ type: "ChangesRequested", payload: {} }],
-        result: undefined,
-      }),
-    },
-
+    submitForReview: { args: zodSchema(empty), transition: { level: "page", event: "submitForReview" } },
+    reopenPlanning: { args: zodSchema(empty), transition: { level: "page", event: "reopenPlanning" } },
+    requestChanges: { args: zodSchema(empty), transition: { level: "page", event: "requestChanges" } },
     ship: {
       args: zodSchema(empty),
       transition: { level: "page", event: "ship" },
-      produces: (page, _args, ctx) => {
-        const { related } = ctx;
-        const checklist = childOfType(related, related.self, "implementation-checklist");
-        const testPlan = childOfType(related, related.self, "testing-plan");
-        const tasks = itemsOf(checklist, "task");
-        const cases = itemsOf(testPlan, "case");
-        const openQuestions = (page.items.question ?? []).filter((q) => q.status !== "resolved");
-
-        const missing: string[] = [];
-        if (tasks.length < 1) {
-          missing.push("≥1 implementation-checklist task");
-        } else if (tasks.some((task) => task.status !== "done")) {
-          missing.push("all implementation-checklist tasks done");
-        }
-        if (cases.length < 1) {
-          missing.push("≥1 testing-plan case");
-        } else if (cases.some((c) => c.status !== "passed")) {
-          missing.push("all testing-plan cases passed");
-        }
-        if (openQuestions.length > 0) {
-          missing.push("zero open questions on the brief");
-        }
-        if (missing.length > 0) {
-          throw new InvariantViolationError(`Cannot ship: needs ${missing.join(" and ")}.`);
-        }
-        return {
-          events: [{ type: "Shipped", payload: {} }],
-          result: undefined,
-        };
-      },
+      preconditions: [checklistComplete, allCasesPassed, noOpenQuestions],
     },
-
-    abandon: {
-      args: zodSchema(empty),
-      transition: { level: "page", event: "abandon" },
-      produces: (_page, _args, _ctx) => ({
-        events: [{ type: "Abandoned", payload: {} }],
-        result: undefined,
-      }),
-    },
+    abandon: { args: zodSchema(empty), transition: { level: "page", event: "abandon" } },
   },
-  apply: applyBrief,
-  render: renderBrief,
+  render: {
+    title: "Feature: {title}",
+    graphSections: false,
+    sections: [
+      { section: "summary", heading: "Summary", field: "body", as: "block", placeholder: "_None._" },
+      { section: "components", heading: "Components affected", field: "items", as: "bullets", item: "{name}" },
+      { section: "constraints", heading: "Design constraints", field: "items", as: "numbered", item: "{text}" },
+      {
+        section: "questions",
+        heading: "Questions",
+        field: "items",
+        groupBy: "status",
+        groups: [
+          { when: "open", heading: "Open questions", item: "**{text}**" },
+          { when: "resolved", heading: "Resolved questions", item: "**{text}** → {answer}" },
+        ],
+      },
+      { section: "@references", heading: "References" },
+      { section: "@children", heading: "Child pages" },
+      { section: "commits", heading: "Commits", field: "items", as: "bullets", item: "`{sha}` {message}" },
+    ],
+  },
 });

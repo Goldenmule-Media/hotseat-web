@@ -15,6 +15,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  arg,
   ConsistencyTimeoutError,
   createWiki,
   definePageType,
@@ -38,44 +39,27 @@ import { buildStore, migrateToLatest, type ReadModelStore } from "../src/readmod
 
 // ── a tiny page type: a `note` with a body field and `task` items ──────────────
 
-interface NoteFields {
-  body?: string;
-}
-
-const Note = definePageType<NoteFields>({
+const Note = definePageType({
   type: "note",
-  initialStatus: "draft",
-  initialFields: {},
   version: 1,
-  items: {},
-  statusTransitions: [
-    t("draft", "setBody", "draft"),
-    t("draft", "publish", "published"),
-    t("published", "setBody", "published"),
-  ],
+  initialStatus: "draft",
+  statusTransitions: [t("draft", "publish", "published")],
+  sections: {
+    body: { name: "Body", required: true, mutableIn: ["draft", "published"], fields: { text: { kind: "prose" } } },
+  },
   commands: {
-    setBody: {
-      args: zodSchema(z.object({ text: z.string() })),
-      transition: { level: "page", event: "setBody" },
-      produces: (_page, args) => ({
-        events: [{ type: "BodySet", payload: { text: args.text } }],
-        result: undefined,
-      }),
-    },
-    publish: {
-      args: zodSchema(z.object({}).strict()),
-      transition: { level: "page", event: "publish" },
-      produces: () => ({ events: [{ type: "Published", payload: {} }], result: undefined }),
-    },
+    setBody: { args: zodSchema(z.object({ text: z.string() })), target: { section: "body", field: "text" }, set: { text: arg("text") } },
+    publish: { args: zodSchema(z.object({})), transition: { level: "page", event: "publish" } },
   },
-  apply: (page, event) => {
-    const p = (event.payload ?? {}) as Record<string, unknown>;
-    if (event.type === "BodySet") page.fields.body = p.text as string;
-    else if (event.type === "Published") page.status = "published";
-    return page;
-  },
-  render: (page) => `# ${page.title}\n\n${page.fields.body ?? ""}`,
+  render: { sections: [{ section: "body", heading: "Body", field: "text", as: "block" }] },
 });
+
+/** Read the `body.text` prose value out of a projected page row's `sections`. */
+function bodyOf(row: { sections?: unknown } | undefined): string | undefined {
+  const sections = (row?.sections ?? []) as Array<{ key?: string; fields?: Record<string, { kind?: string; value?: string }> }>;
+  const f = sections.find((s) => s.key === "body")?.fields?.text;
+  return f?.kind === "prose" ? f.value : undefined;
+}
 
 const PAGE_TYPES = [Note] as const;
 
@@ -149,14 +133,14 @@ describe("SQL read model: fold → serialize → SQL", () => {
       expect(row.title).toBe(node!.title);
       expect(row.status).toBe(node!.status);
       expect(row.parent_id).toBe(node!.parentId);
-      // fields JSONB round-trips to the folded fields
-      expect(row.fields).toEqual(node!.fields);
+      // sections JSONB round-trips to the folded sections
+      expect(row.sections).toEqual(node!.sections);
     }
 
     // the published note really is published (proves status folded through)
     const beta = await readModel.getPage(wsId, b);
     expect(beta?.status).toBe("published");
-    expect(beta?.fields).toEqual({ body: "world" });
+    expect(bodyOf(beta)).toBe("world");
 
     // ── tree edges match the folded children map (ordered) ──
     const edges = await readModel.treeEdges(wsId);

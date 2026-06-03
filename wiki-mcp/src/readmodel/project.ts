@@ -16,15 +16,29 @@
 import { ROOT } from "wiki";
 import { Registry } from "wiki/registry";
 import { foldWorkspace } from "wiki";
-import type { IEventEnvelope, IWorkspaceState, PageId, WorkspaceId } from "wiki";
+import type {
+  IBlock,
+  IField,
+  IInline,
+  IPageNode,
+  ISection,
+  IEventEnvelope,
+  IWorkspaceState,
+  PageId,
+  RefTarget,
+  WorkspaceId,
+} from "wiki";
 import type { Insertable, Kysely } from "kysely";
 
 import type {
   EventsTable,
   LinksTable,
+  OutlineTable,
   PagesTable,
   ReadModelDatabase,
+  SymbolIndexTable,
   TreeEdgesTable,
+  XrefIndexTable,
 } from "./schema.js";
 
 /** Insertable row shapes: JSONB columns are `string` on the way in (we serialize). */
@@ -32,6 +46,9 @@ type PageInsert = Insertable<PagesTable>;
 type TreeEdgeInsert = Insertable<TreeEdgesTable>;
 type LinkInsert = Insertable<LinksTable>;
 type EventInsert = Insertable<EventsTable>;
+type OutlineInsert = Insertable<OutlineTable>;
+type SymbolInsert = Insertable<SymbolIndexTable>;
+type XrefInsert = Insertable<XrefIndexTable>;
 
 /** Serialize a JS value to the `string` JSONB columns expect on insert. */
 function toJsonb(value: unknown): string {
@@ -49,12 +66,108 @@ function pageRows(state: IWorkspaceState): PageInsert[] {
       parent_id: node.parentId,
       title: node.title,
       status: node.status,
-      // JSONB columns: Insertable type is `string`; we serialize ourselves.
-      fields: toJsonb(node.fields),
-      items: toJsonb(node.items),
+      // JSONB column: Insertable type is `string`; we serialize ourselves.
+      sections: toJsonb(node.sections),
       created_at: node.createdAt,
       updated_at: node.updatedAt,
     });
+  }
+  return rows;
+}
+
+/** Build `outline` rows — the section tree, straight from folded state (§11). */
+function outlineRows(state: IWorkspaceState): OutlineInsert[] {
+  const rows: OutlineInsert[] = [];
+  for (const node of state.pages.values()) {
+    for (const sec of node.sections) {
+      rows.push({
+        workspace_id: state.id,
+        page_id: node.id,
+        section_id: sec.id,
+        parent_section_id: sec.parentId,
+        key: sec.key,
+        name: sec.name,
+        ord: sec.order,
+      });
+    }
+  }
+  return rows;
+}
+
+/** Build the `symbol_index` STUB rows — canonical code locations only (§11/§12). */
+function symbolRows(state: IWorkspaceState): SymbolInsert[] {
+  const rows: SymbolInsert[] = [];
+  const pushCode = (node: IPageNode, sec: ISection, field: string, blockId: string | null, lang: string, hash: string): void => {
+    rows.push({
+      workspace_id: state.id,
+      page_id: node.id,
+      section_id: sec.id,
+      field,
+      block_id: blockId,
+      lang,
+      source_hash: hash,
+      name: null,
+      kind: null,
+      range: null,
+    });
+  };
+  const walkBlocks = (node: IPageNode, sec: ISection, field: string, blocks: IBlock[]): void => {
+    for (const b of blocks) {
+      if (b.kind === "code") pushCode(node, sec, field, b.id, b.lang, b.hash);
+      else if (b.kind === "quote") walkBlocks(node, sec, field, b.blocks);
+      else if (b.kind === "list") for (const item of b.items) walkBlocks(node, sec, field, item);
+    }
+  };
+  for (const node of state.pages.values()) {
+    for (const sec of node.sections) {
+      for (const [fk, f] of Object.entries(sec.fields)) {
+        if (f.kind === "code") pushCode(node, sec, fk, null, f.lang, f.hash);
+        else if (f.kind === "blocks") walkBlocks(node, sec, fk, f.blocks);
+      }
+    }
+  }
+  return rows;
+}
+
+/** Build `xref_index` rows — every `ref` field + inline ref, harvested deep (§7). */
+function xrefRows(state: IWorkspaceState): XrefInsert[] {
+  const rows: XrefInsert[] = [];
+  const push = (node: IPageNode, sec: ISection, field: string, target: RefTarget): void => {
+    rows.push({
+      workspace_id: state.id,
+      from_page: node.id,
+      from_section: sec.id,
+      from_field: field,
+      target_kind: target.kind,
+      target_page: target.kind === "page" ? target.id : null,
+      target_section: target.kind === "section" ? target.id : "section" in target ? target.section : null,
+      target_block: target.kind === "block" ? target.block : null,
+      target_name: target.kind === "symbol" ? target.name : null,
+    });
+  };
+  const walkInlines = (node: IPageNode, sec: ISection, field: string, inlines: IInline[]): void => {
+    for (const run of inlines) if (run.kind === "ref") push(node, sec, field, run.target);
+  };
+  const walkBlocks = (node: IPageNode, sec: ISection, field: string, blocks: IBlock[]): void => {
+    for (const b of blocks) {
+      if (b.kind === "paragraph" || b.kind === "heading") walkInlines(node, sec, field, b.inlines);
+      else if (b.kind === "quote") walkBlocks(node, sec, field, b.blocks);
+      else if (b.kind === "list") for (const item of b.items) walkBlocks(node, sec, field, item);
+      else if (b.kind === "table") {
+        for (const cell of b.header) walkInlines(node, sec, field, cell);
+        for (const row of b.rows) for (const cell of row) walkInlines(node, sec, field, cell);
+      }
+    }
+  };
+  const walkField = (node: IPageNode, sec: ISection, field: string, f: IField): void => {
+    if (f.kind === "ref") push(node, sec, field, f.target);
+    else if (f.kind === "blocks") walkBlocks(node, sec, field, f.blocks);
+    else if (f.kind === "list") for (const el of f.elements) for (const [efk, ef] of Object.entries(el.fields)) walkField(node, sec, `${field}.${efk}`, ef);
+  };
+  for (const node of state.pages.values()) {
+    for (const sec of node.sections) {
+      for (const [fk, f] of Object.entries(sec.fields)) walkField(node, sec, fk, f);
+    }
   }
   return rows;
 }
@@ -163,6 +276,9 @@ export async function applyCommit(
   const edges = treeEdgeRows(state);
   const links = linkRows(state);
   const events = eventRows(commit.workspaceId, commit.events);
+  const outline = outlineRows(state);
+  const symbols = symbolRows(state);
+  const xrefs = xrefRows(state);
   const cursor = commit.cursor ?? null;
 
   await db.transaction().execute(async (trx) => {
@@ -172,6 +288,9 @@ export async function applyCommit(
     await trx.deleteFrom("pages").where("workspace_id", "=", commit.workspaceId).execute();
     await trx.deleteFrom("tree_edges").where("workspace_id", "=", commit.workspaceId).execute();
     await trx.deleteFrom("links").where("workspace_id", "=", commit.workspaceId).execute();
+    await trx.deleteFrom("outline").where("workspace_id", "=", commit.workspaceId).execute();
+    await trx.deleteFrom("symbol_index").where("workspace_id", "=", commit.workspaceId).execute();
+    await trx.deleteFrom("xref_index").where("workspace_id", "=", commit.workspaceId).execute();
 
     await trx
       .insertInto("workspaces")
@@ -184,6 +303,9 @@ export async function applyCommit(
     if (pages.length > 0) await trx.insertInto("pages").values(pages).execute();
     if (edges.length > 0) await trx.insertInto("tree_edges").values(edges).execute();
     if (links.length > 0) await trx.insertInto("links").values(links).execute();
+    if (outline.length > 0) await trx.insertInto("outline").values(outline).execute();
+    if (symbols.length > 0) await trx.insertInto("symbol_index").values(symbols).execute();
+    if (xrefs.length > 0) await trx.insertInto("xref_index").values(xrefs).execute();
 
     // Append the commit's events (idempotent on the (workspace, version) PK).
     if (events.length > 0) {

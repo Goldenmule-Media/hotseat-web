@@ -11,18 +11,20 @@
  * the node. Pure & total: no host clock / RNG (time + ids ride in the envelopes).
  */
 import type {
-  DomainEvent,
   IEventEnvelope,
-  IItemRecord,
   IPageNode,
+  ISection,
   IWorkspaceState,
   PageId,
-  PageState,
   RootId,
+  SectionId,
+  SectionOpsAppliedPayload,
+  PageState,
   WorkspaceId,
 } from "../api";
 import { ROOT } from "../api";
 import { UnknownPageTypeError } from "./errors";
+import { applyOps, materializeSectionFields } from "./operations";
 import type { Registry } from "./registry";
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -40,9 +42,10 @@ export const STRUCTURAL_EVENT_TYPES = [
   "LinkAdded",
   "LinkRemoved",
   "WorkspaceArchived",
-  "ItemAdded",
-  "ItemRemoved",
 ] as const;
+
+/** The single engine content event type — its payload is an ordered `SectionOp[]`. */
+export const SECTION_OPS_EVENT = "SectionOpsApplied" as const;
 
 /** Union of the structural/workspace event type tags. */
 export type StructuralEventType = (typeof STRUCTURAL_EVENT_TYPES)[number];
@@ -66,6 +69,8 @@ interface PageCreatedPayload {
   readonly parentId?: PageId | null;
   readonly title: string;
   readonly pinned?: boolean;
+  /** Pre-minted ids for the required sections so the reducer stays id-free (§2.4). */
+  readonly requiredSectionIds?: Record<string, SectionId>;
 }
 interface PageReparentedPayload {
   readonly pageId: PageId;
@@ -89,10 +94,6 @@ interface LinkPayload {
   readonly to: PageId;
   readonly role: string;
 }
-interface ItemMovePayload {
-  readonly itemType: string;
-  readonly item: IItemRecord;
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // PageState view (shared-reference window onto an IPageNode)
@@ -110,20 +111,18 @@ export function pageStateView(node: IPageNode): PageState {
     parentId: node.parentId,
     title: node.title,
     status: node.status,
-    fields: node.fields,
-    items: node.items,
+    sections: node.sections,
     createdAt: node.createdAt,
     updatedAt: node.updatedAt,
   };
 }
 
-/** Copy any node-owned mutations from a (possibly fresh) PageState back onto the node. */
+/** Copy any node-owned mutations from a PageState view back onto the node. */
 function writeBack(node: IPageNode, view: PageState): void {
   node.parentId = view.parentId;
   node.title = view.title;
   node.status = view.status;
-  node.fields = view.fields;
-  node.items = view.items;
+  node.sections = view.sections;
   node.updatedAt = view.updatedAt;
 }
 
@@ -187,10 +186,6 @@ function upcastPayload(
 // Helpers
 // ────────────────────────────────────────────────────────────────────────────
 
-function deepClone<T>(value: T): T {
-  return structuredClone(value);
-}
-
 function childList(state: IWorkspaceState, key: PageId | RootId): PageId[] {
   let list = state.children.get(key);
   if (list === undefined) {
@@ -253,16 +248,34 @@ function applyStructural(
       const id = event.pageId as PageId;
       const def = registry.page(p.type);
       const parentKey: PageId | RootId = p.parentId ?? ROOT;
-      const items: Record<string, IItemRecord[]> = {};
-      for (const tag of registry.itemTypesOf(p.type)) items[tag] = [];
+
+      // Auto-materialize required sections empty, keyed by declared key (§6), with
+      // pre-minted ids from the event payload so the reducer stays id-free.
+      const sections: ISection[] = [];
+      const required = registry.requiredSectionsOf(p.type);
+      required.forEach((req, idx) => {
+        const sectionId =
+          (p.requiredSectionIds?.[req.key] ?? (`sec:${id}:${req.key}` as SectionId)) as SectionId;
+        const section: ISection = {
+          id: sectionId,
+          key: req.key,
+          name: req.decl.name,
+          ...(req.decl.description !== undefined ? { description: req.decl.description } : {}),
+          order: idx,
+          parentId: null,
+          fields: {},
+        };
+        materializeSectionFields(section, req.decl);
+        sections.push(section);
+      });
+
       const node: IPageNode = {
         id,
         type: p.type,
         parentId: p.parentId ?? null,
         title: p.title,
         status: def.initialStatus,
-        fields: deepClone(def.initialFields),
-        items,
+        sections,
         pinned: p.pinned === true ? true : undefined,
         createdAt: event.meta.occurredAt,
         updatedAt: event.meta.occurredAt,
@@ -337,27 +350,6 @@ function applyStructural(
       return state;
     }
 
-    case "ItemAdded": {
-      const p = event.payload as ItemMovePayload;
-      const node = requireNode(state, event.pageId as PageId);
-      const list = node.items[p.itemType] ?? (node.items[p.itemType] = []);
-      if (!list.some((i) => i.id === p.item.id)) list.push(deepClone(p.item));
-      node.updatedAt = event.meta.occurredAt;
-      return state;
-    }
-
-    case "ItemRemoved": {
-      const p = event.payload as ItemMovePayload;
-      const node = requireNode(state, event.pageId as PageId);
-      const list = node.items[p.itemType];
-      if (list !== undefined) {
-        const idx = list.findIndex((i) => i.id === p.item.id);
-        if (idx !== -1) list.splice(idx, 1);
-      }
-      node.updatedAt = event.meta.occurredAt;
-      return state;
-    }
-
     default: {
       // Exhaustiveness guard — should be unreachable given isStructuralEvent().
       throw new UnknownPageTypeError([event.type]);
@@ -375,15 +367,22 @@ function applyContent(
     // A non-structural event must target a page to be routable.
     throw new UnknownPageTypeError([event.type]);
   }
+  if (event.type !== SECTION_OPS_EVENT) {
+    throw new UnknownPageTypeError([event.type]);
+  }
   const node = state.pages.get(pageId);
   if (node === undefined) throw new UnknownPageTypeError([`page:${pageId}`]);
 
   const def = registry.page(node.type);
-  const upcasted = upcastPayload(registry, node.type, event.schemaVersion, event.payload);
-  const routed: DomainEvent = { type: event.type, pageId, payload: upcasted };
-
-  const result = def.apply(pageStateView(node), routed);
-  writeBack(node, result);
+  const upcasted = upcastPayload(registry, node.type, event.schemaVersion, event.payload) as SectionOpsAppliedPayload;
+  const view = pageStateView(node);
+  applyOps(view, upcasted.ops, {
+    now: event.meta.occurredAt,
+    def,
+    pageNext: (status, ev) => registry.pageGuard(node.type).next(status, ev),
+    elementNext: (elType, status, ev) => registry.elementGuard(node.type, elType)?.next(status, ev),
+  });
+  writeBack(node, view);
   return state;
 }
 

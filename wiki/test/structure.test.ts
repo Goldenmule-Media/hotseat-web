@@ -304,48 +304,48 @@ describe("link — endpoint integrity", () => {
   });
 });
 
-describe("moveItem — atomicity (both events or neither)", () => {
-  /** A state where the parent brief owns one open question. */
+describe("moveItem — cross-page list-element move (both events or neither)", () => {
+  /** A state where the parent brief owns one open question (a `questions` list element). */
   function stateWithQuestion(): IWorkspaceState {
     const state = baseState();
     foldOne(
       state,
-      env(0, "QuestionAsked", { id: "q1", text: "Page size?" }, parentId, 1),
+      {
+        type: "SectionOpsApplied",
+        pageId: parentId,
+        payload: { ops: [{ op: "addElement", section: "questions", field: "items", id: "q1", status: "open", fields: { text: { kind: "prose", value: "Page size?" } } }] },
+      },
       state.version,
     );
     return state;
   }
 
-  it("emits BOTH ItemRemoved(from) and ItemAdded(to) in one batch carrying the full item", () => {
+  it("emits BOTH SectionOpsApplied(remove on from) and SectionOpsApplied(add on to) in one batch", () => {
     const state = stateWithQuestion();
     const { events } = moveItem(
       state,
-      { from: parentId, to: childId, itemType: "question", itemId: "q1" },
+      { from: parentId, to: childId, section: "questions", field: "items", itemId: "q1" },
       makeServices(),
       registry,
     );
     expect(events).toHaveLength(2);
-
     const [removed, added] = events;
-    expect(removed.type).toBe("ItemRemoved");
+    expect(removed.type).toBe("SectionOpsApplied");
     expect(removed.pageId).toBe(parentId);
-    expect(added.type).toBe("ItemAdded");
+    expect(added.type).toBe("SectionOpsApplied");
     expect(added.pageId).toBe(childId);
-
-    // The full item record (status + text) rides across both events.
-    const expectedItem = { id: "q1", text: "Page size?", status: "open" };
-    expect((removed.payload as { item: unknown }).item).toEqual(expectedItem);
-    expect((added.payload as { item: unknown }).item).toEqual(expectedItem);
-    expect((removed.payload as { itemType: string }).itemType).toBe("question");
+    expect((removed.payload as { ops: { op: string }[] }).ops[0]!.op).toBe("removeElement");
+    expect((added.payload as { ops: { op: string; status?: string }[] }).ops[0]!.op).toBe("addElement");
+    expect((added.payload as { ops: { status?: string }[] }).ops[0]!.status).toBe("open");
   });
 
-  it("emits NEITHER event when the item is missing (throws, no partial move)", () => {
+  it("emits NEITHER event when the element is missing (throws, no partial move)", () => {
     const state = stateWithQuestion();
     let events: IEventEnvelope[] | undefined;
     expect(() => {
       const out = moveItem(
         state,
-        { from: parentId, to: childId, itemType: "question", itemId: "nope" },
+        { from: parentId, to: childId, section: "questions", field: "items", itemId: "nope" },
         makeServices(),
         registry,
       );
@@ -354,17 +354,12 @@ describe("moveItem — atomicity (both events or neither)", () => {
     expect(events).toBeUndefined();
   });
 
-  it("rejects moving an item from a non-existent source page", () => {
+  it("rejects moving an element from a non-existent source page", () => {
     const state = stateWithQuestion();
     expect(() =>
       moveItem(
         state,
-        {
-          from: "feature-brief:ghost" as PageId,
-          to: childId,
-          itemType: "question",
-          itemId: "q1",
-        },
+        { from: "feature-brief:ghost" as PageId, to: childId, section: "questions", field: "items", itemId: "q1" },
         makeServices(),
         registry,
       ),

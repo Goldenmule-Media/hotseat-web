@@ -21,10 +21,25 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { IWiki, IWorkspaceHandle, PageId, WorkspaceId } from "../src/api";
+import type { DeepReadonly, IEventEnvelope, IField, IItem, IWiki, IWorkspaceHandle, PageId, PageState, SectionOp, WorkspaceId } from "../src/api";
 import { MutationNotAllowedError } from "../src/core/errors";
 import { featurePageTypes } from "wiki-models/feature";
 import { startTestServer, wikiOn, type ITestServer } from "../src/testing";
+
+function elements(state: DeepReadonly<PageState>, sectionKey: string, field = "items"): readonly DeepReadonly<IItem>[] {
+  const f = state.sections.find((s) => s.key === sectionKey)?.fields[field] as DeepReadonly<IField> | undefined;
+  return f !== undefined && f.kind === "list" ? f.elements : [];
+}
+/** Count content commits that emitted a given op kind / transition event. */
+function countOps(events: readonly IEventEnvelope[], pred: (op: SectionOp) => boolean): number {
+  let n = 0;
+  for (const e of events) {
+    if (e.type !== "SectionOpsApplied") continue;
+    const ops = (e.payload as { ops: SectionOp[] }).ops;
+    if (ops.some(pred)) n += 1;
+  }
+  return n;
+}
 
 describe("concurrency: two handles on one workspace", () => {
   let serverHandle: ITestServer;
@@ -85,18 +100,18 @@ describe("concurrency: two handles on one workspace", () => {
     // from a fresh handle (folded from zero, so already current) shows the step
     // AND the case.
     const fresh = await wikiC.openWorkspace(wsId);
-    const types = (await fresh.history()).map((e) => e.type);
-    expect(types.filter((t) => t === "StepAdded")).toHaveLength(1);
-    expect(types.filter((t) => t === "CaseAdded")).toHaveLength(1);
+    const history = await fresh.history();
+    expect(countOps(history, (op) => op.op === "addElement" && op.section === "steps")).toBe(1);
+    expect(countOps(history, (op) => op.op === "addElement" && op.section === "cases")).toBe(1);
 
     // Versions are contiguous (no gap, no duplicate) — the two appends serialized
     // cleanly behind OCC.
     const versions = (await fresh.history()).map((e) => e.version);
     expect(versions).toEqual(versions.map((_, i) => i));
 
-    // The freshly-folded state carries both children's items.
-    expect((await (await fresh.page(plan)).state()).items.step).toHaveLength(1);
-    expect((await (await fresh.page(testPlan)).state()).items.case).toHaveLength(1);
+    // The freshly-folded state carries both children's list elements.
+    expect(elements(await (await fresh.page(plan)).state(), "steps")).toHaveLength(1);
+    expect(elements(await (await fresh.page(testPlan)).state(), "cases")).toHaveLength(1);
   });
 
   it("rejects the second answer to the SAME question with MutationNotAllowedError after rebase", async () => {
@@ -119,7 +134,7 @@ describe("concurrency: two handles on one workspace", () => {
     // its projection before we assert its open status.
     const bView = await b.page(brief, { consistentWith: askToken });
     expect(
-      (await bView.state()).items.question.find((q) => q.id === questionId)?.status,
+      elements(await bView.state(), "questions").find((q) => q.id === questionId)?.status,
     ).toBe("open");
 
     // Race the SAME item-level mutation from both handles. The first wins and
@@ -148,10 +163,10 @@ describe("concurrency: two handles on one workspace", () => {
     // The question is resolved exactly once in the authoritative log: one
     // QuestionAnswered event total.
     const fresh = await wikiC.openWorkspace(wsId);
-    const answered = (await fresh.history()).filter((e) => e.type === "QuestionAnswered");
-    expect(answered).toHaveLength(1);
+    const answered = countOps(await fresh.history(), (op) => op.op === "transition" && op.level === "element" && op.event === "answer");
+    expect(answered).toBe(1);
     expect(
-      (await (await fresh.page(brief)).state()).items.question.find((q) => q.id === questionId)
+      elements(await (await fresh.page(brief)).state(), "questions").find((q) => q.id === questionId)
         ?.status,
     ).toBe("resolved");
   });
@@ -185,10 +200,11 @@ describe("concurrency: two handles on one workspace", () => {
     // Contiguous 0..N-1: OCC + rebase produced a clean, gap-free, dup-free log.
     expect(versions).toEqual(versions.map((_, i) => i));
 
-    // All four mutations are represented exactly once.
-    const types = (await fresh.history()).map((e) => e.type);
-    expect(types.filter((t) => t === "ConstraintAdded")).toHaveLength(1);
-    expect(types.filter((t) => t === "QuestionAsked")).toHaveLength(1);
-    expect(types.filter((t) => t === "TaskAdded")).toHaveLength(2);
+    // All four content mutations are represented exactly once (each is one
+    // SectionOpsApplied carrying an addElement into the relevant section).
+    const history = await fresh.history();
+    expect(countOps(history, (op) => op.op === "addElement" && op.section === "constraints")).toBe(1);
+    expect(countOps(history, (op) => op.op === "addElement" && op.section === "questions")).toBe(1);
+    expect(countOps(history, (op) => op.op === "addElement" && op.section === "tasks")).toBe(2);
   });
 });

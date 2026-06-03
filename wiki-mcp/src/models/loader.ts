@@ -13,7 +13,7 @@ import { pathToFileURL } from "node:url";
 import type { IPageType } from "wiki/authoring";
 
 /** The page-type defs a bundle contributes (what the engine `Registry` consumes). */
-export type PageTypeSet = readonly IPageType<any, any, any, any>[];
+export type PageTypeSet = readonly IPageType[];
 
 /** A loaded bundle's page-type defs plus the resolved URL (for logging). */
 export interface LoadedBundle {

@@ -17,15 +17,21 @@
  */
 import type {
   DeepReadonly,
+  DeclarativeCommand,
   DomainEvent,
+  FieldValueSpec,
   ICommandContext,
   IEventEnvelope,
   IEventMeta,
+  IField,
+  IItem,
   IRelatedReader,
   IWorkspaceState,
   PageId,
   PageState,
   RootId,
+  SectionId,
+  SectionOp,
   WorkspaceId,
 } from "../api";
 import {
@@ -33,13 +39,18 @@ import {
   ItemNotFoundError,
   MutationNotAllowedError,
   PageNotFoundError,
+  PreconditionUnmetError,
+  SectionContractError,
   WorkspaceArchivedError,
 } from "./errors";
-import type { Registry } from "./registry";
+import { contentHash } from "./ingestion";
+import { applyOps, normalizeFieldValue } from "./operations";
+import type { GeneratedCommand, Registry } from "./registry";
 import { writeSnapshot } from "./snapshot";
 import { STRUCTURAL_HANDLERS, type StructureHandler } from "./structure";
 import { isStaleAppend, type IEventLog, type ProjectionEntry, type Services } from "./types";
-import { applyWorkspace, isStructuralEvent, pageStateView } from "./workspace";
+import { validatePage } from "./ingestion";
+import { applyWorkspace, isStructuralEvent, pageStateView, SECTION_OPS_EVENT } from "./workspace";
 
 /** Max rebase attempts before surfacing {@link ConcurrencyError}. */
 const MAX_REBASE_ATTEMPTS = 5;
@@ -159,7 +170,7 @@ export class CommandBus {
     });
   }
 
-  /** Pure page-command decision (validate → guard → context → produces). */
+  /** Pure page-command decision (resolve → validate → gate → effect → check). */
   private decidePage(
     state: IWorkspaceState,
     req: PageRequest,
@@ -172,58 +183,367 @@ export class CommandBus {
     if (node === undefined) throw new PageNotFoundError(req.pageId);
 
     const def = this.registry.page(node.type);
-    const cmd = def.commands[req.command];
     const guard = this.registry.pageGuard(node.type);
+    const declared: DeclarativeCommand | undefined = def.commands[req.command];
+    const generated: GeneratedCommand | undefined = this.registry
+      .generatedCommands(node.type)
+      .get(req.command);
 
-    // Unknown command for this type → MutationNotAllowed listing what IS allowed.
-    if (cmd === undefined) {
-      throw new MutationNotAllowedError(
-        node.type,
-        node.status,
-        req.command,
-        guard.available(node.status),
-      );
+    const allowedSet = (): string[] => [
+      ...guard.available(node.status),
+      ...this.contentCommands(node.type, node.status),
+    ];
+
+    if (declared === undefined && generated === undefined) {
+      throw new MutationNotAllowedError(node.type, node.status, req.command, allowedSet());
     }
 
-    // 1) Validate args (→ ValidationError on failure).
-    const parsed = cmd.args.parse(req.args) as Record<string, unknown>;
-
-    // 2) Page FSM: is this command legal from the current page status?
-    if (!guard.can(node.status, req.command)) {
-      throw new MutationNotAllowedError(
-        node.type,
-        node.status,
-        req.command,
-        guard.available(node.status),
-      );
-    }
-
-    // 3) Item-level commands ALSO check the target item's FSM.
-    if (cmd.transition.level === "item") {
-      const { itemType, idArg, event } = cmd.transition;
-      const itemId = parsed[idArg] as string;
-      const bucket = node.items[itemType] ?? [];
-      const item = bucket.find((i) => i.id === itemId);
-      if (item === undefined) {
-        throw new ItemNotFoundError(itemType, String(itemId));
-      }
-      const itemGuard = this.registry.itemGuard(itemType);
-      const itemStatus = item.status ?? "";
-      if (itemGuard !== undefined && !itemGuard.can(itemStatus, event)) {
-        throw new MutationNotAllowedError(
-          `${node.type}.${itemType}`,
-          itemStatus,
-          req.command,
-          itemGuard.available(itemStatus),
-        );
-      }
-    }
-
-    // 4) Build the command context (cross-page reads via `related`) and decide.
     const ctx = this.buildContext(state, req.pageId, req.actor, req.commandId);
     const view: PageState = pageStateView(node);
-    const { events, result } = cmd.produces(view, parsed, ctx);
-    return { events, result };
+
+    // ── declarative command ──
+    if (declared !== undefined) {
+      const parsed = declared.args.parse(req.args) as Record<string, unknown>;
+
+      // FSM legality + write-gate.
+      if (declared.transition?.level === "page") {
+        if (!guard.can(node.status, req.command)) {
+          throw new MutationNotAllowedError(node.type, node.status, req.command, allowedSet());
+        }
+      }
+      const targetSection = declared.target?.section;
+      if (targetSection !== undefined) {
+        this.assertMutable(node.type, node.status, targetSection, req.command, allowedSet());
+      }
+
+      // element-level FSM legality.
+      let resolvedElementId: string | undefined;
+      if (declared.transition?.level === "element" && declared.target?.element !== undefined) {
+        const idArg = declared.target.element.idArg;
+        resolvedElementId = parsed[idArg] as string;
+        this.checkElementTransition(node.type, view, targetSection!, resolvedElementId, declared.transition.event, req.command);
+      }
+
+      // build the ops.
+      const ops = this.buildDeclarativeOps(view, declared, parsed, ctx, resolvedElementId);
+
+      // preconditions.
+      this.runPreconditions(declared, view, ctx.related);
+
+      // well-formedness dry run.
+      this.dryRunAndValidate(state, node.type, view, ops);
+
+      const result = this.commandResult(declared, parsed, ops);
+      if (ops.length === 0) return { events: [], result };
+      return {
+        events: [{ type: SECTION_OPS_EVENT, pageId: req.pageId, payload: { ops } }],
+        result,
+      };
+    }
+
+    // ── generated structural command ──
+    const gen = generated as GeneratedCommand;
+    this.assertMutable(node.type, node.status, gen.section, req.command, allowedSet());
+    const parsed = (req.args ?? {}) as Record<string, unknown>;
+    const ops = this.buildGeneratedOps(gen, parsed, ctx);
+    this.dryRunAndValidate(state, node.type, view, ops);
+    const result = this.generatedResult(gen, ops);
+    if (ops.length === 0) return { events: [], result };
+    return {
+      events: [{ type: SECTION_OPS_EVENT, pageId: req.pageId, payload: { ops } }],
+      result,
+    };
+  }
+
+  /** Content (generated + declared-with-target) command names mutable in `status`. */
+  private contentCommands(type: string, status: string): string[] {
+    const out: string[] = [];
+    const decls = this.registry.sectionDeclsOf(type);
+    for (const [name, gen] of this.registry.generatedCommands(type)) {
+      const sd = decls[gen.section];
+      if (sd?.mutableIn === undefined || sd.mutableIn.includes(status)) out.push(name);
+    }
+    const def = this.registry.page(type);
+    for (const [name, cmd] of Object.entries(def.commands)) {
+      if (cmd.target?.section !== undefined) {
+        const sd = decls[cmd.target.section];
+        if (sd?.mutableIn === undefined || sd.mutableIn.includes(status)) out.push(name);
+      }
+    }
+    return out;
+  }
+
+  /** The §6 write-gate: the target section must be mutable in the current status. */
+  private assertMutable(
+    type: string,
+    status: string,
+    sectionKey: string,
+    command: string,
+    allowed: string[],
+  ): void {
+    const sd = this.registry.sectionDeclsOf(type)[sectionKey];
+    if (sd?.mutableIn !== undefined && !sd.mutableIn.includes(status)) {
+      throw new MutationNotAllowedError(type, status, command, allowed);
+    }
+  }
+
+  private checkElementTransition(
+    type: string,
+    view: PageState,
+    sectionKey: string,
+    elementId: string,
+    event: string,
+    command: string,
+  ): void {
+    const sec = view.sections.find((s) => s.key === sectionKey);
+    if (sec === undefined) throw new ItemNotFoundError(sectionKey, elementId);
+    let elementType: string | undefined;
+    let item: IItem | undefined;
+    for (const f of Object.values(sec.fields)) {
+      if (f.kind === "list") {
+        const found = f.elements.find((e) => e.id === elementId);
+        if (found !== undefined) {
+          elementType = f.elementType;
+          item = found;
+          break;
+        }
+      }
+    }
+    if (item === undefined || elementType === undefined) {
+      throw new ItemNotFoundError(sectionKey, elementId);
+    }
+    const eg = this.registry.elementGuard(type, elementType);
+    const st = item.status ?? "";
+    if (eg !== undefined && !eg.can(st, event)) {
+      throw new MutationNotAllowedError(`${type}.${elementType}`, st, command, eg.available(st));
+    }
+  }
+
+  /** Synthesize the op list for a declarative command (target + set + transition + produces). */
+  private buildDeclarativeOps(
+    view: PageState,
+    cmd: DeclarativeCommand,
+    args: Record<string, unknown>,
+    ctx: ICommandContext,
+    elementId: string | undefined,
+  ): SectionOp[] {
+    if (cmd.produces !== undefined) {
+      return cmd.produces(view as DeepReadonly<PageState>, args, ctx);
+    }
+    const ops: SectionOp[] = [];
+    const target = cmd.target;
+    if (target !== undefined && cmd.set !== undefined) {
+      const sectionKey = target.section;
+      const type = view.type;
+      if (target.element !== undefined) {
+        // setElementField for each `set` entry on the resolved element.
+        const id = elementId ?? (args[target.element.idArg] as string);
+        const field = target.field ?? this.firstListFieldKey(view, sectionKey);
+        const elType = this.elementTypeOf(view, sectionKey, field);
+        for (const [elemField, spec] of Object.entries(cmd.set)) {
+          const v = this.resolveValueOptional(spec, args, this.elementFieldKind(type, elType, elemField));
+          if (v !== undefined) {
+            ops.push({ op: "setElementField", section: sectionKey, field, id, elementField: elemField, value: v });
+          }
+        }
+      } else if (target.field !== undefined && this.fieldIsList(view, sectionKey, target.field)) {
+        // addElement: build the element fields from `set`.
+        const id = ctx.newId();
+        const elType = this.elementTypeOf(view, sectionKey, target.field);
+        const fields: Record<string, IField> = {};
+        for (const [f, spec] of Object.entries(cmd.set)) {
+          const v = this.resolveValueOptional(spec, args, this.elementFieldKind(type, elType, f));
+          if (v !== undefined) fields[f] = v;
+        }
+        ops.push({ op: "addElement", section: sectionKey, field: target.field, id, fields });
+      } else {
+        // setField on a scalar/prose field.
+        const field = target.field ?? Object.keys(cmd.set)[0]!;
+        const spec = cmd.set[field] ?? Object.values(cmd.set)[0]!;
+        const v = this.resolveValueOptional(spec, args, this.registry.fieldDeclOf(type, sectionKey, field)?.kind);
+        if (v !== undefined) ops.push({ op: "setField", section: sectionKey, field, value: v });
+      }
+    }
+    if (cmd.transition !== undefined) {
+      if (cmd.transition.level === "page") {
+        ops.push({ op: "transition", level: "page", event: cmd.transition.event });
+      } else if (target !== undefined) {
+        const id = elementId ?? (target.element !== undefined ? (args[target.element.idArg] as string) : undefined);
+        if (id !== undefined) {
+          ops.push({
+            op: "transition",
+            level: "element",
+            section: target.section,
+            element: id,
+            event: cmd.transition.event,
+          });
+        }
+      }
+    }
+    return ops;
+  }
+
+  private buildGeneratedOps(
+    gen: GeneratedCommand,
+    args: Record<string, unknown>,
+    ctx: ICommandContext,
+  ): SectionOp[] {
+    switch (gen.kind) {
+      case "setField":
+        return [{ op: "setField", section: gen.section, field: gen.field, value: this.coerceField(args.value) }];
+      case "addElement": {
+        const id = (args.id as string) ?? ctx.newId();
+        const fields = (args.fields as Record<string, IField>) ?? {};
+        return [{ op: "addElement", section: gen.section, field: gen.field, id, fields }];
+      }
+      case "removeElement":
+        return [{ op: "removeElement", section: gen.section, field: gen.field, id: args.id as string }];
+      case "moveElement":
+        return [{ op: "moveElement", section: gen.section, field: gen.field, id: args.id as string, toIndex: Number(args.toIndex ?? 0) }];
+      case "setElementField":
+        return [{
+          op: "setElementField",
+          section: gen.section,
+          field: gen.field,
+          id: args.id as string,
+          elementField: gen.elementField!,
+          value: this.coerceField(args.value),
+        }];
+    }
+  }
+
+  private coerceField(value: unknown): IField {
+    if (value !== null && typeof value === "object" && "kind" in (value as object)) {
+      return normalizeFieldValue(value as IField);
+    }
+    return { kind: "scalar", value: value as string | number | boolean };
+  }
+
+  private resolveValueOptional(
+    spec: FieldValueSpec,
+    args: Record<string, unknown>,
+    declKind: string | undefined,
+  ): IField | undefined {
+    if ("literal" in spec) return normalizeFieldValue(spec.literal);
+    const raw = args[spec.__arg];
+    if (raw === undefined) return undefined;
+    return this.kindFor(declKind, raw);
+  }
+
+  /** Build a typed `IField` for `raw` honoring the declared field-kind. */
+  private kindFor(declKind: string | undefined, raw: unknown): IField {
+    switch (declKind) {
+      case "scalar":
+        return { kind: "scalar", value: raw as string | number | boolean };
+      case "prose":
+        return { kind: "prose", value: String(raw) };
+      case "code":
+        return { kind: "code", lang: "text", source: String(raw), hash: contentHash(String(raw)) };
+      default:
+        if (typeof raw === "number" || typeof raw === "boolean") return { kind: "scalar", value: raw };
+        return { kind: "prose", value: String(raw) };
+    }
+  }
+
+  private elementTypeOf(view: PageState, sectionKey: string, field: string): string | undefined {
+    const sec = view.sections.find((s) => s.key === sectionKey);
+    const f = sec?.fields[field];
+    if (f !== undefined && f.kind === "list") return f.elementType;
+    return undefined;
+  }
+
+  private elementFieldKind(type: string, elementType: string | undefined, fieldKey: string): string | undefined {
+    if (elementType === undefined) return undefined;
+    return this.registry.element(type, elementType)?.fields[fieldKey]?.kind;
+  }
+
+  private fieldIsList(view: PageState, sectionKey: string, field: string): boolean {
+    const sec = view.sections.find((s) => s.key === sectionKey);
+    return sec?.fields[field]?.kind === "list";
+  }
+
+  private firstListFieldKey(view: PageState, sectionKey: string): string {
+    const sec = view.sections.find((s) => s.key === sectionKey);
+    if (sec !== undefined) {
+      for (const [k, f] of Object.entries(sec.fields)) if (f.kind === "list") return k;
+    }
+    return "items";
+  }
+
+  private runPreconditions(cmd: DeclarativeCommand, view: PageState, related: IRelatedReader): void {
+    for (const pre of cmd.preconditions ?? []) {
+      const res = pre(view as DeepReadonly<PageState>, related);
+      if (res !== true) throw new PreconditionUnmetError(res.unmet);
+    }
+  }
+
+  /** Dry-run the ops against a clone and validate the resulting sections (§7). */
+  private dryRunAndValidate(
+    state: IWorkspaceState,
+    type: string,
+    view: PageState,
+    ops: readonly SectionOp[],
+  ): void {
+    if (ops.length === 0) return;
+    const def = this.registry.page(type);
+    const clone: PageState = {
+      id: view.id,
+      type: view.type,
+      parentId: view.parentId,
+      title: view.title,
+      status: view.status,
+      sections: structuredClone(view.sections),
+      createdAt: view.createdAt,
+      updatedAt: view.updatedAt,
+    };
+    applyOps(clone, ops, {
+      now: clone.updatedAt,
+      def,
+      pageNext: (status, ev) => this.registry.pageGuard(type).next(status, ev),
+      elementNext: (elType, status, ev) => this.registry.elementGuard(type, elType)?.next(status, ev),
+    });
+    // Validate against a state whose page node reflects the dry-run sections.
+    const node = state.pages.get(view.id);
+    if (node === undefined) return;
+    const previous = node.sections;
+    node.sections = clone.sections;
+    try {
+      validatePage(state, node, this.registry);
+    } finally {
+      node.sections = previous;
+    }
+    void SectionContractError;
+    void contentHash;
+  }
+
+  private commandResult(cmd: DeclarativeCommand, args: Record<string, unknown>, ops: readonly SectionOp[]): unknown {
+    if (cmd.result === undefined) return undefined;
+    // Surface a created element id when the command added one.
+    const added = ops.find((o) => o.op === "addElement");
+    if (added !== undefined && added.op === "addElement") {
+      // try to satisfy common result shapes ({ <x>Id: id }).
+      const schema = cmd.result.toJsonSchema() as { properties?: Record<string, unknown> };
+      const props = Object.keys(schema.properties ?? {});
+      if (props.length === 1 && props[0]!.endsWith("Id")) {
+        return { [props[0]!]: added.id };
+      }
+    }
+    // echo an id arg if the result shape names one.
+    const schema = cmd.result.toJsonSchema() as { properties?: Record<string, unknown> };
+    const props = Object.keys(schema.properties ?? {});
+    if (props.length === 1 && props[0]!.endsWith("Id")) {
+      const argKey = props[0]!;
+      if (args[argKey] !== undefined) return { [argKey]: args[argKey] };
+    }
+    return undefined;
+  }
+
+  private generatedResult(gen: GeneratedCommand, ops: readonly SectionOp[]): unknown {
+    const added = ops.find((o) => o.op === "addElement");
+    if (gen.kind === "addElement" && added !== undefined && added.op === "addElement") {
+      return { id: added.id };
+    }
+    return undefined;
   }
 
   /** Assemble the read-only {@link ICommandContext} a `produces` is handed. */

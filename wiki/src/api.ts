@@ -13,6 +13,8 @@
 
 export type WorkspaceId = string & { readonly __brand: "WorkspaceId" };
 export type PageId = string & { readonly __brand: "PageId" };
+export type SectionId = string & { readonly __brand: "SectionId" };
+export type BlockId = string & { readonly __brand: "BlockId" };
 
 /** Sentinel parent key for top-level pages in the children map / tree. */
 export const ROOT = "@root" as const;
@@ -92,6 +94,9 @@ export interface IEventMeta {
   readonly actor?: string;
   /** Idempotency: the command that produced this event. */
   readonly commandId?: string;
+  /** The semantic command name that produced this content event (§9.4) — keeps
+   *  history semantic (`answerQuestion`) without per-type events. */
+  readonly command?: string;
   readonly causationId?: string;
   readonly correlationId?: string;
 }
@@ -124,11 +129,83 @@ export interface DomainEvent {
 
 export type WorkspaceStatus = "active" | "archived";
 
-export interface IItemRecord {
+// ────────────────────────────────────────────────────────────────────────────
+// Content tree: Sections, Fields, Items, Blocks (DESIGN structured-content §2, §3)
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Closed, engine-owned field-kind vocabulary (§3). */
+export type FieldKind =
+  | "scalar"
+  | "prose"
+  | "code"
+  | "attachment-ref"
+  | "ref"
+  | "blocks"
+  | "list";
+
+/** A typed cross-reference target; the displayed label is render-derived (§3.2). */
+export type RefTarget =
+  | { readonly kind: "section"; id: SectionId }
+  | { readonly kind: "page"; id: PageId }
+  | { readonly kind: "symbol"; section: SectionId; field: string; name: string }
+  | { readonly kind: "block"; section: SectionId; field: string; block: BlockId };
+
+/** A `text` run's overlapping inline style, carried as a canonical-sorted set (§3.2). */
+export type Mark = "strong" | "emphasis" | { readonly kind: "link"; href: string };
+
+/** Inline run inside a prose-bearing block (§3.2). */
+export type IInline =
+  | { readonly kind: "text"; value: string; marks: Mark[] }
+  | { readonly kind: "code-span"; value: string }
+  | { readonly kind: "ref"; target: RefTarget };
+
+/** Closed document block vocabulary (§3.1). Each carries an injected `BlockId`. */
+export type IBlock =
+  | { readonly kind: "paragraph"; id: BlockId; inlines: IInline[] }
+  | { readonly kind: "heading"; id: BlockId; level: 1 | 2 | 3 | 4 | 5 | 6; inlines: IInline[] }
+  | { readonly kind: "code"; id: BlockId; lang: string; source: string; hash: string }
+  | { readonly kind: "list"; id: BlockId; ordered: boolean; items: IBlock[][] }
+  | {
+      readonly kind: "table";
+      id: BlockId;
+      align: ("left" | "center" | "right" | null)[];
+      header: IInline[][];
+      rows: IInline[][][];
+    }
+  | { readonly kind: "quote"; id: BlockId; variant?: string; blocks: IBlock[] }
+  | { readonly kind: "divider"; id: BlockId };
+
+/** A typed field value — the closed value shapes per field-kind (§3). */
+export type IField =
+  | { readonly kind: "scalar"; value: string | number | boolean }
+  | { readonly kind: "prose"; value: string }
+  | { readonly kind: "code"; lang: string; source: string; hash: string }
+  | { readonly kind: "attachment-ref"; ref: string; mime: string; name: string }
+  | { readonly kind: "ref"; target: RefTarget }
+  | { readonly kind: "blocks"; blocks: IBlock[] }
+  | { readonly kind: "list"; elementType: string; elements: IItem[] };
+
+/** A list element (item): an id, an optional model FSM status, typed fields, optional meta. */
+export interface IItem {
   readonly id: string;
   status?: string;
-  /** + typed fields per item type. */
-  [field: string]: unknown;
+  fields: Record<string, IField>;
+  meta?: Record<string, unknown>;
+}
+
+/** An addressable, contract-bearing node in a page's content tree (§2). */
+export interface ISection {
+  readonly id: SectionId;
+  /** Stable, model-declared; unique among siblings. */
+  key: string;
+  name: string;
+  description?: string;
+  /** Explicit ordering — never object-key order (§10). */
+  order: number;
+  /** Intra-page section tree parent. */
+  parentId: SectionId | null;
+  fields: Record<string, IField>;
+  meta?: Record<string, unknown>;
 }
 
 export interface IPageNode {
@@ -137,10 +214,8 @@ export interface IPageNode {
   parentId: PageId | null;
   title: string;
   status: string;
-  /** Typed per page type (the page's `fields`). */
-  fields: unknown;
-  /** e.g. { component: [...], question: [...], commit: [...] }. */
-  items: Record<string, IItemRecord[]>;
+  /** The page's content tree — ordered typed sections (§2). */
+  sections: ISection[];
   /** Page types auto-created with this page and pinned (cannot reparent-out / archive alone). */
   pinned?: boolean;
   createdAt: string;
@@ -162,17 +237,16 @@ export interface IWorkspaceState {
 }
 
 /**
- * The page state shape passed to a page type's reducer/decider/renderer.
- * `F` is the page type's typed `fields`.
+ * The page state shape passed to the engine reducer / deciders / render read model.
+ * Content is the typed section tree (§2) — no `fields`/`items` containers.
  */
-export interface PageState<F = unknown> {
+export interface PageState {
   readonly id: PageId;
   readonly type: string;
   parentId: PageId | null;
   title: string;
   status: string;
-  fields: F;
-  items: Record<string, IItemRecord[]>;
+  sections: ISection[];
   createdAt: string;
   updatedAt: string;
 }
@@ -271,7 +345,15 @@ export interface IWorkspaceHandle {
   archivePage(pageId: PageId): Promise<Committed<void>>;
   link(from: PageId, to: PageId, role: string): Promise<Committed<void>>;
   unlink(from: PageId, to: PageId, role: string): Promise<Committed<void>>;
-  moveItem(input: { from: PageId; to: PageId; itemType: string; itemId: string }): Promise<Committed<void>>;
+  /** Cross-page list-element move: remove from one page's `(section, field)` list and
+   *  add to another's, in one atomic append (§1.9). */
+  moveItem(input: {
+    from: PageId;
+    to: PageId;
+    section: string;
+    field: string;
+    itemId: string;
+  }): Promise<Committed<void>>;
   archive(): Promise<Committed<void>>;
 
   // ── page-scoped content/status command ──
@@ -305,6 +387,8 @@ export interface IMutationDescriptor {
   /** Whether the command is legal in the page's current status right now. */
   readonly available: boolean;
   readonly description?: string;
+  /** Which section/field this command edits (§6 write-gate surfacing). */
+  readonly target?: { readonly section: string; readonly field?: string };
 }
 
 export interface IPageView<K extends PageTypeName = PageTypeName> {
@@ -379,68 +463,188 @@ export interface IRenderCtx {
   backlinksOf(id: PageId): readonly { readonly from: PageId; readonly role: string }[];
 }
 
-/** One page-scoped command: typed args, optional result, an FSM transition, a pure decider. */
-export interface ICommandDef<State = unknown, Args = unknown, Result = unknown, Ev extends DomainEvent = DomainEvent> {
-  readonly args: ISchema<Args>;
-  readonly result?: ISchema<Result>;
-  /** The transition this command represents — page-level, or delegated to an item's FSM. */
-  readonly transition:
+// ────────────────────────────────────────────────────────────────────────────
+// Section operations — the closed write vocabulary (§9.4)
+// ────────────────────────────────────────────────────────────────────────────
+
+/** A structured edit of a code field/block: replace `[start,end)` with `replacement`. */
+export interface TextEdit {
+  readonly start: number;
+  readonly end: number;
+  readonly replacement: string;
+}
+
+/**
+ * The engine-owned closed vocabulary every command emits and the one built-in
+ * reducer folds (§9.4). Each op names its target by key/id, never by position.
+ * `section` is the section KEY; `addSection` mints a fresh `SectionId`.
+ */
+export type SectionOp =
+  // ── field / element edits ──
+  | { readonly op: "setField"; section: string; field: string; value: IField }
+  | { readonly op: "applyTextEdits"; section: string; field: string; block?: BlockId; edits: TextEdit[] }
+  | {
+      readonly op: "addElement";
+      section: string;
+      field: string;
+      id: string;
+      fields: Record<string, IField>;
+      status?: string;
+      meta?: Record<string, unknown>;
+      index?: number;
+    }
+  | { readonly op: "removeElement"; section: string; field: string; id: string }
+  | { readonly op: "moveElement"; section: string; field: string; id: string; toIndex: number }
+  | { readonly op: "setElementField"; section: string; field: string; id: string; elementField: string; value: IField }
+  // ── block-tree edits (a `blocks` field) ──
+  | { readonly op: "addBlock"; section: string; field: string; block: IBlock; index?: number }
+  | { readonly op: "removeBlock"; section: string; field: string; block: BlockId }
+  | { readonly op: "moveBlock"; section: string; field: string; block: BlockId; toIndex: number }
+  | { readonly op: "setBlock"; section: string; field: string; block: IBlock }
+  // ── section-tree edits ──
+  | {
+      readonly op: "addSection";
+      key: string;
+      name: string;
+      description?: string;
+      parentSection?: SectionId | null;
+      index?: number;
+      id?: SectionId;
+    }
+  | { readonly op: "removeSection"; section: string }
+  | { readonly op: "moveSection"; section: string; parentSection: SectionId | null; toIndex: number }
+  | { readonly op: "renameSection"; section: string; name: string }
+  // ── meta ──
+  | { readonly op: "setMeta"; section: string; element?: string; path: (string | number)[]; value: unknown }
+  // ── FSM ──
+  | {
+      readonly op: "transition";
+      level: "page" | "element";
+      section?: string;
+      field?: string;
+      element?: string;
+      event: string;
+    };
+
+/** The single engine content event payload (§9.4): an ordered op list. */
+export interface SectionOpsAppliedPayload {
+  readonly ops: SectionOp[];
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Declarative authoring (§9)
+// ────────────────────────────────────────────────────────────────────────────
+
+/** The model's view of a field-kind in a section/element declaration (§9.2). */
+export type FieldDecl =
+  | { readonly kind: "scalar"; required?: boolean; schema?: ISchema }
+  | { readonly kind: "prose"; required?: boolean }
+  | { readonly kind: "code"; required?: boolean }
+  | { readonly kind: "attachment-ref"; required?: boolean }
+  | { readonly kind: "ref"; required?: boolean; targetKinds?: RefTarget["kind"][] }
+  | { readonly kind: "blocks"; required?: boolean }
+  | { readonly kind: "list"; element: string; ordered?: boolean; required?: boolean };
+
+export interface SectionDecl {
+  readonly name: string;
+  readonly description?: string;
+  /** requiredSection (§6) — materialized empty at create. */
+  readonly required?: boolean;
+  /** The write-gate (§6/§9.2). */
+  readonly mutableIn?: readonly string[];
+  readonly fields: Readonly<Record<string, FieldDecl>>;
+  readonly meta?: ISchema;
+  readonly reduceMeta?: (meta: unknown, op: SectionOp) => unknown;
+  readonly deriveMeta?: (section: DeepReadonly<ISection>) => unknown;
+  readonly sections?: Readonly<Record<string, SectionDecl>>;
+}
+
+export interface ElementDecl {
+  readonly fields: Readonly<Record<string, FieldDecl>>;
+  readonly status?: { readonly initial: string; readonly transitions: readonly ITransition[] };
+  readonly meta?: ISchema;
+  readonly reduceMeta?: (meta: unknown, op: SectionOp) => unknown;
+}
+
+/** Section-set contract (§6). */
+export interface SectionSetContract {
+  readonly mode: "open" | "closed";
+  readonly prohibited?: readonly string[];
+  readonly cardinality?: Readonly<Record<string, { min?: number; max?: number }>>;
+}
+
+/** `arg("name")` sugar — maps a command arg to a field value (§9.8). */
+export type ArgRef = { readonly __arg: string };
+export type FieldValueSpec = ArgRef | { readonly literal: IField };
+
+/** A pure precondition for a transition (§6); returns `true` or `{ unmet }`. */
+export type Precondition = (
+  page: DeepReadonly<PageState>,
+  related: IRelatedReader,
+) => true | { readonly unmet: string };
+
+export interface DeclarativeCommand {
+  readonly args: ISchema;
+  readonly result?: ISchema;
+  readonly description?: string;
+  readonly target?: { section: string; element?: { idArg: string }; field?: string };
+  readonly set?: Readonly<Record<string, FieldValueSpec>>;
+  readonly transition?:
     | { readonly level: "page"; readonly event: string }
-    | { readonly level: "item"; readonly itemType: string; readonly idArg: string; readonly event: string };
-  /** Pure decision: check invariants, return events to append + the typed result. No I/O. */
-  readonly produces: (page: PageState<State>, args: Args, ctx: ICommandContext) => { events: Ev[]; result: Result };
+    | { readonly level: "element"; readonly event: string };
+  readonly preconditions?: readonly Precondition[];
+  /** Escape hatch (§9.4): compute the effect as the same closed op vocabulary. */
+  readonly produces?: (page: DeepReadonly<PageState>, args: unknown, ctx: ICommandContext) => SectionOp[];
 }
 
-export type CommandMap = Readonly<Record<string, ICommandDef<any, any, any, any>>>;
+export type DeclarativeCommandMap = Readonly<Record<string, DeclarativeCommand>>;
 
-/** Full specification of a page entity (DESIGN §6.3). */
-export interface IPageTypeDef<
-  State = unknown,
-  Status extends string = string,
-  Cmds extends CommandMap = CommandMap,
-  Ev extends DomainEvent = DomainEvent,
-> {
-  /** Stable type tag, also the page-id prefix (e.g. "feature-brief"). */
+// ────────────────────────────────────────────────────────────────────────────
+// Render config (§9.7)
+// ────────────────────────────────────────────────────────────────────────────
+
+export interface SectionRender {
+  readonly section: string;
+  readonly heading?: string;
+  readonly placeholder?: string;
+  /** Which field of the section to render as the body. */
+  readonly field?: string;
+  readonly as?: "block" | "inline" | "fenced" | "link" | "bullets" | "numbered" | "table" | "blocks";
+  /** Element template, e.g. "{text}" / "{field?}". */
+  readonly item?: string;
+  readonly groupBy?: string;
+  readonly groups?: readonly { when: string; heading?: string; item: string }[];
+}
+
+export interface RenderConfig {
+  /** e.g. "Feature: {title}" — {title} is the page title. */
+  readonly title?: string;
+  readonly sections: readonly SectionRender[];
+  /** Whether to append the engine References + Child pages sections (default true). */
+  readonly graphSections?: boolean;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Page type definition (§9) — declarative; no author apply/render/produces
+// ────────────────────────────────────────────────────────────────────────────
+
+export interface IPageTypeDef<Status extends string = string> {
   readonly type: string;
-  /** Status assigned when a page of this type is created. */
-  readonly initialStatus: Status;
-  /** Initial `fields` value for a freshly-created page of this type. */
-  readonly initialFields: State;
-  /** Current schema version for this type's events (DESIGN §8.5). */
   readonly version: number;
-  /** Upcasters keyed by from-version, composed on fold to migrate old payloads up to `version`. */
-  readonly upcasters?: Readonly<Record<number, (payload: unknown) => unknown>>;
-  /** The page lifecycle FSM, built with {@link t}. Include self-transitions for content edits. */
-  readonly statusTransitions: readonly ITransition<Status, Extract<keyof Cmds, string>>[];
-  /** Item types this page may contain, keyed by item-type tag. */
-  readonly items?: Readonly<Record<string, IItemType>>;
-  /** Page types auto-created (atomically) as pinned children whenever a page of this type is created. */
+  readonly initialStatus: Status;
+  /** Lifecycle FSM ONLY (§9.4). */
+  readonly statusTransitions: readonly ITransition<Status, string>[];
+  readonly sections: Readonly<Record<string, SectionDecl>>;
+  readonly elements?: Readonly<Record<string, ElementDecl>>;
+  readonly sectionSet?: SectionSetContract;
   readonly requiredChildren?: readonly string[];
-  /** Page-scoped commands, keyed by command name. */
-  readonly commands: Cmds;
-  /** Pure reducer: fold one event into this page's state. Total, no I/O. */
-  readonly apply: (page: PageState<State>, event: Ev) => PageState<State>;
-  /** Deterministic Markdown renderer for a page of this type (DESIGN §11). */
-  readonly render: (page: PageState<State>, ctx: IRenderCtx) => string;
+  readonly commands: DeclarativeCommandMap;
+  readonly render: RenderConfig;
+  /** Upcasters keyed by from-version, over `SectionOp` payloads (§10). */
+  readonly upcasters?: Readonly<Record<number, (payload: unknown) => unknown>>;
 }
 
-/** Full specification of an item entity (DESIGN §6.4). */
-export interface IItemTypeDef<Status extends string = never> {
-  readonly type: string;
-  readonly initialStatus?: Status;
-  readonly statusTransitions?: readonly ITransition<Status, string>[];
-}
-
-/** Opaque registration objects returned by the `define*` helpers. */
-export interface IPageType<
-  State = any,
-  Status extends string = string,
-  Cmds extends CommandMap = CommandMap,
-  Ev extends DomainEvent = DomainEvent,
-> {
-  readonly __def: IPageTypeDef<State, Status, Cmds, Ev>;
-}
-
-export interface IItemType<Status extends string = string> {
-  readonly __def: IItemTypeDef<Status>;
+/** Opaque registration object returned by `definePageType`. */
+export interface IPageType<Status extends string = string> {
+  readonly __def: IPageTypeDef<Status>;
 }

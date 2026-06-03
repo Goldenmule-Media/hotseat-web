@@ -341,7 +341,7 @@ const listWorkspacesTool: WikiTool = {
 
 const getPageTool: WikiTool = {
   name: "getPage",
-  description: "Fetch one page's projected state (type, title, status, fields, items) from the read model.",
+  description: "Fetch one page's projected state (type, title, status, sections) from the read model.",
   inputSchema: obj({ workspaceId: STR, pageId: STR }, ["workspaceId", "pageId"]),
   write: false,
   async handle(args, ctx) {
@@ -446,11 +446,20 @@ const openQuestionsTool: WikiTool = {
     for (const ws of workspaces) {
       const pages = await ctx.readModel.listPages(ws);
       for (const p of pages) {
-        const items = (p.items ?? {}) as Record<string, Array<Record<string, unknown>>>;
-        for (const q of items.question ?? []) {
-          const status = typeof q.status === "string" ? q.status : "open";
-          if (!RESOLVED.has(status.toLowerCase())) {
-            open.push({ workspaceId: ws, pageId: p.id, pageTitle: p.title, itemId: String(q.id ?? ""), status });
+        // Walk the section tree: `question` list elements live in a `list` field
+        // whose `elementType === "question"` (the new section content model §2/§3).
+        const sections = (p.sections ?? []) as Array<{
+          fields?: Record<string, { kind?: string; elementType?: string; elements?: Array<Record<string, unknown>> }>;
+        }>;
+        for (const sec of sections) {
+          for (const f of Object.values(sec.fields ?? {})) {
+            if (f.kind !== "list" || f.elementType !== "question") continue;
+            for (const q of f.elements ?? []) {
+              const status = typeof q.status === "string" ? q.status : "open";
+              if (!RESOLVED.has(status.toLowerCase())) {
+                open.push({ workspaceId: ws, pageId: p.id, pageTitle: p.title, itemId: String(q.id ?? ""), status });
+              }
+            }
           }
         }
       }
