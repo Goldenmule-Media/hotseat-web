@@ -1,0 +1,30 @@
+{
+  "name": "wiki-ui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Read-only, live-updating browser for a wiki-server. Embeds the wiki engine in the browser and tails the Durable Stream directly.",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "marked": "^14.1.4",
+    "next": "^15.5.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "wiki": "file:../wiki",
+    "wiki-models": "file:../wiki-models"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.7.3"
+  },
+  "overrides": {
+    "wiki": "file:../wiki"
+  }
+}
