@@ -21,11 +21,19 @@
  * (DESIGN §6.2). Write tools advance the session's high-water mark and echo the
  * token in their result so a client MAY also thread it.
  */
-import { encodeToken, type JsonSchema, type WorkspaceId } from "wiki";
+import { encodeToken, StaleEditError, type JsonSchema, type WorkspaceId } from "wiki";
 
 import { asPageId, asWorkspaceId, type EmbeddedEngine } from "../engine.js";
 import type { SqlReadModel } from "../readmodel/readmodel.js";
+import { createLanguageRegistry } from "../models/analyzers/index.js";
+import type { LanguageRegistry, RenameTarget } from "../models/language-registry.js";
 import type { SessionTokenManager } from "./tokens.js";
+
+/**
+ * The shared default {@link LanguageRegistry} (built-in TS/JS analyzer, stateless/pure)
+ * the semantic-operation write tools consult to compute rename edits host-side (§11).
+ */
+const LANGUAGES: LanguageRegistry = createLanguageRegistry();
 
 // ────────────────────────────────────────────────────────────────────────────
 // Tool descriptor shape
@@ -591,6 +599,225 @@ const referencesTool: WikiTool = {
 };
 
 // ────────────────────────────────────────────────────────────────────────────
+// Semantic operations (write) — renameSymbol (DESIGN §5/§11, Phase 3)
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Capitalize the first letter (mirrors the engine's generated-command derivation). */
+function cap(s: string): string {
+  return s.length === 0 ? s : s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/**
+ * The engine's generated guarded code-edit command name for a `(section, field)`
+ * target — `apply<Section><Field>Edits` for a `code` field, or
+ * `apply<Section><Field>BlockEdits` when addressing a `code` block in a `blocks`
+ * field (mirrors `registry.deriveGenerated`, §9.4).
+ */
+function codeEditCommand(section: string, field: string, onBlock: boolean): string {
+  return onBlock ? `apply${cap(section)}${cap(field)}BlockEdits` : `apply${cap(section)}${cap(field)}Edits`;
+}
+
+/** The shape of a serialized section in a `pages.sections` JSONB row. */
+interface SectionJson {
+  id: string;
+  key: string;
+  fields?: Record<string, FieldJson>;
+}
+type FieldJson =
+  | { kind: "code"; lang: string; source: string; hash: string }
+  | { kind: "blocks"; blocks: BlockJson[] }
+  | { kind: string; [k: string]: unknown };
+type BlockJson = { kind: string; id?: string; lang?: string; source?: string; hash?: string } & Record<string, unknown>;
+
+/** A located `code` field/block's canonical source + hash, read from a page row. */
+interface CodeLocation {
+  readonly lang: string;
+  readonly source: string;
+  readonly hash: string;
+}
+
+/**
+ * Locate a `code` field (or a `code` block by id, when `block` is given) in a page's
+ * serialized section tree, returning its canonical source + hash. The canonical source
+ * is the write-model source of truth (§4); we read it from the read-model page row.
+ */
+function locateCode(sections: SectionJson[], section: string, field: string, block: string | undefined): CodeLocation | undefined {
+  const sec = sections.find((s) => s.key === section);
+  const f = sec?.fields?.[field];
+  if (f === undefined) return undefined;
+  if (block !== undefined) {
+    if (f.kind !== "blocks") return undefined;
+    const blk = (f as { blocks: BlockJson[] }).blocks.find((b) => b.id === block);
+    if (blk === undefined || blk.kind !== "code") return undefined;
+    return { lang: String(blk.lang ?? "ts"), source: String(blk.source ?? ""), hash: String(blk.hash ?? "") };
+  }
+  if (f.kind !== "code") return undefined;
+  const cf = f as { lang: string; source: string; hash: string };
+  return { lang: cf.lang, source: cf.source, hash: cf.hash };
+}
+
+const renameSymbolTool: WikiTool = {
+  name: "renameSymbol",
+  description:
+    "Type-aware rename of a symbol within ONE `code` field or `code` block (Phase 3). " +
+    "Reads the field/block's current canonical source, computes scope-correct rename edits " +
+    "with the language analyzer (a single-file type-checker, so shadowed / unrelated " +
+    "same-name identifiers are NOT touched), then applies them via a guarded code-edit " +
+    "command under a CONTENT-HASH PRECONDITION (rejected + retried once on a concurrent " +
+    "write). GUARANTEE SCOPE: sound only for in-scope references within the single edited " +
+    "source in a supported language. Same-name references in OTHER code fields / blocks / " +
+    "pages are REPORTED as `candidates` (where-used), never auto-renamed; cross-workspace " +
+    "and prose occurrences are out of scope. Returns the new consistency token, the applied " +
+    "edits, any `unresolved` notes, and the reported `candidates`.",
+  inputSchema: obj(
+    {
+      workspaceId: STR,
+      pageId: str("The page whose code field/block to edit."),
+      section: str("The section KEY containing the code field/block."),
+      field: str("The field key (a `code` field, or a `blocks` field when `block` is set)."),
+      block: nullableStr("A `code` block id inside a `blocks` field, or null/omit for a `code` field."),
+      symbol: nullableStr("The symbol name to rename (the first declaration of that name)."),
+      offset: { type: ["integer", "null"], minimum: 0, description: "An offset into the source on the target identifier (disambiguates same-name declarations). Use instead of, or with, `symbol`." },
+      newName: str("The new name for the symbol."),
+    },
+    ["workspaceId", "pageId", "section", "field", "newName"],
+  ),
+  write: true,
+  async handle(args, ctx) {
+    const ws = asWorkspaceId(reqStr(args, "workspaceId"));
+    const pageId = reqStr(args, "pageId");
+    const section = reqStr(args, "section");
+    const field = reqStr(args, "field");
+    const block = optStrOrNull(args, "block") ?? undefined;
+    const newName = reqStr(args, "newName");
+    const symbol = optStrOrNull(args, "symbol") ?? undefined;
+    const offset = typeof args.offset === "number" ? args.offset : undefined;
+    if (symbol === undefined && offset === undefined) {
+      throw new Error('renameSymbol needs a target: pass "symbol" (a name) and/or "offset".');
+    }
+
+    // Read the CURRENT canonical source + hash for this code field/block, gated on the
+    // session's own writes so we rename against the latest committed source (§6.2).
+    await awaitConsistency(ctx, ws);
+    const located = await readCode(ctx, ws, pageId, section, field, block);
+    if (located === undefined) {
+      throw new Error(`No code field/block at ${pageId}/${section}.${field}${block ? `#${block}` : ""}.`);
+    }
+    const analyzer = LANGUAGES.get(located.lang);
+    if (analyzer?.rename === undefined) {
+      throw new Error(`No rename-capable analyzer for lang "${located.lang}" (rename is supported for TS/JS).`);
+    }
+
+    const target: RenameTarget = offset !== undefined ? { offset } : { name: symbol! };
+    const rename = analyzer.rename(located.source, target, newName, located.lang);
+    if (rename.edits.length === 0) {
+      return {
+        text: `No bound occurrences of ${symbol ?? `offset ${offset}`} were renamed.${rename.unresolved.length ? ` ${rename.unresolved.join(" ")}` : ""}`,
+        data: { token: null, edits: [], unresolved: rename.unresolved, candidates: [] },
+      };
+    }
+
+    const command = codeEditCommand(section, field, block !== undefined);
+    const handle = await ctx.engine.open(ws);
+
+    // Apply the precomputed edits via the guarded code-edit command under the
+    // content-hash precondition. On a StaleEditError (a concurrent write changed the
+    // source), re-read + recompute ONCE, then either succeed or surface the conflict.
+    let token: string;
+    let appliedEdits = rename.edits;
+    let usedHash = located.hash;
+    try {
+      const res = await handle.mutate(asPageId(pageId), command, {
+        ...(block !== undefined ? { block } : {}),
+        edits: rename.edits,
+        expectedHash: located.hash,
+        label: "renameSymbol",
+      });
+      token = res.token;
+    } catch (e) {
+      if (!(e instanceof StaleEditError)) throw e;
+      // Concurrent write: re-read the now-current source, recompute, retry once.
+      const fresh = await readCode(ctx, ws, pageId, section, field, block, /* bypassCache */ true);
+      if (fresh === undefined) throw e;
+      const recomputed = analyzer.rename(fresh.source, target, newName, fresh.lang);
+      if (recomputed.edits.length === 0) {
+        throw new Error(`renameSymbol conflict: the source changed concurrently and no bound occurrences remain. ${recomputed.unresolved.join(" ")}`);
+      }
+      const res = await handle.mutate(asPageId(pageId), command, {
+        ...(block !== undefined ? { block } : {}),
+        edits: recomputed.edits,
+        expectedHash: fresh.hash,
+        label: "renameSymbol",
+      });
+      token = res.token;
+      appliedEdits = recomputed.edits;
+      usedHash = fresh.hash;
+    }
+    ctx.tokens.recordWrite(ctx.sessionId, token);
+
+    // Harvest OTHER same-name references (cross-field / cross-page) from the by-name
+    // reference index — REPORTED as candidates, NOT renamed (honest guarantee scope).
+    // Exclude the edited field/block itself (those were just renamed in-place).
+    const refs = await ctx.readModel.references(ws, rename.oldName);
+    const candidates = refs
+      .filter((r) => !(r.page_id === pageId && r.section_id === located.sectionId && r.field === field && (r.block_id ?? undefined) === block))
+      .map((r) => ({
+        pageId: r.page_id,
+        sectionId: r.section_id,
+        field: r.field,
+        blockId: r.block_id,
+        start: r.ref_start,
+        end: r.ref_end,
+      }));
+
+    const sameField = candidates.filter((c) => c.pageId === pageId);
+    return {
+      text:
+        `Renamed "${rename.oldName}" → "${newName}" in ${pageId}/${section}.${field}${block ? `#${block}` : ""} ` +
+        `(${appliedEdits.length} edit${appliedEdits.length === 1 ? "" : "s"}). ` +
+        `${candidates.length} same-name reference(s) in OTHER code fields/pages were REPORTED, not renamed` +
+        `${sameField.length ? ` (${sameField.length} elsewhere on this page)` : ""}.` +
+        `${rename.unresolved.length ? ` Notes: ${rename.unresolved.join(" ")}` : ""}`,
+      data: {
+        token,
+        oldName: rename.oldName,
+        newName,
+        edits: appliedEdits,
+        expectedHash: usedHash,
+        unresolved: rename.unresolved,
+        candidates,
+        guaranteeScope:
+          "Renames are sound only for in-scope references within the single edited source in a supported language. " +
+          "Candidates in other fields/pages and any cross-workspace or prose occurrences are reported, never auto-applied.",
+      },
+    };
+  },
+};
+
+/**
+ * Read the CURRENT canonical source + hash for a `(page, section, field, block?)` code
+ * target from the read-model page row. `bypassCache` is accepted for symmetry with a
+ * post-conflict re-read; the read model is queried fresh either way.
+ */
+async function readCode(
+  ctx: WikiToolContext,
+  ws: WorkspaceId,
+  pageId: string,
+  section: string,
+  field: string,
+  block: string | undefined,
+  _bypassCache = false,
+): Promise<(CodeLocation & { sectionId: string }) | undefined> {
+  const row = await ctx.readModel.getPage(ws, pageId);
+  if (row === undefined) return undefined;
+  const sections = ((row.sections ?? []) as unknown as SectionJson[]) ?? [];
+  const located = locateCode(sections, section, field, block);
+  if (located === undefined) return undefined;
+  const sec = sections.find((s) => s.key === section);
+  return { ...located, sectionId: sec?.id ?? "" };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // The full catalog
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -609,6 +836,8 @@ export function wikiTools(): readonly WikiTool[] {
     linkTool,
     unlinkTool,
     mutatePageTool,
+    // semantic operations (write, Phase 3)
+    renameSymbolTool,
     // reads
     describeMutationsTool,
     listWorkspacesTool,

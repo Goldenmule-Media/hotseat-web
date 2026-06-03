@@ -135,6 +135,7 @@ export {
   RefIntegrityError,
   BlockNormalFormError,
   PreconditionUnmetError,
+  StaleEditError,
 } from "./core/errors";
 export type { SchemaIssue } from "./core/errors";
 

@@ -36,13 +36,16 @@ import type {
 } from "../api";
 import {
   ConcurrencyError,
+  FieldKindError,
   ItemNotFoundError,
   MutationNotAllowedError,
   PageNotFoundError,
   PreconditionUnmetError,
   SectionContractError,
+  StaleEditError,
   WorkspaceArchivedError,
 } from "./errors";
+import type { IBlock, TextEdit } from "../api";
 import { contentHash } from "./ingestion";
 import { applyOps, normalizeFieldValue } from "./operations";
 import type { GeneratedCommand, Registry } from "./registry";
@@ -164,10 +167,24 @@ export class CommandBus {
     return this.commit(projection, decide, {
       actor: req.actor,
       commandId: req.commandId,
+      // The SEMANTIC command label stamped on the content event's metadata (§9.4) —
+      // keeps history semantic (`answerQuestion`, `renameSymbol`) without per-type
+      // events. A command may override it with a `label` arg (e.g. a guarded
+      // code-edit run as `renameSymbol`); otherwise the command name is used.
+      command: this.labelFor(req),
       // Page-command events default to the target page when they omit `pageId`
       // (BUILD_NOTES §2). Structural commands set their own pageId explicitly.
       defaultPageId: req.pageId,
     });
+  }
+
+  /** The semantic label for a page command: an explicit `label` arg, else the command name. */
+  private labelFor(req: PageRequest): string {
+    const a = req.args;
+    if (a !== null && typeof a === "object" && typeof (a as { label?: unknown }).label === "string") {
+      return (a as { label: string }).label;
+    }
+    return req.command;
   }
 
   /** Pure page-command decision (resolve → validate → gate → effect → check). */
@@ -227,6 +244,9 @@ export class CommandBus {
       // build the ops.
       const ops = this.buildDeclarativeOps(view, declared, parsed, ctx, resolvedElementId);
 
+      // content-hash precondition on any code edit (re-runs on rebase, §5).
+      this.assertEditPreconditions(view, ops);
+
       // preconditions.
       this.runPreconditions(declared, view, ctx.related);
 
@@ -246,6 +266,7 @@ export class CommandBus {
     this.assertMutable(node.type, node.status, gen.section, req.command, allowedSet());
     const parsed = (req.args ?? {}) as Record<string, unknown>;
     const ops = this.buildGeneratedOps(gen, parsed, ctx);
+    this.assertEditPreconditions(view, ops);
     this.dryRunAndValidate(state, node.type, view, ops);
     const result = this.generatedResult(gen, ops);
     if (ops.length === 0) return { events: [], result };
@@ -391,6 +412,21 @@ export class CommandBus {
     switch (gen.kind) {
       case "setField":
         return [{ op: "setField", section: gen.section, field: gen.field, value: this.coerceField(args.value) }];
+      case "applyTextEdits": {
+        const edits = this.coerceEdits(args.edits);
+        const block = gen.onBlocksField ? (args.block as string | undefined) : undefined;
+        const expectedHash = typeof args.expectedHash === "string" ? args.expectedHash : undefined;
+        return [
+          {
+            op: "applyTextEdits",
+            section: gen.section,
+            field: gen.field,
+            ...(block !== undefined ? { block: block as never } : {}),
+            edits,
+            ...(expectedHash !== undefined ? { expectedHash } : {}),
+          },
+        ];
+      }
       case "addElement": {
         const id = (args.id as string) ?? ctx.newId();
         const fields = (args.fields as Record<string, IField>) ?? {};
@@ -417,6 +453,20 @@ export class CommandBus {
       return normalizeFieldValue(value as IField);
     }
     return { kind: "scalar", value: value as string | number | boolean };
+  }
+
+  /** Coerce a raw `edits` arg into a validated `TextEdit[]` (pure shape check). */
+  private coerceEdits(value: unknown): TextEdit[] {
+    if (!Array.isArray(value)) {
+      throw new FieldKindError("applyTextEdits requires an `edits` array of TextEdits.");
+    }
+    return value.map((e): TextEdit => {
+      const r = e as { start?: unknown; end?: unknown; replacement?: unknown };
+      if (typeof r.start !== "number" || typeof r.end !== "number" || typeof r.replacement !== "string") {
+        throw new FieldKindError("Each TextEdit needs numeric start/end and a string replacement.");
+      }
+      return { start: r.start, end: r.end, replacement: r.replacement };
+    });
   }
 
   private resolveValueOptional(
@@ -474,6 +524,42 @@ export class CommandBus {
     for (const pre of cmd.preconditions ?? []) {
       const res = pre(view as DeepReadonly<PageState>, related);
       if (res !== true) throw new PreconditionUnmetError(res.unmet);
+    }
+  }
+
+  /**
+   * Enforce the CONTENT-HASH PRECONDITION on every `applyTextEdits` op that carries
+   * `expectedHash` (structured-content §5/§11). Evaluated against the CURRENT folded
+   * `view` (a code field/block's live source) inside the rebase-retried `decide`
+   * window, so an edit computed against now-stale source — e.g. after an OCC rebase
+   * advanced the head, or a concurrent writer touched the same field — is rejected
+   * with a typed {@link StaleEditError} rather than silently applied. Pure: it only
+   * reads the live source and recomputes its hash.
+   */
+  private assertEditPreconditions(view: PageState, ops: readonly SectionOp[]): void {
+    for (const op of ops) {
+      if (op.op !== "applyTextEdits" || op.expectedHash === undefined) continue;
+      const sec = view.sections.find((s) => s.key === op.section);
+      if (sec === undefined) continue; // a missing section surfaces later as SECTION_NOT_FOUND.
+      let actualHash: string | undefined;
+      if (op.block !== undefined) {
+        const f = sec.fields[op.field];
+        if (f !== undefined && f.kind === "blocks") {
+          const target = f.blocks.find((b: IBlock) => b.id === op.block);
+          if (target !== undefined && target.kind === "code") actualHash = target.hash;
+        }
+      } else {
+        const f = sec.fields[op.field];
+        if (f !== undefined && f.kind === "code") actualHash = f.hash;
+      }
+      if (actualHash === undefined) {
+        throw new FieldKindError(
+          `applyTextEdits targets a code field/block; "${op.section}.${op.field}"${op.block !== undefined ? `#${op.block}` : ""} is not code.`,
+        );
+      }
+      if (actualHash !== op.expectedHash) {
+        throw new StaleEditError(op.section, op.field, op.block, op.expectedHash, actualHash);
+      }
     }
   }
 
@@ -591,7 +677,7 @@ export class CommandBus {
   private async commit(
     projection: BusProjection,
     decide: (state: IWorkspaceState) => { events: DomainEvent[]; result: unknown },
-    meta: { actor?: string; commandId?: string; defaultPageId?: PageId },
+    meta: { actor?: string; commandId?: string; command?: string; defaultPageId?: PageId },
   ): Promise<CommitOutcome> {
     const ws = projection.state.id;
 
@@ -642,13 +728,14 @@ export class CommandBus {
     state: IWorkspaceState,
     raw: readonly DomainEvent[],
     expectedVersion: number,
-    meta: { actor?: string; commandId?: string; defaultPageId?: PageId },
+    meta: { actor?: string; commandId?: string; command?: string; defaultPageId?: PageId },
   ): IEventEnvelope[] {
     const ws: WorkspaceId = state.id;
     const eventMeta: IEventMeta = {
       occurredAt: this.services.now(),
       ...(meta.actor !== undefined ? { actor: meta.actor } : {}),
       ...(meta.commandId !== undefined ? { commandId: meta.commandId } : {}),
+      ...(meta.command !== undefined ? { command: meta.command } : {}),
     };
 
     return raw.map((ev, i): IEventEnvelope => {

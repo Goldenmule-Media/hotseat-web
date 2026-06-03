@@ -20,11 +20,23 @@ const KNOWN_KINDS = new Set(["scalar", "prose", "code", "attachment-ref", "ref",
 /** A generated structural command derived from a section/field declaration. */
 export interface GeneratedCommand {
   readonly name: string;
-  readonly kind: "setField" | "addElement" | "removeElement" | "moveElement" | "setElementField";
+  readonly kind:
+    | "setField"
+    | "applyTextEdits"
+    | "addElement"
+    | "removeElement"
+    | "moveElement"
+    | "setElementField";
   readonly section: string;
   readonly field: string;
   readonly elementType?: string;
   readonly elementField?: string;
+  /**
+   * For an `applyTextEdits` command: whether the target field is a `blocks` field
+   * (so a `block` id arg is required to address a `code` block) vs a `code` field
+   * (the field IS the code, no block). Undefined for non-edit kinds.
+   */
+  readonly onBlocksField?: boolean;
 }
 
 function cap(s: string): string {
@@ -121,6 +133,25 @@ export class Registry {
         } else {
           const setName = `set${cap(key)}${cap(fk)}`;
           out.set(setName, { name: setName, kind: "setField", section: key, field: fk });
+          // A `code` field also gets a guarded code-edit command: it applies a
+          // precomputed `TextEdit[]` under a content-hash precondition (§5/§11). The
+          // host (wiki-mcp) computes the edits (rename, etc.) and calls this command.
+          if (fd.kind === "code") {
+            const editName = `apply${cap(key)}${cap(fk)}Edits`;
+            out.set(editName, { name: editName, kind: "applyTextEdits", section: key, field: fk });
+          }
+          // A `blocks` field may hold `code` blocks — the same guarded code-edit
+          // command, addressing one block by id (§3.1: a code block IS a code field).
+          if (fd.kind === "blocks") {
+            const editName = `apply${cap(key)}${cap(fk)}BlockEdits`;
+            out.set(editName, {
+              name: editName,
+              kind: "applyTextEdits",
+              section: key,
+              field: fk,
+              onBlocksField: true,
+            });
+          }
         }
       }
       for (const [nk, nested] of Object.entries(sd.sections ?? {})) walk(nk, nested);

@@ -57,10 +57,28 @@ export interface AnalyzerTextEdit {
   readonly replacement: string;
 }
 
-/** The result of a host-side `rename` computation (Phase 3). */
+/**
+ * Identifies the rename target within a single source unit (Phase 3). Either the
+ * declared `name` (the first declaration of that name wins) or a `offset` into the
+ * source that lands on an identifier — the offset form disambiguates when several
+ * declarations share a name (the analyzer resolves which binding the offset hits).
+ */
+export type RenameTarget = { readonly name: string } | { readonly offset: number };
+
+/**
+ * The result of a host-side `rename` computation (Phase 3). `edits` are the
+ * `[start,end)`→`newName` replacements over the ONE source unit, sound for the
+ * in-scope lexical references that bind to the SAME declaration (shadowed / unrelated
+ * same-name identifiers are excluded). `unresolved` carries human-readable notes for
+ * sites the analyzer could not safely rename (e.g. the target name was not found, or a
+ * `newName` collision) — reported, never guessed. `oldName` echoes the resolved
+ * declaration name so the host can harvest cross-field same-name candidates (§5).
+ */
 export interface RenameResult {
-  readonly source: string;
+  readonly oldName: string;
+  readonly newName: string;
   readonly edits: readonly AnalyzerTextEdit[];
+  readonly unresolved: readonly string[];
 }
 
 /**
@@ -84,8 +102,14 @@ export interface ILanguageAnalyzer {
   symbols(source: string, lang?: string): readonly AnalyzerSymbol[];
   /** Identifier occurrences in `source` (optionally only those named `name`). */
   references(source: string, name?: string, lang?: string): readonly AnalyzerReference[];
-  /** Compute rename edits host-side (Phase 3) — returns, never writes. Optional in Phase 2. */
-  rename?(source: string, name: string, newName: string, lang?: string): RenameResult;
+  /**
+   * Compute TYPE-AWARE rename edits host-side (Phase 3) over the ONE source unit —
+   * returns, never writes. Resolves `target` to its declaration via a single-file
+   * type-checker so only occurrences that BIND to that declaration are renamed
+   * (shadowed / unrelated same-name identifiers are left alone). Optional: a Phase-2
+   * analyzer may omit it.
+   */
+  rename?(source: string, target: RenameTarget, newName: string, lang?: string): RenameResult;
 }
 
 /** Loader contract: import an analyzer plugin by specifier (for out-of-tree analyzers). */

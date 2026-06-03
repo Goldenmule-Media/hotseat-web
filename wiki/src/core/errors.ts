@@ -198,6 +198,36 @@ export class PreconditionUnmetError extends WikiError {
 }
 
 /**
+ * Thrown when a code edit carries a CONTENT-HASH PRECONDITION (structured-content §5)
+ * that no longer holds: the target `code` field/block's CURRENT content hash differs
+ * from the `expectedHash` the edits were computed against. Distinct from the
+ * stream-level {@link ConcurrencyError} (OCC `Stream-Seq`): this is a *semantic* stale
+ * read — the host computed `TextEdit`s against source that has since changed (e.g.
+ * another writer edited the same field, or an OCC rebase advanced the head). Evaluated
+ * inside the rebase-retried `decide` window, so it re-checks against the freshest state.
+ */
+export class StaleEditError extends WikiError {
+  readonly section: string;
+  readonly field: string;
+  readonly block: string | undefined;
+  readonly expectedHash: string;
+  readonly actualHash: string;
+  constructor(section: string, field: string, block: string | undefined, expectedHash: string, actualHash: string) {
+    super(
+      "STALE_EDIT",
+      `Code edit precondition failed for "${section}.${field}"${block !== undefined ? `#${block}` : ""}: ` +
+        `expected content hash "${expectedHash}" but the current source hashes to "${actualHash}". ` +
+        `The edits were computed against stale source; re-read and recompute.`,
+    );
+    this.section = section;
+    this.field = field;
+    this.block = block;
+    this.expectedHash = expectedHash;
+    this.actualHash = actualHash;
+  }
+}
+
+/**
  * Thrown when a token-gated read's `waitFor` exceeds its timeout — the read model
  * hasn't applied the requested {@link ConsistencyToken} in time (DESIGN §8.6/§14).
  * Carries the awaited `token` + `timeoutMs` so a caller can retry or fall back to an

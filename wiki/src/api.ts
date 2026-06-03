@@ -482,7 +482,21 @@ export interface TextEdit {
 export type SectionOp =
   // ── field / element edits ──
   | { readonly op: "setField"; section: string; field: string; value: IField }
-  | { readonly op: "applyTextEdits"; section: string; field: string; block?: BlockId; edits: TextEdit[] }
+  | {
+      readonly op: "applyTextEdits";
+      section: string;
+      field: string;
+      block?: BlockId;
+      edits: TextEdit[];
+      /**
+       * Optional CONTENT-HASH PRECONDITION (structured-content §5, §11). When present,
+       * the command bus's rebase-retried decide window rejects the op (with a typed
+       * {@link StaleEditError}) iff the target code field/block's CURRENT content hash
+       * differs — i.e. the edits were computed against now-stale source (e.g. after an
+       * OCC rebase). Complements stream-level OCC; the reducer itself stays pure.
+       */
+      expectedHash?: string;
+    }
   | {
       readonly op: "addElement";
       section: string;
