@@ -35,6 +35,10 @@ export default defineConfig({
       /^pg($|\/)/,
       /^zod($|\/)/,
       /^zod-to-json-schema($|\/)/,
+      // The TypeScript compiler (the §6.2 TS/JS analyzer's parser) is a heavy, version-
+      // sensitive host dep — keep it EXTERNAL so it loads from node_modules at runtime,
+      // never bundled into dist (structured-content §4/§13).
+      /^typescript($|\/)/,
     ],
   },
   sourcemap: true,

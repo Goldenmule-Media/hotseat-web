@@ -71,9 +71,13 @@ export interface OutlineTable {
 }
 
 /**
- * `symbol_index(...)` — a STUB (§11/§12): one row per `code` field/block with its
- * canonical source location + hash. `name`/`kind`/`range` are filled in Phase 3 by
- * the LanguageRegistry; null in Phase 1 (no parser).
+ * `symbol_index(...)` — the symbol projection (§6.2). For a `code` field/block whose
+ * `lang` has a loaded analyzer (the §7 LanguageRegistry), one row **per declaration**:
+ * `name` / `kind` / `def_start` / `def_end` carry the symbol and its `[def_start,
+ * def_end)` offset range into canonical source. For a `lang` with **no** analyzer it
+ * keeps the Phase-1 STUB shape — one location-only row with `name`/`kind`/offsets null
+ * (the "opaque blob served verbatim" case, §12). `source_hash` is the field/block
+ * content hash (`def_hash`), so a rename reads source + hash straight from here (§6.4).
  */
 export interface SymbolIndexTable {
   workspace_id: string;
@@ -85,7 +89,33 @@ export interface SymbolIndexTable {
   source_hash: string;
   name: string | null;
   kind: string | null;
-  range: string | null;
+  /** Containing symbol (e.g. the class of a method), or null. */
+  container: string | null;
+  /** 0-based start offset of the declaration in canonical source; null for a stub row. */
+  def_start: number | null;
+  /** End offset (exclusive) of the declaration; null for a stub row. */
+  def_end: number | null;
+}
+
+/**
+ * `reference_index(...)` — the in-source identifier index (§6.2/§11). One row per
+ * identifier occurrence inside a `code` field/block whose `lang` has an analyzer; a
+ * rename's where-used set and the `references` read tool read this. Resolution to a
+ * specific declaration (cross-file / type-aware) is Phase 3 — a reference is keyed by
+ * `name` + `[start, end)` offset only.
+ */
+export interface ReferenceIndexTable {
+  workspace_id: string;
+  page_id: string;
+  section_id: string;
+  field: string;
+  block_id: string | null;
+  lang: string;
+  name: string;
+  /** 0-based start offset of the occurrence in canonical source. */
+  ref_start: number;
+  /** End offset (exclusive) of the occurrence. */
+  ref_end: number;
 }
 
 /** `xref_index(...)` — every `ref` field and inline `ref`, harvested deep (§7). */
@@ -152,6 +182,7 @@ export interface ReadModelDatabase {
   projection_offsets: ProjectionOffsetsTable;
   outline: OutlineTable;
   symbol_index: SymbolIndexTable;
+  reference_index: ReferenceIndexTable;
   xref_index: XrefIndexTable;
 }
 

@@ -28,8 +28,11 @@ import type { Kysely, Selectable } from "kysely";
 import type {
   EventsTable,
   LinksTable,
+  OutlineTable,
   PagesTable,
   ReadModelDatabase,
+  ReferenceIndexTable,
+  SymbolIndexTable,
   TreeEdgesTable,
   WorkspacesTable,
 } from "./schema.js";
@@ -40,6 +43,9 @@ export type PageRow = Selectable<PagesTable>;
 export type TreeEdgeRow = Selectable<TreeEdgesTable>;
 export type LinkRow = Selectable<LinksTable>;
 export type EventRow = Selectable<EventsTable>;
+export type OutlineRow = Selectable<OutlineTable>;
+export type SymbolRow = Selectable<SymbolIndexTable>;
+export type ReferenceRow = Selectable<ReferenceIndexTable>;
 
 /** Tuning knobs for the read model's `waitFor` backstop poll + default timeout. */
 export interface ReadModelOptions {
@@ -156,6 +162,68 @@ export class SqlReadModel implements IReadModel {
   /** The event log for a workspace, in version order. */
   async events(workspace: WorkspaceId): Promise<EventRow[]> {
     return this.db.selectFrom("events").selectAll().where("workspace_id", "=", workspace).orderBy("version").execute();
+  }
+
+  // ── derived projections (§6) ──────────────────────────────────────────────────
+
+  /**
+   * The outline rows for a page (the section tree, §6.1) — ordered by `(parent, ord)`
+   * so a caller can rebuild the nested tree deterministically.
+   */
+  async outline(workspace: WorkspaceId, pageId: string): Promise<OutlineRow[]> {
+    return this.db
+      .selectFrom("outline")
+      .selectAll()
+      .where("workspace_id", "=", workspace)
+      .where("page_id", "=", pageId)
+      .orderBy("parent_section_id")
+      .orderBy("ord")
+      .execute();
+  }
+
+  /**
+   * Symbols in a workspace (§6.2), optionally scoped to one page and/or filtered by
+   * exact `name` / `kind`. Stub (analyzer-less) rows have null `name`/`kind`, so a
+   * name/kind filter naturally excludes them. Ordered for determinism.
+   */
+  async symbols(
+    workspace: WorkspaceId,
+    filter?: { pageId?: string; name?: string; kind?: string },
+  ): Promise<SymbolRow[]> {
+    let q = this.db.selectFrom("symbol_index").selectAll().where("workspace_id", "=", workspace);
+    if (filter?.pageId !== undefined) q = q.where("page_id", "=", filter.pageId);
+    if (filter?.name !== undefined) q = q.where("name", "=", filter.name);
+    if (filter?.kind !== undefined) q = q.where("kind", "=", filter.kind);
+    return q
+      .orderBy("page_id")
+      .orderBy("section_id")
+      .orderBy("field")
+      .orderBy("def_start")
+      .execute();
+  }
+
+  /**
+   * In-source references to identifier `name` in a workspace (§6.2), optionally scoped
+   * to one page. Resolution to a specific declaration is Phase 3; this is the
+   * by-name where-used index. Ordered for determinism.
+   */
+  async references(
+    workspace: WorkspaceId,
+    name: string,
+    filter?: { pageId?: string },
+  ): Promise<ReferenceRow[]> {
+    let q = this.db
+      .selectFrom("reference_index")
+      .selectAll()
+      .where("workspace_id", "=", workspace)
+      .where("name", "=", name);
+    if (filter?.pageId !== undefined) q = q.where("page_id", "=", filter.pageId);
+    return q
+      .orderBy("page_id")
+      .orderBy("section_id")
+      .orderBy("field")
+      .orderBy("ref_start")
+      .execute();
   }
 
   // ── internals ────────────────────────────────────────────────────────────────

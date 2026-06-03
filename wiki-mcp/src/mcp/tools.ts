@@ -470,6 +470,127 @@ const openQuestionsTool: WikiTool = {
 };
 
 // ────────────────────────────────────────────────────────────────────────────
+// Derived-projection read tools (outline · symbols · references, DESIGN §6)
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A nested outline node — the section tree shape the `outline` tool returns.
+ * `(key, name, order)` plus children, rebuilt from the flat `outline` rows.
+ */
+interface OutlineNode {
+  sectionId: string;
+  key: string;
+  name: string;
+  order: number;
+  children: OutlineNode[];
+}
+
+const outlineTool: WikiTool = {
+  name: "outline",
+  description:
+    "A page's section tree (key, name, order) from the outline projection (DESIGN §6.1) — " +
+    "no parsing, straight from folded state. Token-gated for read-your-writes.",
+  inputSchema: obj({ workspaceId: STR, pageId: STR }, ["workspaceId", "pageId"]),
+  write: false,
+  async handle(args, ctx) {
+    const ws = asWorkspaceId(reqStr(args, "workspaceId"));
+    await awaitConsistency(ctx, ws);
+    const rows = await ctx.readModel.outline(ws, reqStr(args, "pageId"));
+    // Rebuild the nested tree from the flat rows (rows are ordered by parent, ord).
+    const byId = new Map<string, OutlineNode>();
+    for (const r of rows) {
+      byId.set(r.section_id, { sectionId: r.section_id, key: r.key, name: r.name, order: r.ord, children: [] });
+    }
+    const roots: OutlineNode[] = [];
+    for (const r of rows) {
+      const node = byId.get(r.section_id)!;
+      const parent = r.parent_section_id !== null ? byId.get(r.parent_section_id) : undefined;
+      if (parent !== undefined) parent.children.push(node);
+      else roots.push(node);
+    }
+    const lines: string[] = [];
+    const render = (nodes: OutlineNode[], depth: number): void => {
+      for (const n of nodes) {
+        lines.push(`${"  ".repeat(depth)}- ${n.name} (${n.key})`);
+        render(n.children, depth + 1);
+      }
+    };
+    render(roots, 0);
+    return { text: lines.join("\n") || "(no sections)", data: roots };
+  },
+};
+
+const symbolsTool: WikiTool = {
+  name: "symbols",
+  description:
+    "Symbols (declarations) indexed from `code` fields/blocks across a workspace " +
+    "(DESIGN §6.2), optionally scoped to one page and/or filtered by exact name or kind. " +
+    "Each symbol carries its kind, container, and [defStart, defEnd) offset range into " +
+    "canonical source. A `code` field in an unanalyzed language yields only a location " +
+    "stub (no name/kind). Token-gated for read-your-writes.",
+  inputSchema: obj(
+    {
+      workspaceId: STR,
+      pageId: nullableStr("Restrict to one page, or null/omit for the whole workspace."),
+      name: nullableStr("Filter by exact symbol name."),
+      kind: nullableStr("Filter by exact symbol kind (e.g. function, class, method)."),
+    },
+    ["workspaceId"],
+  ),
+  write: false,
+  async handle(args, ctx) {
+    const ws = asWorkspaceId(reqStr(args, "workspaceId"));
+    await awaitConsistency(ctx, ws);
+    const pageId = optStrOrNull(args, "pageId");
+    const name = optStrOrNull(args, "name");
+    const kind = optStrOrNull(args, "kind");
+    const filter = {
+      ...(pageId !== null ? { pageId } : {}),
+      ...(name !== null ? { name } : {}),
+      ...(kind !== null ? { kind } : {}),
+    };
+    const rows = await ctx.readModel.symbols(ws, filter);
+    const lines = rows.map((r) =>
+      r.name === null
+        ? `- [${r.lang}] ${r.page_id}/${r.section_id}.${r.field}${r.block_id ? `#${r.block_id}` : ""} (no analyzer)`
+        : `- ${r.kind} ${r.container ? `${r.container}.` : ""}${r.name} @[${r.def_start},${r.def_end}) (${r.page_id}/${r.section_id}.${r.field}${r.block_id ? `#${r.block_id}` : ""})`,
+    );
+    return { text: rows.length === 0 ? "No symbols." : lines.join("\n"), data: rows };
+  },
+};
+
+const referencesTool: WikiTool = {
+  name: "references",
+  description:
+    "In-source references (identifier occurrences) to a given symbol name across a " +
+    "workspace's `code` fields/blocks (DESIGN §6.2), optionally scoped to one page. Each " +
+    "reference carries its [start, end) offset. Resolution to a specific declaration " +
+    "(cross-file / type-aware) is deferred; this is the by-name where-used index. " +
+    "Token-gated for read-your-writes.",
+  inputSchema: obj(
+    {
+      workspaceId: STR,
+      name: str("The symbol name to find references to."),
+      pageId: nullableStr("Restrict to one page, or null/omit for the whole workspace."),
+    },
+    ["workspaceId", "name"],
+  ),
+  write: false,
+  async handle(args, ctx) {
+    const ws = asWorkspaceId(reqStr(args, "workspaceId"));
+    await awaitConsistency(ctx, ws);
+    const name = reqStr(args, "name");
+    const pageId = optStrOrNull(args, "pageId");
+    const filter = pageId !== null ? { pageId } : undefined;
+    const rows = await ctx.readModel.references(ws, name, filter);
+    const lines = rows.map(
+      (r) => `- ${r.name} @[${r.ref_start},${r.ref_end}) (${r.page_id}/${r.section_id}.${r.field}${r.block_id ? `#${r.block_id}` : ""})`,
+    );
+    return { text: rows.length === 0 ? `No references to "${name}".` : lines.join("\n"), data: rows };
+  },
+};
+
+// ────────────────────────────────────────────────────────────────────────────
 // The full catalog
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -496,5 +617,9 @@ export function wikiTools(): readonly WikiTool[] {
     renderPageTool,
     searchTool,
     openQuestionsTool,
+    // derived projections (§6)
+    outlineTool,
+    symbolsTool,
+    referencesTool,
   ];
 }

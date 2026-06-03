@@ -31,6 +31,10 @@ export default defineConfig({
       /^pg($|\/)/,
       /^zod($|\/)/,
       /^zod-to-json-schema($|\/)/,
+      // The TypeScript compiler is wiki-mcp's TS/JS analyzer parser (structured-content
+      // §6.2) — heavy + version-sensitive, kept EXTERNAL here too so the 8 MB compiler
+      // loads from node_modules at runtime rather than bloating dist (§4/§13).
+      /^typescript($|\/)/,
     ],
   },
   sourcemap: true,

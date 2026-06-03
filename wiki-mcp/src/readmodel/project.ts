@@ -30,12 +30,15 @@ import type {
 } from "wiki";
 import type { Insertable, Kysely } from "kysely";
 
+import { createLanguageRegistry } from "../models/analyzers/index.js";
+import type { LanguageRegistry } from "../models/language-registry.js";
 import type {
   EventsTable,
   LinksTable,
   OutlineTable,
   PagesTable,
   ReadModelDatabase,
+  ReferenceIndexTable,
   SymbolIndexTable,
   TreeEdgesTable,
   XrefIndexTable,
@@ -48,12 +51,19 @@ type LinkInsert = Insertable<LinksTable>;
 type EventInsert = Insertable<EventsTable>;
 type OutlineInsert = Insertable<OutlineTable>;
 type SymbolInsert = Insertable<SymbolIndexTable>;
+type ReferenceInsert = Insertable<ReferenceIndexTable>;
 type XrefInsert = Insertable<XrefIndexTable>;
 
 /** Serialize a JS value to the `string` JSONB columns expect on insert. */
 function toJsonb(value: unknown): string {
   return JSON.stringify(value ?? null);
 }
+
+/**
+ * The default {@link LanguageRegistry} (built-in TS/JS analyzer) used when a caller
+ * doesn't inject one — constructed once and shared (the analyzer is stateless/pure).
+ */
+const DEFAULT_LANGUAGES: LanguageRegistry = createLanguageRegistry();
 
 /** Build the `pages` rows for a folded workspace state. */
 function pageRows(state: IWorkspaceState): PageInsert[] {
@@ -94,26 +104,85 @@ function outlineRows(state: IWorkspaceState): OutlineInsert[] {
   return rows;
 }
 
-/** Build the `symbol_index` STUB rows — canonical code locations only (§11/§12). */
-function symbolRows(state: IWorkspaceState): SymbolInsert[] {
-  const rows: SymbolInsert[] = [];
-  const pushCode = (node: IPageNode, sec: ISection, field: string, blockId: string | null, lang: string, hash: string): void => {
-    rows.push({
-      workspace_id: state.id,
-      page_id: node.id,
-      section_id: sec.id,
-      field,
-      block_id: blockId,
-      lang,
-      source_hash: hash,
-      name: null,
-      kind: null,
-      range: null,
-    });
+/**
+ * Build the `symbol_index` + `reference_index` rows over every `code` field and `code`
+ * block (recursing `blocks` fields, §6.2). For a `lang` with a loaded analyzer
+ * ({@link LanguageRegistry}) we parse canonical source and emit one symbol row **per
+ * declaration** (name/kind/container/offsets) plus one reference row per identifier
+ * occurrence. For a `lang` with **no** analyzer we keep the Phase-1 STUB: a single
+ * location-only symbol row (name/kind/offsets null), serving the code as an opaque
+ * canonical blob (§12). Pure + deterministic: the analyzer is pure over its source, the
+ * walk is source-ordered, so equal state yields equal rows (§10).
+ */
+function symbolAndReferenceRows(
+  state: IWorkspaceState,
+  langs: LanguageRegistry,
+): { symbols: SymbolInsert[]; references: ReferenceInsert[] } {
+  const symbols: SymbolInsert[] = [];
+  const references: ReferenceInsert[] = [];
+
+  const pushCode = (
+    node: IPageNode,
+    sec: ISection,
+    field: string,
+    blockId: string | null,
+    lang: string,
+    source: string,
+    hash: string,
+  ): void => {
+    const analyzer = langs.get(lang);
+    if (analyzer === undefined) {
+      // No analyzer for this lang → the STUB: one location-only row (§12).
+      symbols.push({
+        workspace_id: state.id,
+        page_id: node.id,
+        section_id: sec.id,
+        field,
+        block_id: blockId,
+        lang,
+        source_hash: hash,
+        name: null,
+        kind: null,
+        container: null,
+        def_start: null,
+        def_end: null,
+      });
+      return;
+    }
+    for (const sym of analyzer.symbols(source, lang)) {
+      symbols.push({
+        workspace_id: state.id,
+        page_id: node.id,
+        section_id: sec.id,
+        field,
+        block_id: blockId,
+        lang,
+        source_hash: hash,
+        name: sym.name,
+        kind: sym.kind,
+        container: sym.container ?? null,
+        def_start: sym.defStart,
+        def_end: sym.defEnd,
+      });
+    }
+    for (const ref of analyzer.references(source, undefined, lang)) {
+      references.push({
+        workspace_id: state.id,
+        page_id: node.id,
+        section_id: sec.id,
+        field,
+        block_id: blockId,
+        lang,
+        name: ref.name,
+        ref_start: ref.start,
+        ref_end: ref.end,
+      });
+    }
   };
+
   const walkBlocks = (node: IPageNode, sec: ISection, field: string, blocks: IBlock[]): void => {
     for (const b of blocks) {
-      if (b.kind === "code") pushCode(node, sec, field, b.id, b.lang, b.hash);
+      if (b.kind === "code") pushCode(node, sec, field, b.id, b.lang, b.source, b.hash);
       else if (b.kind === "quote") walkBlocks(node, sec, field, b.blocks);
       else if (b.kind === "list") for (const item of b.items) walkBlocks(node, sec, field, item);
     }
@@ -121,12 +190,12 @@ function symbolRows(state: IWorkspaceState): SymbolInsert[] {
   for (const node of state.pages.values()) {
     for (const sec of node.sections) {
       for (const [fk, f] of Object.entries(sec.fields)) {
-        if (f.kind === "code") pushCode(node, sec, fk, null, f.lang, f.hash);
+        if (f.kind === "code") pushCode(node, sec, fk, null, f.lang, f.source, f.hash);
         else if (f.kind === "blocks") walkBlocks(node, sec, fk, f.blocks);
       }
     }
   }
-  return rows;
+  return { symbols, references };
 }
 
 /** Build `xref_index` rows — every `ref` field + inline ref, harvested deep (§7). */
@@ -251,12 +320,16 @@ export async function appliedVersion(
  * apply is a no-op and the current applied version is returned.
  *
  * @param fingerprint the registry fingerprint stamped on the offset row (§5.3).
+ * @param languages the {@link LanguageRegistry} the symbol/reference projection
+ *   consults per `code` field/block `lang` (§6.2); a lang with no analyzer keeps the
+ *   location-only stub row.
  */
 export async function applyCommit(
   db: Kysely<ReadModelDatabase>,
   registry: Registry,
   commit: Commit,
   fingerprint: string,
+  languages: LanguageRegistry = DEFAULT_LANGUAGES,
 ): Promise<number> {
   if (commit.events.length === 0) return appliedVersion(db, commit.workspaceId);
 
@@ -277,7 +350,7 @@ export async function applyCommit(
   const links = linkRows(state);
   const events = eventRows(commit.workspaceId, commit.events);
   const outline = outlineRows(state);
-  const symbols = symbolRows(state);
+  const { symbols, references } = symbolAndReferenceRows(state, languages);
   const xrefs = xrefRows(state);
   const cursor = commit.cursor ?? null;
 
@@ -290,6 +363,7 @@ export async function applyCommit(
     await trx.deleteFrom("links").where("workspace_id", "=", commit.workspaceId).execute();
     await trx.deleteFrom("outline").where("workspace_id", "=", commit.workspaceId).execute();
     await trx.deleteFrom("symbol_index").where("workspace_id", "=", commit.workspaceId).execute();
+    await trx.deleteFrom("reference_index").where("workspace_id", "=", commit.workspaceId).execute();
     await trx.deleteFrom("xref_index").where("workspace_id", "=", commit.workspaceId).execute();
 
     await trx
@@ -305,6 +379,7 @@ export async function applyCommit(
     if (links.length > 0) await trx.insertInto("links").values(links).execute();
     if (outline.length > 0) await trx.insertInto("outline").values(outline).execute();
     if (symbols.length > 0) await trx.insertInto("symbol_index").values(symbols).execute();
+    if (references.length > 0) await trx.insertInto("reference_index").values(references).execute();
     if (xrefs.length > 0) await trx.insertInto("xref_index").values(xrefs).execute();
 
     // Append the commit's events (idempotent on the (workspace, version) PK).

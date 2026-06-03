@@ -28,6 +28,8 @@ import type { IEventEnvelope, Unsubscribe, WorkspaceId } from "wiki";
 import type { Kysely } from "kysely";
 
 import type { Logger } from "../logger.js";
+import { createLanguageRegistry } from "../models/analyzers/index.js";
+import type { LanguageRegistry } from "../models/language-registry.js";
 import { applyCommit, type Commit } from "../readmodel/project.js";
 import type { SqlReadModel } from "../readmodel/readmodel.js";
 import type { ReadModelDatabase } from "../readmodel/schema.js";
@@ -73,6 +75,12 @@ interface Attached {
 export class ProjectionService {
   private registry: Registry;
   private fingerprint: string;
+  /**
+   * The {@link LanguageRegistry} the symbol/reference projection consults per `code`
+   * field/block `lang` (§6.2/§7). Defaults to the built-in (TS/JS) registry; analyzers
+   * swap re-projects the symbol/reference indexes only, never the write model.
+   */
+  private readonly languages: LanguageRegistry;
   /** Live-tail state — set by {@link start}, cleared by {@link stopLive}. */
   private live:
     | {
@@ -88,9 +96,11 @@ export class ProjectionService {
     pageTypes: ConstructorParameters<typeof Registry>[0],
     private readonly readModel: SqlReadModel,
     private readonly logger: Logger,
+    languages?: LanguageRegistry,
   ) {
     this.registry = new Registry(pageTypes);
     this.fingerprint = this.registry.fingerprint();
+    this.languages = languages ?? createLanguageRegistry();
   }
 
   /**
@@ -102,7 +112,7 @@ export class ProjectionService {
    */
   async project(commit: Commit): Promise<number> {
     try {
-      const applied = await applyCommit(this.db, this.registry, commit, this.fingerprint);
+      const applied = await applyCommit(this.db, this.registry, commit, this.fingerprint, this.languages);
       this.readModel.notifyApplied(commit.workspaceId, applied);
       this.logger.info("projection applied", { workspace: commit.workspaceId, appliedVersion: applied });
       return applied;
