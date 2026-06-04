@@ -47,6 +47,13 @@ export const TestingPlan = definePageType({
       target: { section: "cases", field: "items" },
       set: { text: arg("text") },
     },
+    removeCase: {
+      args: zodSchema(z.object({ caseId: z.string() })),
+      target: { section: "cases", field: "items" },
+      produces: (_page, args) => [
+        { op: "removeElement", section: "cases", field: "items", id: (args as { caseId: string }).caseId },
+      ],
+    },
     markCasePassed: {
       args: zodSchema(z.object({ caseId: z.string() })),
       target: { section: "cases", field: "items", element: { idArg: "caseId" } },
