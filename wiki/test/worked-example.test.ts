@@ -329,7 +329,7 @@ describe("worked example: plan → build → ship a feature", () => {
       "## Components affected\n- web-app\n- cli",
       "## Design constraints\n1. Export must stream; never buffer >50MB in memory.",
       "## Open questions\n_None._",
-      "## Resolved questions\n1. **Which formats in v1?** → CSV and JSON; Parquet later.",
+      "## Resolved questions\n1. **Which formats in v1?** — _CSV and JSON; Parquet later._",
       "## References\n- depends-on → [Access control (RBAC)](feature-brief:id-3)",
       "## Child pages\n- [Implementation plan](implementation-plan:id-14)\n- [Implementation checklist](implementation-checklist:id-15)\n- [Testing plan](testing-plan:id-16)\n- [Spec](feature-spec:id-17)",
       "## Commits\n- `a1b2c3d` feat(api): streaming export endpoint\n- `e4f5g6h` feat(cli): wiki export",

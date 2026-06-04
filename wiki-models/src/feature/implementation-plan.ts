@@ -156,7 +156,7 @@ export const ImplementationPlan = definePageType({
         groupBy: "status",
         groups: [
           { when: "open", heading: "Open questions", item: "**{text}**" },
-          { when: "resolved", heading: "Resolved questions", item: "**{text}** → {answer}" },
+          { when: "resolved", heading: "Resolved questions", item: "**{text}** — _{answer}_" },
         ],
       },
     ],
