@@ -5,6 +5,12 @@
  * schemas, add their static imports and concat them into `pageTypes`.
  */
 import type { IPageType } from "wiki";
+import architecturePageTypes from "wiki-models/architecture";
 import featurePageTypes from "wiki-models/feature";
+import tocPageTypes from "wiki-models/toc";
 
-export const pageTypes: readonly IPageType[] = [...featurePageTypes];
+export const pageTypes: readonly IPageType[] = [
+  ...featurePageTypes,
+  ...tocPageTypes,
+  ...architecturePageTypes,
+];

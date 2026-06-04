@@ -25,10 +25,31 @@ import type {
   Unsubscribe,
   WorkspaceId,
 } from "wiki";
+import { UnknownPageTypeError, WikiError } from "wiki";
 import { getConfig } from "./config";
 import { getWiki } from "./engine";
 
+/** Transport (live-tail) health. Distinct from a {@link LoadError}: a workspace can be
+ *  fully reachable yet still fail to load because of a schema problem. */
 export type ConnectionState = "connecting" | "live" | "reconnecting" | "error";
+
+/**
+ * Why a workspace view could not be built. The crucial distinction the UI was missing:
+ * - `connection` — the wiki-server is unreachable (network/fetch failure). Retryable;
+ *   the probe keeps trying and the view recovers on its own.
+ * - `unknown-page-type` / `engine` — the server WAS reached and returned data, but this
+ *   build's bundled page types can't fold it. Not a connection problem; polling won't
+ *   fix it (only rebuilding wiki-ui with the matching wiki-models bundle will).
+ */
+export type LoadErrorKind = "connection" | "unknown-page-type" | "engine";
+
+export interface LoadError {
+  readonly kind: LoadErrorKind;
+  /** Raw engine/network message — logged to the console and shown as fallback detail. */
+  readonly message: string;
+  /** For `unknown-page-type`: the page/event types the engine could not resolve. */
+  readonly unknownTypes: readonly string[];
+}
 
 export interface LiveWorkspace {
   readonly id: WorkspaceId;
@@ -36,7 +57,7 @@ export interface LiveWorkspace {
   readonly connection: ConnectionState;
   /** Wall-clock ms of the last applied event — drives the "live" pulse. */
   readonly lastEventAt: number | null;
-  readonly error: string | null;
+  readonly error: LoadError | null;
 }
 
 // ── per-workspace live session ────────────────────────────────────────────────
@@ -71,9 +92,16 @@ class WorkspaceSession {
   /** useSyncExternalStore getSnapshot — returns a cached, stable object reference. */
   getSnapshot = (): LiveWorkspace => this.snap;
 
-  /** Shared handle; opened once and reused by tree + page reads. */
+  /** Shared handle; opened once and reused by tree + page reads. A failed open clears
+   *  the cache so a later retry (probe recovery) can re-open instead of replaying a
+   *  permanently-rejected promise. */
   handle(): Promise<IWorkspaceHandle> {
-    if (this.handleP === null) this.handleP = this.wiki.openWorkspace(this.id);
+    if (this.handleP === null) {
+      this.handleP = this.wiki.openWorkspace(this.id).catch((e: unknown) => {
+        this.handleP = null;
+        throw e;
+      });
+    }
     return this.handleP;
   }
 
@@ -84,14 +112,27 @@ class WorkspaceSession {
 
   private async start(): Promise<void> {
     try {
-      const h = await this.handle();
-      const tree = await h.tree();
-      if (this.disposed) return;
-      this.set({ tree, connection: "live", error: null });
-      this.unsub = await h.subscribe((_e: IEventEnvelope) => void this.onEvent());
+      await this.resume();
       this.scheduleProbe(PROBE_INTERVAL_MS);
     } catch (e) {
-      if (!this.disposed) this.set({ connection: "error", error: errMsg(e) });
+      this.fail(e, "error");
+      // A transport failure can recover — keep probing. A content/schema error is
+      // deterministic for this build, so polling would never clear it.
+      if (this.snap.error?.kind === "connection") this.scheduleProbe(PROBE_BACKOFF_MS);
+    }
+  }
+
+  /** Seed (or re-seed) the tree and ensure we are tailing. Shared by initial start and
+   *  probe-detected recovery, so a connection that drops before the first subscribe
+   *  still establishes the live tail once the server returns. */
+  private async resume(): Promise<void> {
+    const h = await this.handle();
+    const tree = await h.tree();
+    if (this.disposed) return;
+    this.down = false;
+    this.set({ tree, connection: "live", error: null });
+    if (this.unsub === null) {
+      this.unsub = await h.subscribe((_e: IEventEnvelope) => void this.onEvent());
     }
   }
 
@@ -104,7 +145,29 @@ class WorkspaceSession {
       if (this.disposed) return;
       this.set({ tree, connection: "live", lastEventAt: Date.now(), error: null });
     } catch (e) {
-      if (!this.disposed) this.set({ connection: "reconnecting", error: errMsg(e) });
+      this.fail(e, "reconnecting");
+    }
+  }
+
+  /**
+   * Classify a failure, log it once, and update state. `lostTransport` is the connection
+   * state to show when the cause is a network problem; a content/schema failure leaves
+   * the transport reported as reachable (the indicator surfaces it as a schema error,
+   * not as "Disconnected") so we don't mislead about why the workspace won't load.
+   */
+  private fail(e: unknown, lostTransport: ConnectionState): void {
+    if (this.disposed) return;
+    const error = classify(e);
+    // Log on entering a new error (don't spam on every probe/event while still broken).
+    if (this.snap.error?.message !== error.message) {
+      const tag = error.kind === "connection" ? "unreachable" : error.kind;
+      console.error(`[wiki-ui] workspace ${this.id}: ${tag} — ${error.message}`);
+    }
+    if (error.kind === "connection") {
+      this.down = true;
+      this.set({ connection: lostTransport, error });
+    } else {
+      this.set({ connection: "live", error });
     }
   }
 
@@ -116,8 +179,8 @@ class WorkspaceSession {
   /**
    * Reachability probe: a HEAD to the workspace stream. A network rejection means the
    * server is unreachable → "reconnecting" (retried with backoff). On recovery we
-   * re-seed the tree immediately; the engine's tail independently replays missed
-   * commits, so content also catches up.
+   * re-seed the tree and (re)establish the tail; the engine's tail independently
+   * replays missed commits, so content also catches up.
    */
   private async probe(): Promise<void> {
     if (this.disposed) return;
@@ -125,22 +188,16 @@ class WorkspaceSession {
     const url = `${cfg.streamBaseUrl.replace(/\/+$/, "")}/${cfg.namespace}/workspace/${encodeURIComponent(this.id)}`;
     try {
       await fetch(url, { method: "HEAD" }); // any HTTP response = reachable
-      if (this.down) {
-        this.down = false;
+      if (this.down || this.unsub === null || this.snap.connection !== "live") {
         try {
-          const h = await this.handle();
-          const tree = await h.tree();
-          this.set({ tree, connection: "live", lastEventAt: Date.now(), error: null });
-        } catch {
-          this.set({ connection: "live", error: null });
+          await this.resume();
+        } catch (e) {
+          this.fail(e, "reconnecting");
         }
-      } else if (this.snap.connection !== "live") {
-        this.set({ connection: "live", error: null });
       }
       this.scheduleProbe(PROBE_INTERVAL_MS);
     } catch (e) {
-      this.down = true;
-      this.set({ connection: "reconnecting", error: errMsg(e) });
+      this.fail(e, "reconnecting");
       this.scheduleProbe(PROBE_BACKOFF_MS);
     }
   }
@@ -152,6 +209,25 @@ const PROBE_BACKOFF_MS = 2_000;
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * Map a thrown value to a {@link LoadError}. The engine throws typed {@link WikiError}s
+ * (with a stable `code`) when it reaches the server but can't fold the data; anything
+ * else (a `fetch` rejection) is a transport/connection failure. The `code` fallback
+ * guards against an `instanceof` miss if the class identity is ever duplicated across
+ * bundles.
+ */
+function classify(e: unknown): LoadError {
+  const code = e instanceof WikiError ? e.code : (e as { code?: unknown } | null)?.code;
+  if (e instanceof UnknownPageTypeError || code === "UNKNOWN_PAGE_TYPE") {
+    const types = e instanceof UnknownPageTypeError ? e.types : [];
+    return { kind: "unknown-page-type", message: errMsg(e), unknownTypes: types };
+  }
+  if (typeof code === "string") {
+    return { kind: "engine", message: errMsg(e), unknownTypes: [] };
+  }
+  return { kind: "connection", message: errMsg(e), unknownTypes: [] };
 }
 
 // ── session cache ─────────────────────────────────────────────────────────────
@@ -222,12 +298,12 @@ export function usePage(workspaceId: WorkspaceId, pageId: PageId): PageContent {
       })
       .catch((e: unknown) => {
         if (cancelled) return;
-        const msg = errMsg(e);
+        const err = classify(e);
         setContent({
           markdown: null,
           loading: false,
-          error: msg,
-          unknownType: /unknown page type/i.test(msg),
+          error: err.message,
+          unknownType: err.kind === "unknown-page-type",
         });
       });
     return () => {

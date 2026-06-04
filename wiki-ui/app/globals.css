@@ -199,6 +199,12 @@ code {
 .live-indicator[data-state="error"] .dot {
   background: var(--red);
 }
+.live-indicator[data-state="schema"] {
+  color: var(--red);
+}
+.live-indicator[data-state="schema"] .dot {
+  background: var(--red);
+}
 .live-indicator .dot.pulse {
   transform: scale(1.9);
 }

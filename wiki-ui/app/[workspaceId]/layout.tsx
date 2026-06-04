@@ -8,6 +8,7 @@ import type { ReactNode } from "react";
 import type { WorkspaceId } from "wiki";
 import { LiveIndicator } from "../../components/LiveIndicator";
 import { TreeNav } from "../../components/TreeNav";
+import { WorkspaceError } from "../../components/WorkspaceError";
 import { WorkspaceSwitcher } from "../../components/WorkspaceSwitcher";
 import { useLiveWorkspace } from "../../lib/live";
 
@@ -25,11 +26,15 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }): 
           <Link href="/" className="home-link">
             ← Workspaces
           </Link>
-          <LiveIndicator connection={ws.connection} lastEventAt={ws.lastEventAt} />
+          <LiveIndicator connection={ws.connection} lastEventAt={ws.lastEventAt} error={ws.error} />
         </div>
         <WorkspaceSwitcher current={workspaceId} />
         <nav className="tree-nav" aria-label="Pages">
-          <TreeNav tree={ws.tree} workspaceId={workspaceId} />
+          {ws.tree === null && ws.error !== null ? (
+            <WorkspaceError error={ws.error} compact />
+          ) : (
+            <TreeNav tree={ws.tree} workspaceId={workspaceId} />
+          )}
         </nav>
       </aside>
       <main className="content">{children}</main>
