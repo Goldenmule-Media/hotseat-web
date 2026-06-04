@@ -141,3 +141,6 @@ export type { SchemaIssue } from "./core/errors";
 
 // ── Zod schema adapter ────────────────────────────────────────────────────────
 export { zodSchema, z } from "./schema/zod-adapter";
+
+// ── display labels (the friendly-title fallback; shared with external read models) ─
+export { titleCase } from "./core/labels";

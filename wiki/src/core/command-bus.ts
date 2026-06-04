@@ -58,6 +58,35 @@ import { applyWorkspace, isStructuralEvent, pageStateView, SECTION_OPS_EVENT } f
 /** Max rebase attempts before surfacing {@link ConcurrencyError}. */
 const MAX_REBASE_ATTEMPTS = 5;
 
+/**
+ * The section a `SectionOp` EDITS THE CONTENT OF, or `undefined` if the op is not a
+ * content edit of an existing section's body. The §6 write-gate (`mutableIn`) applies
+ * per content op (DESIGN §6): field/element/block/meta edits are gated by their target
+ * section's content gate; FSM `transition` ops (page or element lifecycle) and
+ * section-tree ops (add/remove/move/renameSection — the section SET, not a body) are
+ * gated by their own rules, never by a section's content `mutableIn`. Gating by the
+ * engine's closed op vocabulary (the ground truth of what a command actually does) is
+ * what cleanly separates "edit the set" from "drive an element" on one section.
+ */
+function contentOpSection(op: SectionOp): string | undefined {
+  switch (op.op) {
+    case "setField":
+    case "applyTextEdits":
+    case "addElement":
+    case "removeElement":
+    case "moveElement":
+    case "setElementField":
+    case "addBlock":
+    case "removeBlock":
+    case "moveBlock":
+    case "setBlock":
+    case "setMeta":
+      return op.section;
+    default:
+      return undefined;
+  }
+}
+
 /** Bus dependencies / configuration. */
 export interface CommandBusConfig {
   readonly snapshotEvery: number;
@@ -222,27 +251,37 @@ export class CommandBus {
     if (declared !== undefined) {
       const parsed = declared.args.parse(req.args) as Record<string, unknown>;
 
-      // FSM legality + write-gate.
+      // Page-FSM legality.
       if (declared.transition?.level === "page") {
         if (!guard.can(node.status, req.command)) {
           throw new MutationNotAllowedError(node.type, node.status, req.command, allowedSet());
         }
       }
+
+      // Resolve the target element id (if any) up front — needed to build the ops.
       const targetSection = declared.target?.section;
-      if (targetSection !== undefined) {
-        this.assertMutable(node.type, node.status, targetSection, req.command, allowedSet());
+      const resolvedElementId: string | undefined =
+        declared.target?.element !== undefined ? (parsed[declared.target.element.idArg] as string) : undefined;
+
+      // Build the ops, then apply the §6 write-gate PER OP. A content edit
+      // (setField/addElement/setElementField/…) is gated by ITS target section's
+      // `mutableIn`; an element-FSM `transition` op (e.g. markCasePassed) carries no
+      // content, so it is gated ONLY by the element FSM below — never frozen by the
+      // section's content gate. This lets "author the set in draft, then record
+      // results in ready" be expressible on one section (feature-review Item 5),
+      // while still freezing genuine content edits: answerQuestion emits a content
+      // `setElementField` (its answer write — gated) AND an element transition (FSM
+      // only), so sealing the section freezes the write but never the lifecycle.
+      const ops = this.buildDeclarativeOps(view, declared, parsed, ctx, resolvedElementId);
+      for (const op of ops) {
+        const sec = contentOpSection(op);
+        if (sec !== undefined) this.assertMutable(node.type, node.status, sec, req.command, allowedSet());
       }
 
       // element-level FSM legality.
-      let resolvedElementId: string | undefined;
       if (declared.transition?.level === "element" && declared.target?.element !== undefined) {
-        const idArg = declared.target.element.idArg;
-        resolvedElementId = parsed[idArg] as string;
-        this.checkElementTransition(node.type, view, targetSection!, resolvedElementId, declared.transition.event, req.command);
+        this.checkElementTransition(node.type, view, targetSection!, resolvedElementId!, declared.transition.event, req.command);
       }
-
-      // build the ops.
-      const ops = this.buildDeclarativeOps(view, declared, parsed, ctx, resolvedElementId);
 
       // content-hash precondition on any code edit (re-runs on rebase, §5).
       this.assertEditPreconditions(view, ops);

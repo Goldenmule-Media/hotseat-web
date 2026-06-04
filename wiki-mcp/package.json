@@ -19,6 +19,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "tsdown",
     "start": "tsx src/bin.ts",
+    "backfill-titles": "tsx src/backfill-titles.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

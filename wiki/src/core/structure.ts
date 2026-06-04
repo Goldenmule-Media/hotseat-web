@@ -31,6 +31,7 @@ import {
   ParentNotFoundError,
 } from "./errors";
 import { SECTION_OPS_EVENT } from "./workspace";
+import { titleCase } from "./labels";
 import type { Registry } from "./registry";
 import type { Services } from "./types";
 
@@ -173,9 +174,13 @@ export const createPage: StructureHandler = (state, args, services, registry) =>
       },
     });
 
-    // Required children are created atomically as pinned children, recursively.
+    // Required children are created atomically as pinned children, recursively. Each
+    // gets a FRIENDLY default title (the child def's `label`, else a title-cased type
+    // id) instead of the raw slug — so the tree / breadcrumb / rendered H1 read
+    // "Implementation plan" rather than "implementation-plan" (feature-review Item 4).
     for (const childType of def.requiredChildren ?? []) {
-      emitPage(childType, childType, id, true);
+      const childDef = registry.page(childType);
+      emitPage(childType, childDef.label ?? titleCase(childType), id, true);
     }
     return id;
   };

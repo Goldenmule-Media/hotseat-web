@@ -15,6 +15,11 @@ export const TestingPlan = definePageType({
   sections: {
     cases: {
       name: "Test cases",
+      // The case SET is authored in `draft` and frozen once the plan is sealed. The
+      // engine gates content edits per OP, so freezing the set here does NOT freeze
+      // result-recording: markCasePassed/markCaseFailed are element-FSM transitions
+      // (no content op), so they stay legal in `ready` and the brief's `allCasesPassed`
+      // ship gate is reachable (feature-review Item 5).
       required: true,
       mutableIn: ["draft"],
       fields: { items: { kind: "list", element: "case" } },

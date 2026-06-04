@@ -10,6 +10,7 @@ import type {
   FieldDecl,
   IPageType,
   IPageTypeDef,
+  ITransition,
   SectionDecl,
 } from "../api";
 import { UnknownPageTypeError, ValidationError } from "./errors";
@@ -69,6 +70,9 @@ export class Registry {
 
   private validateDef(def: IPageTypeDef): void {
     const issues: { path: (string | number)[]; message: string }[] = [];
+    if (def.label !== undefined && (typeof def.label !== "string" || def.label.length === 0)) {
+      issues.push({ path: ["label"], message: "label, when present, must be a non-empty string" });
+    }
     const statuses = new Set<string>([def.initialStatus]);
     for (const tr of def.statusTransitions) {
       statuses.add(tr.fromState);
@@ -92,6 +96,60 @@ export class Registry {
       for (const [nk, nested] of Object.entries(sd.sections ?? {})) validateSectionDecl(nk, nested);
     };
     for (const [key, sd] of Object.entries(def.sections)) validateSectionDecl(key, sd);
+
+    // ── static reachability guards (§6; feature-review Item 5) ────────────────
+    // Turn whole classes of silent, load-after deadlocks into load-time errors.
+    const reachableFrom = (initial: string, transitions: readonly ITransition[]): Set<string> => {
+      const seen = new Set<string>([initial]);
+      for (let changed = true; changed; ) {
+        changed = false;
+        for (const tr of transitions) {
+          if (seen.has(tr.fromState) && !seen.has(tr.toState)) {
+            seen.add(tr.toState);
+            changed = true;
+          }
+        }
+      }
+      return seen;
+    };
+
+    // (1) A write-gate that names a status UNREACHABLE from the initial status is a
+    // dead gate (the section can never be edited in it); a REQUIRED section frozen in
+    // every status (`mutableIn: []`) is materialized empty and can never be filled.
+    const reachableStatuses = reachableFrom(def.initialStatus, def.statusTransitions);
+    const lintGate = (key: string, sd: SectionDecl): void => {
+      if (sd.mutableIn !== undefined) {
+        for (const status of sd.mutableIn) {
+          if (statuses.has(status) && !reachableStatuses.has(status)) {
+            issues.push({ path: ["sections", key, "mutableIn"], message: `status "${status}" is unreachable from the initial status "${def.initialStatus}" — a dead write-gate` });
+          }
+        }
+        if (sd.mutableIn.length === 0 && sd.required === true) {
+          issues.push({ path: ["sections", key, "mutableIn"], message: `a required section that is never mutable (mutableIn: []) is materialized empty and can never be filled` });
+        }
+      }
+      for (const [nk, nested] of Object.entries(sd.sections ?? {})) lintGate(nk, nested);
+    };
+    for (const [key, sd] of Object.entries(def.sections)) lintGate(key, sd);
+
+    // (2) An element-FSM state mentioned by a transition but unreachable from the
+    // element's initial status can never be entered — and any gate keyed on it (e.g. a
+    // ship gate requiring every case `passed`) would be unsatisfiable.
+    for (const [tag, el] of Object.entries(def.elements ?? {})) {
+      const fsm = el.status;
+      if (fsm === undefined) continue;
+      const elReach = reachableFrom(fsm.initial, fsm.transitions);
+      const mentioned = new Set<string>([fsm.initial]);
+      for (const tr of fsm.transitions) {
+        mentioned.add(tr.fromState);
+        mentioned.add(tr.toState);
+      }
+      for (const s of mentioned) {
+        if (!elReach.has(s)) {
+          issues.push({ path: ["elements", tag, "status"], message: `element status "${s}" is unreachable from the initial status "${fsm.initial}"` });
+        }
+      }
+    }
 
     // sectionSet contract keys resolve.
     const sectionKeys = new Set(Object.keys(def.sections));

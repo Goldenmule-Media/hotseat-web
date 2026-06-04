@@ -646,6 +646,14 @@ export interface RenderConfig {
 
 export interface IPageTypeDef<Status extends string = string> {
   readonly type: string;
+  /**
+   * Human-friendly display name (e.g. "Implementation plan"). Used as the DEFAULT
+   * title for auto-created required children (§structure) and available to UIs /
+   * breadcrumbs. When omitted, a deterministic title-cased `type` id is used. This is
+   * a creation-time default frozen into the page's title — editing `label` later does
+   * NOT rename existing pages (their titles live in the event log).
+   */
+  readonly label?: string;
   readonly version: number;
   readonly initialStatus: Status;
   /** Lifecycle FSM ONLY (§9.4). */
