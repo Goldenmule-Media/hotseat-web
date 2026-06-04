@@ -63,6 +63,7 @@ describe("handle: a token-gated read reflects a prior write", () => {
       "implementation-plan",
       "implementation-checklist",
       "testing-plan",
+      "feature-spec",
     ]);
 
     // A later content write's token gates a status read to its post-write value.

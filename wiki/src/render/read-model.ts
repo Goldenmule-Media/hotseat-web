@@ -38,20 +38,35 @@ export function buildRenderCtx(state: IWorkspaceState, _registry: Registry): IRe
   };
 }
 
-/** Resolve a ref target to its render-derived label (§3.2). */
+/** Resolve a ref target to its render-derived label (§3.2). Workspace-scoped: a
+ * cross-page ref (`target.page` set) resolves against that page; same-page otherwise. */
 function makeLabelResolver(state: IWorkspaceState, page: IPageNode, ctx: IRenderCtx): LabelResolver {
+  const ownerOf = (p: PageId | undefined): IPageNode | undefined =>
+    p === undefined ? page : state.pages.get(p);
   return (target: RefTarget): string => {
     switch (target.kind) {
       case "page":
         return ctx.titleOf(target.id) ?? String(target.id);
       case "section": {
-        const sec = page.sections.find((s) => s.id === target.id);
+        const sec = ownerOf(target.page)?.sections.find((s) => s.id === target.id);
         return sec?.name ?? String(target.id);
       }
       case "symbol":
         return target.name;
       case "block":
         return String(target.block);
+      case "element": {
+        // The label is the named `labelField` of the target element (explicit, so it
+        // is a pure projection and never depends on object-key order). Falls back to
+        // the element id when the field is absent or non-textual.
+        const f = ownerOf(target.page)?.sections.find((s) => s.id === target.section)?.fields[target.field];
+        const el = f !== undefined && f.kind === "list" ? f.elements.find((e) => e.id === target.element) : undefined;
+        if (el !== undefined && target.labelField !== undefined) {
+          const lf = el.fields[target.labelField];
+          if (lf !== undefined && (lf.kind === "prose" || lf.kind === "scalar")) return String(lf.value);
+        }
+        return String(target.element);
+      }
     }
   };
 }

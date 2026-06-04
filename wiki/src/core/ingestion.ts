@@ -193,16 +193,24 @@ function assertBlockNormalForm(block: IBlock): void {
 // ────────────────────────────────────────────────────────────────────────────
 
 function resolveRef(state: IWorkspaceState, page: IPageNode, target: RefTarget): boolean {
+  if (target.kind === "page") return state.pages.has(target.id);
+  // Non-`page` kinds resolve within an OWNER page: the cross-page `target.page` when
+  // present (ref integrity now spans pages), else the page being validated.
+  const owner = target.page === undefined ? page : state.pages.get(target.page);
+  if (owner === undefined) return false;
   switch (target.kind) {
-    case "page":
-      return state.pages.has(target.id);
     case "section":
-      return page.sections.some((s) => s.id === target.id);
+      return owner.sections.some((s) => s.id === target.id);
     case "symbol":
     case "block": {
-      const sec = page.sections.find((s) => s.id === target.section);
+      const sec = owner.sections.find((s) => s.id === target.section);
       if (sec === undefined) return false;
       return sec.fields[target.field] !== undefined;
+    }
+    case "element": {
+      const sec = owner.sections.find((s) => s.id === target.section);
+      const f = sec?.fields[target.field];
+      return f !== undefined && f.kind === "list" && f.elements.some((e) => e.id === target.element);
     }
   }
 }

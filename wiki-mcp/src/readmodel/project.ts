@@ -202,16 +202,20 @@ function symbolAndReferenceRows(
 function xrefRows(state: IWorkspaceState): XrefInsert[] {
   const rows: XrefInsert[] = [];
   const push = (node: IPageNode, sec: ISection, field: string, target: RefTarget): void => {
+    // A cross-page ref (any non-`page` kind with `target.page` set) records its target
+    // page so backlinks resolve across pages; an `element` ref records the element id
+    // in `target_name` (its identifier within the section).
+    const crossPage = target.kind !== "page" ? target.page : undefined;
     rows.push({
       workspace_id: state.id,
       from_page: node.id,
       from_section: sec.id,
       from_field: field,
       target_kind: target.kind,
-      target_page: target.kind === "page" ? target.id : null,
+      target_page: target.kind === "page" ? target.id : crossPage ?? null,
       target_section: target.kind === "section" ? target.id : "section" in target ? target.section : null,
       target_block: target.kind === "block" ? target.block : null,
-      target_name: target.kind === "symbol" ? target.name : null,
+      target_name: target.kind === "symbol" ? target.name : target.kind === "element" ? target.element : null,
     });
   };
   const walkInlines = (node: IPageNode, sec: ISection, field: string, inlines: IInline[]): void => {

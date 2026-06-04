@@ -117,6 +117,7 @@ _None._
 - Implementation plan
 - Implementation checklist
 - Testing plan
+- Spec
 
 ## Commits
 - \`a1b2c3d\` feat(api): streaming export endpoint
@@ -215,12 +216,13 @@ describe("workspace render — deterministic tree", () => {
     const a = await ws.toMarkdown(undefined, { consistentWith: token });
     const b = await ws.toMarkdown();
     expect(b).toBe(a);
-    // The H1 is the workspace name; the building brief and its three children appear.
+    // The H1 is the workspace name; the building brief and its four children appear.
     expect(a.startsWith("# Acme platform\n")).toBe(true);
     expect(a).toContain("Bulk export (feature-brief, building)");
     expect(a).toContain("Implementation plan (implementation-plan, draft)");
     expect(a).toContain("Implementation checklist (implementation-checklist, building)");
     expect(a).toContain("Testing plan (testing-plan, draft)");
+    expect(a).toContain("Spec (feature-spec, drafting)");
   });
 });
 

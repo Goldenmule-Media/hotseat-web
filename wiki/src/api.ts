@@ -143,12 +143,23 @@ export type FieldKind =
   | "blocks"
   | "list";
 
-/** A typed cross-reference target; the displayed label is render-derived (§3.2). */
+/**
+ * A typed cross-reference target; the displayed label is render-derived (§3.2).
+ *
+ * Every non-`page` kind carries an OPTIONAL `page?: PageId`: omitted = same page (the
+ * historical behaviour), present = a CROSS-PAGE ref into that page's content. The
+ * `element` kind addresses a list `IItem` by its stable id — the one content node no
+ * ref could previously point at — and carries an optional `labelField` naming which of
+ * the element's fields supplies the render-derived label (explicit, never object-key
+ * order). Together these let a page reference a decision/step/case on a sibling page
+ * (feature-review Item 1).
+ */
 export type RefTarget =
-  | { readonly kind: "section"; id: SectionId }
+  | { readonly kind: "section"; page?: PageId; id: SectionId }
   | { readonly kind: "page"; id: PageId }
-  | { readonly kind: "symbol"; section: SectionId; field: string; name: string }
-  | { readonly kind: "block"; section: SectionId; field: string; block: BlockId };
+  | { readonly kind: "symbol"; page?: PageId; section: SectionId; field: string; name: string }
+  | { readonly kind: "block"; page?: PageId; section: SectionId; field: string; block: BlockId }
+  | { readonly kind: "element"; page?: PageId; section: SectionId; field: string; element: string; labelField?: string };
 
 /** A `text` run's overlapping inline style, carried as a canonical-sorted set (§3.2). */
 export type Mark = "strong" | "emphasis" | { readonly kind: "link"; href: string };

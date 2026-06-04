@@ -136,7 +136,7 @@ export const FeatureBrief = definePageType({
     },
   },
   sectionSet: { mode: "closed" },
-  requiredChildren: ["implementation-plan", "implementation-checklist", "testing-plan"],
+  requiredChildren: ["implementation-plan", "implementation-checklist", "testing-plan", "feature-spec"],
   commands: {
     setSummary: {
       args: zodSchema(z.object({ text: z.string() })),

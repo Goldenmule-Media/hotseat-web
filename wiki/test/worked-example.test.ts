@@ -92,20 +92,21 @@ describe("worked example: plan → build → ship a feature", () => {
     brief = briefCommit.value;
     const briefToken = briefCommit.token;
     const afterBrief = (await ws.history({ consistentWith: briefToken })).length;
-    expect(afterBrief - beforeBrief).toBe(4);
+    expect(afterBrief - beforeBrief).toBe(5);
 
     // The 4 PageCreated events of THIS brief share a single commit version run and
     // a single occurredAt (one atomic append → one envelope meta timestamp).
     const created = (await ws.history({ consistentWith: briefToken }))
       .slice(beforeBrief)
       .filter((e) => e.type === "PageCreated");
-    expect(created).toHaveLength(4);
+    expect(created).toHaveLength(5);
     expect(new Set(created.map((e) => e.meta.occurredAt)).size).toBe(1);
     expect(created.map((e) => (e.payload as { type: string }).type)).toEqual([
       "feature-brief",
       "implementation-plan",
       "implementation-checklist",
       "testing-plan",
+      "feature-spec",
     ]);
 
     // The brief now has exactly its 3 pinned children, in requiredChildren order.
@@ -115,6 +116,7 @@ describe("worked example: plan → build → ship a feature", () => {
       "implementation-plan",
       "implementation-checklist",
       "testing-plan",
+      "feature-spec",
     ]);
     [plan, checklist, testPlan] = children.map((c) => c.id);
 
@@ -130,6 +132,7 @@ describe("worked example: plan → build → ship a feature", () => {
       { type: "implementation-plan", status: "draft" },
       { type: "implementation-checklist", status: "building" },
       { type: "testing-plan", status: "draft" },
+      { type: "feature-spec", status: "drafting" },
     ]);
   });
 
@@ -323,7 +326,7 @@ describe("worked example: plan → build → ship a feature", () => {
       "## Open questions\n_None._",
       "## Resolved questions\n- **Which formats in v1?** → CSV and JSON; Parquet later.",
       "## References\n- depends-on → Access control (RBAC)",
-      "## Child pages\n- Implementation plan\n- Implementation checklist\n- Testing plan",
+      "## Child pages\n- Implementation plan\n- Implementation checklist\n- Testing plan\n- Spec",
       "## Commits\n- `a1b2c3d` feat(api): streaming export endpoint\n- `e4f5g6h` feat(cli): wiki export",
     ];
     const expected = blocks.join("\n\n") + "\n";
@@ -339,6 +342,7 @@ describe("worked example: plan → build → ship a feature", () => {
       { type: "implementation-plan", status: "draft" },
       { type: "implementation-checklist", status: "building" },
       { type: "testing-plan", status: "draft" },
+      { type: "feature-spec", status: "drafting" },
     ]);
   });
 });
