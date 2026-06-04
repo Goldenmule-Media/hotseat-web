@@ -313,6 +313,13 @@ export interface IWiki {
   openWorkspace(id: WorkspaceId): Promise<IWorkspaceHandle>;
   listWorkspaces(): Promise<readonly IWorkspaceSummary[]>;
   close(): Promise<void>;
+  /**
+   * The serializable status-FSM of a registered page TYPE (DESIGN §7.2) — states +
+   * named transitions + the initial status — for inspection/visualization. Schema-
+   * agnostic: works for any registered type (incl. runtime-loaded models). Throws
+   * {@link UnknownPageTypeError} for an unregistered type. Pure (no I/O).
+   */
+  fsmOf(type: PageTypeName): FsmDescriptor;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -395,8 +402,19 @@ export interface IMutationDescriptor {
   readonly name: string;
   readonly argsSchema: JsonSchema;
   readonly resultSchema?: JsonSchema;
-  /** Whether the command is legal in the page's current status right now. */
+  /**
+   * Whether the command can run right now: FSM-legal in the page's current status
+   * AND — for a command carrying `preconditions` — every precondition currently
+   * satisfied (the same pure checks the command bus enforces at commit).
+   */
   readonly available: boolean;
+  /**
+   * When the command is otherwise in-gate but a precondition currently fails, the
+   * first failed precondition's human reason (e.g. "all testing-plan cases must be
+   * passed"). Absent when `available` is true, or when the command is simply not
+   * status-legal. Lets a UI render a transition as "blocked — here's why" (§7.2).
+   */
+  readonly unmet?: string;
   readonly description?: string;
   /** Which section/field this command edits (§6 write-gate surfacing). */
   readonly target?: { readonly section: string; readonly field?: string };
@@ -427,6 +445,35 @@ export interface ITransition<S extends string = string, C extends string = strin
   readonly event: C;
   readonly toState: S;
   readonly meta?: { readonly description?: string };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// FSM descriptor — the serializable, public projection of a page type's status FSM
+// (DESIGN §7.2 / §10.5). Built by {@link IWiki.fsmOf} from the registry's guard; the
+// stable, transport-friendly shape a UI/tool consumes (vs the internal `Guard`).
+// ────────────────────────────────────────────────────────────────────────────
+
+/** One status-FSM edge: a named transition between two statuses. */
+export interface FsmTransition {
+  /** Source status. */
+  readonly from: string;
+  /** The page-transition command/event name (e.g. "ship"). */
+  readonly event: string;
+  /** Target status. */
+  readonly to: string;
+  readonly meta?: { readonly description?: string };
+}
+
+/** A page type's status FSM, serializable and self-contained. */
+export interface FsmDescriptor {
+  /** The page-type tag this FSM belongs to (e.g. "feature-brief"). */
+  readonly type: string;
+  /** The status a freshly-created page of this type starts in. */
+  readonly initial: string;
+  /** All distinct statuses; `initial` first, then the rest in declaration order. */
+  readonly states: readonly string[];
+  /** Every declared transition (the directed, labeled edges). */
+  readonly transitions: readonly FsmTransition[];
 }
 
 // ────────────────────────────────────────────────────────────────────────────

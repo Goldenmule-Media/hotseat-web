@@ -17,11 +17,13 @@ import type {
   ConsistencyToken,
   DeepReadonly,
   DomainEvent,
+  FsmDescriptor,
   IEventEnvelope,
   IMutationDescriptor,
   IPageNode,
   IPageView,
   IReadOpts,
+  IRelatedReader,
   ITreeNode,
   IWiki,
   IWikiConfig,
@@ -232,6 +234,29 @@ class Wiki implements IWiki {
     }
     this.open.clear();
     await this.eventLog.close();
+  }
+
+  /**
+   * The serializable status FSM of a registered page type (§7.2): initial status,
+   * the distinct states (initial first), and the named transitions — derived from
+   * the registry's memoized guard. Pure; throws {@link UnknownPageTypeError} for an
+   * unregistered type (via `registry.page`).
+   */
+  fsmOf(type: string): FsmDescriptor {
+    const def = this.registry.page(type);
+    const guard = this.registry.pageGuard(type);
+    const rest = guard.states().filter((s) => s !== def.initialStatus);
+    return {
+      type,
+      initial: def.initialStatus,
+      states: [def.initialStatus, ...rest],
+      transitions: guard.transitions.map((tr) => ({
+        from: tr.fromState,
+        event: tr.event,
+        to: tr.toState,
+        ...(tr.meta !== undefined ? { meta: tr.meta } : {}),
+      })),
+    };
   }
 
   /** Start the live tail, register the handle, and return it. */
@@ -527,6 +552,24 @@ class WorkspaceHandle implements IWorkspaceHandle {
     return this.registry;
   }
 
+  /**
+   * Build the read-only {@link IRelatedReader} the command bus hands a precondition at
+   * commit (DESIGN §13.4), over the CURRENT folded projection. Lets a read-side check
+   * (e.g. {@link PageView.describeMutations}) evaluate the SAME pure preconditions a
+   * write would, so reported availability matches what a commit would allow.
+   */
+  relatedReaderFor(self: PageId): IRelatedReader {
+    const state = this.projection.state;
+    return {
+      self,
+      page: (id: PageId): DeepReadonly<PageState> | undefined => {
+        const n = state.pages.get(id);
+        return n === undefined ? undefined : (pageStateView(n) as DeepReadonly<PageState>);
+      },
+      childrenOf: (id: PageId | RootId): readonly PageId[] => [...(state.children.get(id) ?? [])],
+    };
+  }
+
   childIdsOf(pageId: PageId | RootId): readonly PageId[] {
     return [...(this.projection.state.children.get(pageId) ?? [])];
   }
@@ -615,18 +658,41 @@ class PageView implements IPageView {
       return sd?.mutableIn === undefined || sd.mutableIn.includes(node.status);
     };
 
+    // The page's own folded view + a lazily-built related reader, so a command's pure
+    // `preconditions` can be evaluated against current state (the same checks the bus
+    // runs at commit) to decide real availability — not just FSM/gate legality.
+    const view = pageStateView(node) as DeepReadonly<PageState>;
+    let related: IRelatedReader | undefined;
+
     const descriptors: IMutationDescriptor[] = [];
     for (const [name, cmd] of Object.entries(def.commands)) {
-      const available =
+      // Base legality: a page transition is gated by the FSM; a content command by its
+      // target section's write-gate; an untargeted command is always in-gate.
+      let available =
         cmd.transition?.level === "page"
           ? guard.can(node.status, name)
           : cmd.target?.section !== undefined
             ? mutableNow(cmd.target.section)
             : true;
+      // Then, if still legal, every declared precondition must currently hold; the first
+      // failure flips `available` off and surfaces its reason as `unmet`.
+      let unmet: string | undefined;
+      if (available && cmd.preconditions !== undefined && cmd.preconditions.length > 0) {
+        related ??= this.handle.relatedReaderFor(this.id);
+        for (const pre of cmd.preconditions) {
+          const res = pre(view, related);
+          if (res !== true) {
+            available = false;
+            unmet = res.unmet;
+            break;
+          }
+        }
+      }
       const descriptor: IMutationDescriptor = {
         name,
         argsSchema: cmd.args.toJsonSchema(),
         available,
+        ...(unmet !== undefined ? { unmet } : {}),
         ...(cmd.result !== undefined ? { resultSchema: cmd.result.toJsonSchema() } : {}),
         ...(cmd.description !== undefined ? { description: cmd.description } : {}),
         ...(cmd.target !== undefined

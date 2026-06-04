@@ -82,8 +82,10 @@ export type {
   // IPageView
   IMutationDescriptor,
   IPageView,
-  // FSM transition
+  // FSM transition + its serializable descriptor (IWiki.fsmOf)
   ITransition,
+  FsmTransition,
+  FsmDescriptor,
   // authoring API
   ISchema,
   ICommandContext,
