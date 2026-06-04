@@ -17,6 +17,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type {
   IEventEnvelope,
+  IMutationDescriptor,
   ITreeNode,
   IWiki,
   IWorkspaceHandle,
@@ -355,4 +356,44 @@ export function useWorkspaces(): WorkspaceList {
   }, []);
 
   return { ...state, refresh: () => setNonce((n) => n + 1) };
+}
+
+export interface PageMutations {
+  /** Per-command descriptors from the engine (name, available, unmet, target, …). */
+  readonly descriptors: readonly IMutationDescriptor[];
+  readonly loading: boolean;
+}
+
+const MUTATIONS_PENDING: PageMutations = { descriptors: [], loading: true };
+
+/**
+ * The open page's live mutation descriptors — its precondition-aware transition
+ * availability (each command's `available` + `unmet`). Re-read on mount and whenever a
+ * new event lands (`ws.lastEventAt`), so the model-inspection overlay tracks status and
+ * precondition changes without polling (constraint #3). Empty on a read failure.
+ */
+export function usePageMutations(workspaceId: WorkspaceId, pageId: PageId): PageMutations {
+  const ws = useLiveWorkspace(workspaceId);
+  const [state, setState] = useState<PageMutations>(MUTATIONS_PENDING);
+
+  useEffect(() => {
+    const session = sessionFor(workspaceId);
+    if (session === null) return;
+    let cancelled = false;
+    session
+      .handle()
+      .then((h) => h.page(pageId))
+      .then((view) => view.describeMutations())
+      .then((descriptors) => {
+        if (!cancelled) setState({ descriptors, loading: false });
+      })
+      .catch(() => {
+        if (!cancelled) setState({ descriptors: [], loading: false });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, pageId, ws.lastEventAt]);
+
+  return state;
 }
