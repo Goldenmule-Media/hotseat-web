@@ -39,6 +39,7 @@ export const STRUCTURAL_EVENT_TYPES = [
   "ChildrenReordered",
   "PageTitleSet",
   "PageArchived",
+  "PageUnarchived",
   "LinkAdded",
   "LinkRemoved",
   "WorkspaceArchived",
@@ -323,7 +324,15 @@ function applyStructural(
     case "PageArchived": {
       const p = event.payload as PageArchivedPayload;
       const node = requireNode(state, p.pageId);
-      node.status = "archived";
+      node.archived = true;
+      node.updatedAt = event.meta.occurredAt;
+      return state;
+    }
+
+    case "PageUnarchived": {
+      const p = event.payload as PageArchivedPayload;
+      const node = requireNode(state, p.pageId);
+      node.archived = undefined;
       node.updatedAt = event.meta.occurredAt;
       return state;
     }

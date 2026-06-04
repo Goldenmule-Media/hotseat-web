@@ -453,6 +453,10 @@ class WorkspaceHandle implements IWorkspaceHandle {
     return this.structural("archivePage", { pageId }) as Promise<Committed<void>>;
   }
 
+  async unarchivePage(pageId: PageId): Promise<Committed<void>> {
+    return this.structural("unarchivePage", { pageId }) as Promise<Committed<void>>;
+  }
+
   async link(from: PageId, to: PageId, role: string): Promise<Committed<void>> {
     return this.structural("link", { from, to, role }) as Promise<Committed<void>>;
   }
@@ -815,6 +819,7 @@ function buildTree(state: IWorkspaceState): ITreeNode {
       id,
       title: node?.title ?? id,
       ...(node !== undefined ? { type: node.type, status: node.status } : {}),
+      ...(node?.archived === true ? { archived: true } : {}),
       children: childIds.map(visit),
     };
   };

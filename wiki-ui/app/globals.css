@@ -210,6 +210,87 @@ code {
   color: var(--muted);
   white-space: nowrap;
 }
+.tree-meta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+/* ── tree: archive + drag-to-reorder (UI-only views) ─────────────────────── */
+.tree-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 6px;
+}
+.tree-toggle-archived {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.tree-toggle-archived:hover {
+  color: var(--text);
+  background: var(--accent-dim);
+}
+.tree-toggle-archived[aria-pressed="true"] {
+  color: var(--text);
+  border-color: var(--accent-dim);
+}
+.tree-error {
+  color: #f87171;
+  font-size: 11px;
+  margin: 0 0 6px;
+}
+.tree-badge {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.tree-row {
+  cursor: grab;
+}
+.tree-row.dragging {
+  opacity: 0.5;
+  cursor: grabbing;
+}
+/* insertion line above the drop target — inset shadow avoids any layout shift */
+.tree-row.drag-over {
+  box-shadow: inset 0 2px 0 var(--text);
+}
+.tree-row.archived .tree-title {
+  opacity: 0.55;
+  font-style: italic;
+}
+.tree-archive {
+  flex: 0 0 auto;
+  opacity: 0;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 10px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.tree-row:hover .tree-archive {
+  opacity: 1;
+}
+.tree-archive:hover {
+  color: var(--text);
+  background: var(--accent-dim);
+}
+.tree-archive:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
 
 /* ── live indicator ──────────────────────────────────────────────────────── */
 .live-indicator {

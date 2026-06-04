@@ -42,7 +42,7 @@ export interface WorkspacesTable {
 }
 
 /**
- * `pages(id PK, workspace_id FK, type, parent_id, title, status, sections JSONB,
+ * `pages(id PK, workspace_id FK, type, parent_id, title, status, archived, sections JSONB,
  * created_at, updated_at)`. Content is the typed section tree (§2), serialized to
  * a single `sections` JSONB column.
  */
@@ -53,6 +53,8 @@ export interface PagesTable {
   parent_id: string | null;
   title: string;
   status: string;
+  /** Hidden from default tree views; an orthogonal visibility flag, not a status (engine ADR-011). */
+  archived: boolean;
   /** The page's typed section tree (`node.sections`), serialized to jsonb. */
   sections: JSONColumnType<JsonObject>;
   created_at: string;

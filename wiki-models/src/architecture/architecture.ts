@@ -80,7 +80,7 @@ const dependencyRows: DerivedList = (page, ctx: IRenderCtx) =>
     const label =
       targetId !== undefined ? `[${ctx.titleOf(targetId) ?? String(targetId)}](${String(targetId)})` : "(unknown)";
     // Ref integrity is write-time only; a target archived afterward still resolves, so flag it.
-    const archived = targetId !== undefined && ctx.statusOf(targetId) === "archived" ? " (archived)" : "";
+    const archived = targetId !== undefined && ctx.archivedOf(targetId) ? " (archived)" : "";
     const role = fieldStr(el, "role");
     const note = fieldStr(el, "note");
     return { id: el.id, text: `**${role}** → ${label}${archived}${note.length > 0 ? ` — ${note}` : ""}` };

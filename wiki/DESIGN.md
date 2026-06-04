@@ -408,6 +408,7 @@ can read the mutated graph back — [§8.6](#86-consistency-tokens-read-models--
 | `reorder` | `{ parentId, orderedChildIds }` | `ChildrenReordered` | — |
 | `setPageTitle` | `{ pageId, title }` | `PageTitleSet` | — |
 | `archivePage` | `{ pageId }` | `PageArchived` | — |
+| `unarchivePage` | `{ pageId }` | `PageUnarchived` | — |
 | `link` / `unlink` | `{ from, to, role }` | `LinkAdded` / `LinkRemoved` | — |
 | `moveItem` | `{ from, to, section, field, itemId }` | a `removeElement` + an `addElement` section operation, both in one atomic append (the cross-page move precedent, structured-content §5) | — |
 | `archiveWorkspace` *(handle: `archive()`)* | `{}` | `WorkspaceArchived` | — |
@@ -1017,8 +1018,11 @@ export interface IWorkspaceHandle {
   /** Rename a page's tree title. @throws {@link DuplicateTitleError} */
   setPageTitle(pageId: PageId, title: string): Promise<Committed<void>>;
 
-  /** Archive a page (terminal; blocks further mutations of that page). */
+  /** Archive a page — hide it from default views (an `archived` flag orthogonal to `status`); blocks mutation until unarchived. */
   archivePage(pageId: PageId): Promise<Committed<void>>;
+
+  /** Unarchive a page — restore it to default views and mutability; its lifecycle `status` is untouched. */
+  unarchivePage(pageId: PageId): Promise<Committed<void>>;
 
   /** Add a typed link between two pages. @throws {@link LinkTargetNotFoundError} */
   link(from: PageId, to: PageId, role: string): Promise<Committed<void>>;
@@ -1889,8 +1893,9 @@ is not a runtime dependency of the engine (the engine is schema-agnostic).
   (Replaces the former `wiki-api/` idea — the engine needs a stream *host*, not an API wrapper.)
 - **Projections / read models** across workspaces — "all open questions," search, dashboards.
 - **Branching / forking** a workspace (the event log makes "fork at version N" natural).
-- **Soft delete / archival** flows; **access control** (actor-scoped command permissions above
-  the FSM).
+- **Soft-delete / trash** flows beyond page-level archival (page archival now ships as a reversible
+  visibility flag — [ADR-011](#adr-011--page-archival-is-an-orthogonal-visibility-flag-not-a-status-2026-06-04));
+  **access control** (actor-scoped command permissions above the FSM).
 - **More page types** — Decision Record (ADR), Spec, Risk, Experiment, Meeting.
 - **Cross-workspace page move** as an explicit export/import saga.
 
@@ -2160,3 +2165,30 @@ golden render tests are rewritten. Schema *evolution within the new model* still
 (sections, field-kinds incl. `blocks`, contracts, render read model; `feature` rewritten) → Phase 2
 read-only host projections (outline, symbol index behind the `LanguageRegistry`) → Phase 3 semantic
 operations (`renameSymbol`, guarantee-scoped per §5 there).
+
+### ADR-011 — Page archival is an orthogonal visibility flag, not a status (2026-06-04)
+
+**Context.** The first cut of `archivePage` set `node.status = "archived"`, overwriting the page-type
+lifecycle status. That conflated two orthogonal axes — *lifecycle* (a per-type FSM, `draft → … →
+shipped`) and *visibility* (should this page appear in default tree/sidebar views?). It destroyed the
+prior status (a `shipped` page forgot it shipped), was a one-way door (`"archived"` is in no model's
+FSM, so the transition machinery could never leave it), and made the model-inspection FSM graph show a
+"current status" that is not a node in that graph.
+
+**Decision.** Archival is a first-class, schema-agnostic **`archived` boolean** on the page node — a
+sibling of `pinned`, **independent of `status`**. `PageArchived` flips the flag (status is preserved);
+a new `PageUnarchived` event + `unarchivePage` command clears it, making archival a round-trip. While
+`archived`, both structural and content mutations are blocked — the freeze that was previously implicit
+in "no FSM transition leaves `archived`" is now an explicit guard. `archived` is surfaced on `ITreeNode`
+and via `IRenderCtx.archivedOf(id)`; reads **annotate, never filter** — the engine exposes archived
+pages so consumers (the SQL read model's `tree`, the UI sidebar) hide them by policy with an opt-in to
+reveal. Archival does **not** cascade: a page is *effectively hidden* when it **or any ancestor** is
+archived, computed by readers — so archiving a feature hides its pinned plan/checklist/testing subtree
+without mutating those children, and unarchiving restores them exactly.
+
+**Consequences.** `archivePage` is no longer terminal — it is reversible and status-preserving. Models
+that surface archived-ness in render read `ctx.archivedOf` (e.g. the `architecture` bundle's
+"(archived)" dependency marker) instead of comparing `statusOf` to a magic string. Sort/visibility
+*policies* (e.g. "hide finished pages") live in read models / the UI, not the engine — the engine owns
+only the durable visibility fact. Greenfield (ADR-010): no migration for the old `status = "archived"`
+representation.

@@ -229,6 +229,8 @@ export interface IPageNode {
   sections: ISection[];
   /** Page types auto-created with this page and pinned (cannot reparent-out / archive alone). */
   pinned?: boolean;
+  /** Hidden from default tree/sidebar views; orthogonal to the lifecycle `status`. Reversible via unarchive. */
+  archived?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -363,6 +365,8 @@ export interface ITreeNode {
   readonly title: string;
   readonly type?: PageTypeName;
   readonly status?: string;
+  /** Hidden from default views (orthogonal to `status`); present and true only when archived. */
+  readonly archived?: boolean;
   readonly children: readonly ITreeNode[];
 }
 
@@ -380,6 +384,7 @@ export interface IWorkspaceHandle {
   reorder(parentId: PageId | null, orderedChildIds: readonly PageId[]): Promise<Committed<void>>;
   setPageTitle(pageId: PageId, title: string): Promise<Committed<void>>;
   archivePage(pageId: PageId): Promise<Committed<void>>;
+  unarchivePage(pageId: PageId): Promise<Committed<void>>;
   link(from: PageId, to: PageId, role: string): Promise<Committed<void>>;
   unlink(from: PageId, to: PageId, role: string): Promise<Committed<void>>;
   /** Cross-page list-element move: remove from one page's `(section, field)` list and
@@ -599,6 +604,8 @@ export interface IRenderCtx {
   titleOf(id: PageId): string | undefined;
   typeOf(id: PageId): string | undefined;
   statusOf(id: PageId): string | undefined;
+  /** Whether the page is archived (hidden from default views); orthogonal to `statusOf`. */
+  archivedOf(id: PageId): boolean;
   childrenOf(id: PageId | RootId): readonly PageId[];
   linksOf(id: PageId): readonly { readonly to: PageId; readonly role: string }[];
   backlinksOf(id: PageId): readonly { readonly from: PageId; readonly role: string }[];

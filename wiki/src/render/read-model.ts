@@ -37,6 +37,7 @@ export function buildRenderCtx(state: IWorkspaceState, _registry: Registry): IRe
     titleOf: (id) => nodeOf(id)?.title,
     typeOf: (id) => nodeOf(id)?.type,
     statusOf: (id) => nodeOf(id)?.status,
+    archivedOf: (id) => nodeOf(id)?.archived === true,
     childrenOf: (id) => [...(state.children.get(id) ?? [])],
     linksOf: (id) => state.links.filter((l) => l.from === id).map((l) => ({ to: l.to, role: l.role })),
     backlinksOf: (id) => state.links.filter((l) => l.to === id).map((l) => ({ from: l.from, role: l.role })),
@@ -302,7 +303,8 @@ export function renderWorkspace(state: IWorkspaceState, registry: Registry): str
   const visit = (id: PageId, level: number): void => {
     const type = ctx.typeOf(id);
     const status = ctx.statusOf(id);
-    const annotation = type !== undefined ? ` (${type}, ${status ?? ""})` : "";
+    const archived = ctx.archivedOf(id) ? ", archived" : "";
+    const annotation = type !== undefined ? ` (${type}, ${status ?? ""}${archived})` : "";
     blocks.push(heading(level, (ctx.titleOf(id) ?? id) + annotation));
     for (const childId of ctx.childrenOf(id)) visit(childId, level + 1);
   };

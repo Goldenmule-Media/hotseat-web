@@ -38,6 +38,7 @@ import {
   BatchCommandError,
   ConcurrencyError,
   FieldKindError,
+  InvariantViolationError,
   ItemNotFoundError,
   MutationNotAllowedError,
   PageNotFoundError,
@@ -362,6 +363,9 @@ export class CommandBus {
 
     const node = state.pages.get(req.pageId);
     if (node === undefined) throw new PageNotFoundError(req.pageId);
+    if (node.archived === true) {
+      throw new InvariantViolationError(`Page "${req.pageId}" is archived; mutation is blocked.`);
+    }
 
     const def = this.registry.page(node.type);
     const guard = this.registry.pageGuard(node.type);

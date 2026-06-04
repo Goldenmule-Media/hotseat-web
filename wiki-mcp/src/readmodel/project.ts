@@ -76,6 +76,7 @@ function pageRows(state: IWorkspaceState): PageInsert[] {
       parent_id: node.parentId,
       title: node.title,
       status: node.status,
+      archived: node.archived === true,
       // JSONB column: Insertable type is `string`; we serialize ourselves.
       sections: toJsonb(node.sections),
       created_at: node.createdAt,

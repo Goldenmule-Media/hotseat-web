@@ -203,7 +203,9 @@ const setPageTitleTool: WikiTool = {
 
 const archivePageTool: WikiTool = {
   name: "archivePage",
-  description: "Archive a page (and its subtree, per engine rules).",
+  description:
+    "Archive a page — hide it from default tree views (it and its subtree drop out). Reversible via " +
+    "unarchivePage; the page's lifecycle status is preserved, and it cannot be mutated while archived.",
   inputSchema: obj({ workspaceId: STR, pageId: STR }, ["workspaceId", "pageId"]),
   write: true,
   async handle(args, ctx) {
@@ -212,6 +214,20 @@ const archivePageTool: WikiTool = {
     const { token } = await handle.archivePage(asPageId(reqStr(args, "pageId")));
     ctx.tokens.recordWrite(ctx.sessionId, token);
     return { text: "Page archived.", data: { token } };
+  },
+};
+
+const unarchivePageTool: WikiTool = {
+  name: "unarchivePage",
+  description: "Unarchive a page — restore it to default tree views. Its lifecycle status is unchanged.",
+  inputSchema: obj({ workspaceId: STR, pageId: STR }, ["workspaceId", "pageId"]),
+  write: true,
+  async handle(args, ctx) {
+    const ws = asWorkspaceId(reqStr(args, "workspaceId"));
+    const handle = await ctx.engine.open(ws);
+    const { token } = await handle.unarchivePage(asPageId(reqStr(args, "pageId")));
+    ctx.tokens.recordWrite(ctx.sessionId, token);
+    return { text: "Page unarchived.", data: { token } };
   },
 };
 
@@ -502,19 +518,37 @@ const treeTool: WikiTool = {
   name: "tree",
   description:
     "The ordered page tree of a workspace as an indented outline (title, type, status, id), " +
-    "plus a slim { nodes, edges } payload. Structure + metadata ONLY — never page content " +
-    "(use renderPage or getPage for a page's body).",
-  inputSchema: obj({ workspaceId: STR }, ["workspaceId"]),
+    "plus a slim { nodes, edges } payload. Archived pages (and their subtrees) are hidden by " +
+    "default — pass includeArchived:true to show them (flagged [archived]). Structure + metadata " +
+    "ONLY — never page content (use renderPage or getPage for a page's body).",
+  inputSchema: obj(
+    {
+      workspaceId: STR,
+      includeArchived: {
+        type: "boolean",
+        description: "Include archived pages and their subtrees (default: false — archived pages are hidden).",
+      },
+    },
+    ["workspaceId"],
+  ),
   write: false,
   async handle(args, ctx) {
     const ws = asWorkspaceId(reqStr(args, "workspaceId"));
+    const includeArchived = (args as { includeArchived?: unknown }).includeArchived === true;
     await awaitConsistency(ctx, ws);
     const [pages, edges] = await Promise.all([ctx.readModel.listPages(ws), ctx.readModel.treeEdges(ws)]);
     // Slim per-page metadata — deliberately DROP the heavy `sections` jsonb. Shipping
     // every page's full folded state here is what made the whole-tree payload blow the
     // response token cap; the structure + light metadata is all `tree` should carry.
-    const nodes = pages.map((p) => ({ id: p.id, type: p.type, title: p.title, status: p.status, parentId: p.parent_id }));
-    const meta = new Map(nodes.map((n) => [n.id, n] as const));
+    const meta = new Map(
+      pages.map(
+        (p) =>
+          [
+            p.id,
+            { id: p.id, type: p.type, title: p.title, status: p.status, archived: p.archived, parentId: p.parent_id },
+          ] as const,
+      ),
+    );
     // Children by parent, in ordinal order. Roots are parents that are never a child
     // (the `@root` sentinel, plus any orphan whose parent is gone) — derived, so we
     // don't hard-code the sentinel literal.
@@ -527,17 +561,33 @@ const treeTool: WikiTool = {
     }
     const childIds = new Set(edges.map((e) => e.child_id));
     const roots = [...childrenOf.keys()].filter((p) => !childIds.has(p)).sort();
+    // A page is hidden when it — or any ancestor — is archived (ADR-011), unless opted in.
+    const hidden = new Set<string>();
+    if (!includeArchived) {
+      const mark = (parentId: string, underArchived: boolean): void => {
+        for (const e of childrenOf.get(parentId) ?? []) {
+          const isHidden = underArchived || meta.get(e.child_id)?.archived === true;
+          if (isHidden) hidden.add(e.child_id);
+          mark(e.child_id, isHidden);
+        }
+      };
+      for (const root of roots) mark(root, false);
+    }
     const lines: string[] = [];
     const walk = (parentId: string, depth: number): void => {
       for (const e of childrenOf.get(parentId) ?? []) {
+        if (hidden.has(e.child_id)) continue;
         const n = meta.get(e.child_id);
-        const label = n !== undefined ? `${n.title} (${n.type}) [${n.status}]` : "?";
+        const flag = n?.archived === true ? " [archived]" : "";
+        const label = n !== undefined ? `${n.title} (${n.type}) [${n.status}]${flag}` : "?";
         lines.push(`${"  ".repeat(depth)}- ${label}  ${e.child_id}`);
         walk(e.child_id, depth + 1);
       }
     };
     for (const root of roots) walk(root, 0);
-    return { text: lines.join("\n") || "(empty)", data: { nodes, edges } };
+    const nodes = [...meta.values()].filter((n) => !hidden.has(n.id));
+    const visibleEdges = edges.filter((e) => !hidden.has(e.child_id));
+    return { text: lines.join("\n") || "(empty)", data: { nodes, edges: visibleEdges } };
   },
 };
 
@@ -998,6 +1048,7 @@ export function wikiTools(): readonly WikiTool[] {
     reparentTool,
     setPageTitleTool,
     archivePageTool,
+    unarchivePageTool,
     linkTool,
     unlinkTool,
     mutatePageTool,

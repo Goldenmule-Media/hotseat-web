@@ -73,7 +73,7 @@ function requirePage(state: IWorkspaceState, pageId: PageId): IPageNode {
 
 /** Reject mutating an archived target page. */
 function assertPageActive(node: IPageNode): void {
-  if (node.status === "archived") {
+  if (node.archived === true) {
     throw new InvariantViolationError(`Page "${node.id}" is archived; structural mutation is blocked.`);
   }
 }
@@ -139,7 +139,7 @@ export const createPage: StructureHandler = (state, args, services, registry) =>
   // Parent (when present) must exist and not be archived.
   if (normalizedParent !== null) {
     const parent = requirePage(state, normalizedParent);
-    if (parent.status === "archived") {
+    if (parent.archived === true) {
       throw new ParentNotFoundError(normalizedParent);
     }
   }
@@ -217,7 +217,7 @@ export const reparent: StructureHandler = (state, args) => {
   // New parent (when present) must exist and not be archived.
   if (newParent !== null) {
     const parent = state.pages.get(newParent);
-    if (parent === undefined || parent.status === "archived") {
+    if (parent === undefined || parent.archived === true) {
       throw new ParentNotFoundError(newParent);
     }
     // Cycle: newParent must not be the page itself or a descendant of it.
@@ -317,20 +317,41 @@ export const setPageTitle: StructureHandler = (state, args) => {
 };
 
 // ────────────────────────────────────────────────────────────────────────────
-// archivePage
+// archivePage / unarchivePage
 // ────────────────────────────────────────────────────────────────────────────
 
-/** Archive a page. Pinned pages cannot be archived alone. */
+/**
+ * Archive a page — hide it from default views. Sets an orthogonal `archived` flag;
+ * the page's lifecycle `status` is preserved. Pinned pages cannot be archived alone
+ * (archive their owner instead). Idempotent: a no-op on an already-archived page.
+ */
 export const archivePage: StructureHandler = (state, args) => {
   const { pageId } = args as { pageId: PageId };
 
   const node = requirePage(state, pageId);
+  if (node.archived === true) return { events: [] };
   if (node.pinned === true) {
     throw new InvariantViolationError(`Page "${pageId}" is pinned and cannot be archived independently.`);
   }
 
   return {
     events: [{ type: "PageArchived", pageId, payload: { pageId } }],
+  };
+};
+
+/**
+ * Unarchive a page — restore it to default views. The lifecycle `status` was never
+ * touched by archiving, so the page becomes visible (and mutable) again at the status
+ * it held. Idempotent: a no-op on a page that is not archived.
+ */
+export const unarchivePage: StructureHandler = (state, args) => {
+  const { pageId } = args as { pageId: PageId };
+
+  const node = requirePage(state, pageId);
+  if (node.archived !== true) return { events: [] };
+
+  return {
+    events: [{ type: "PageUnarchived", pageId, payload: { pageId } }],
   };
 };
 
@@ -436,6 +457,7 @@ export const STRUCTURAL_HANDLERS: Readonly<Record<string, StructureHandler>> = {
   reorder,
   setPageTitle,
   archivePage,
+  unarchivePage,
   link,
   unlink,
   moveItem,

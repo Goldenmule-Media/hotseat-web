@@ -451,3 +451,51 @@ export function usePageMutator(workspaceId: WorkspaceId, pageId: PageId): PageMu
 
   return { run, pending, error, reset };
 }
+
+export interface StructuralMutator {
+  /** Archive a page — hides it (and its subtree) from default tree views. Resolves `true` on commit. */
+  archive: (pageId: PageId) => Promise<boolean>;
+  /** Unarchive a page — restores it to default tree views. */
+  unarchive: (pageId: PageId) => Promise<boolean>;
+  readonly pending: boolean;
+  /** The engine's error message, formatted; `null` when clear. */
+  readonly error: string | null;
+}
+
+/**
+ * Structural writes for the sidebar (archive / unarchive). Like {@link usePageMutator}, this
+ * reuses the read side's already-open {@link IWorkspaceHandle}; the committed event flows back
+ * through the live tail and re-projects the tree, so callers never refresh a view themselves.
+ */
+export function useStructuralMutator(workspaceId: WorkspaceId): StructuralMutator {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const call = useCallback(
+    async (fn: (h: IWorkspaceHandle) => Promise<unknown>): Promise<boolean> => {
+      const session = sessionFor(workspaceId);
+      if (session === null) {
+        setError("Engine not ready.");
+        return false;
+      }
+      setPending(true);
+      setError(null);
+      try {
+        const h = await session.handle();
+        await fn(h);
+        setPending(false);
+        return true;
+      } catch (e) {
+        setError(classify(e).message);
+        setPending(false);
+        return false;
+      }
+    },
+    [workspaceId],
+  );
+
+  const archive = useCallback((pageId: PageId) => call((h) => h.archivePage(pageId)), [call]);
+  const unarchive = useCallback((pageId: PageId) => call((h) => h.unarchivePage(pageId)), [call]);
+
+  return { archive, unarchive, pending, error };
+}

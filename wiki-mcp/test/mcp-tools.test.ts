@@ -266,10 +266,47 @@ describe("MCP tools + token manager + resources", () => {
     const data = tree.data as { nodes: Array<Record<string, unknown>>; edges: unknown[] };
     expect(data.nodes.length).toBe(2);
     for (const n of data.nodes) {
-      expect(Object.keys(n).sort()).toEqual(["id", "parentId", "status", "title", "type"]);
+      expect(Object.keys(n).sort()).toEqual(["archived", "id", "parentId", "status", "title", "type"]);
     }
     expect(JSON.stringify(tree.data)).not.toContain("SECRET-BODY-CONTENT");
     expect(data.edges.length).toBe(2);
+  });
+
+  it("tree hides archived pages (and their subtree) by default; includeArchived reveals them; unarchive restores", async () => {
+    const session = "arch1";
+    const created = await tools.get("createWorkspace")!.handle({ name: "Arch" }, ctx(session));
+    const wsId = (created.data as { workspaceId: string }).workspaceId;
+    const root = await tools.get("createPage")!.handle(
+      { workspaceId: wsId, type: "note", title: "Root", parentId: null },
+      ctx(session),
+    );
+    const rootId = (root.data as { pageId: string }).pageId;
+    await tools.get("createPage")!.handle(
+      { workspaceId: wsId, type: "note", title: "Child", parentId: rootId },
+      ctx(session),
+    );
+    await tools.get("archivePage")!.handle({ workspaceId: wsId, pageId: rootId }, ctx(session));
+    await drain();
+
+    // Default view: the archived Root and its whole subtree drop out (ancestor-aware).
+    const hidden = await tools.get("tree")!.handle({ workspaceId: wsId }, ctx(session));
+    expect(hidden.text).toBe("(empty)");
+    expect((hidden.data as { nodes: unknown[] }).nodes.length).toBe(0);
+
+    // includeArchived: both reappear; Root is flagged [archived] and KEEPS its status.
+    const shown = await tools.get("tree")!.handle({ workspaceId: wsId, includeArchived: true }, ctx(session));
+    expect(shown.text).toContain("- Root (note) [draft] [archived]");
+    expect(shown.text).toMatch(/\n {2}- Child \(note\) \[draft\]/);
+    const shownNodes = (shown.data as { nodes: Array<{ id: string; archived: boolean }> }).nodes;
+    expect(shownNodes.length).toBe(2);
+    expect(shownNodes.find((n) => n.id === rootId)?.archived).toBe(true);
+
+    // Unarchive restores it to the default view.
+    await tools.get("unarchivePage")!.handle({ workspaceId: wsId, pageId: rootId }, ctx(session));
+    await drain();
+    const restored = await tools.get("tree")!.handle({ workspaceId: wsId }, ctx(session));
+    expect(restored.text).toContain("- Root (note) [draft]");
+    expect((restored.data as { nodes: unknown[] }).nodes.length).toBe(2);
   });
 
   it("mutatePageBatch applies an ordered batch atomically with one recorded token", async () => {
