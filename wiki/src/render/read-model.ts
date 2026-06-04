@@ -5,6 +5,8 @@
  * so equal state renders byte-identically (§10). The per-type `render` is retired.
  */
 import type {
+  ComputedFlag,
+  DeepReadonly,
   IField,
   IItem,
   IPageNode,
@@ -12,12 +14,14 @@ import type {
   ISection,
   IWorkspaceState,
   PageId,
+  PageState,
   RefTarget,
   RenderConfig,
   SectionRender,
   RootId,
 } from "../api";
 import { ROOT } from "../api";
+import { pageStateView } from "../core/workspace";
 import type { Registry } from "../core/registry";
 import { renderBlocks, type LabelResolver } from "./blocks";
 import { bulletList, heading, joinBlocks, numbered, placeholder, section, statusBadge } from "./determinism";
@@ -35,6 +39,10 @@ export function buildRenderCtx(state: IWorkspaceState, _registry: Registry): IRe
     childrenOf: (id) => [...(state.children.get(id) ?? [])],
     linksOf: (id) => state.links.filter((l) => l.from === id).map((l) => ({ to: l.to, role: l.role })),
     backlinksOf: (id) => state.links.filter((l) => l.to === id).map((l) => ({ from: l.from, role: l.role })),
+    pageState: (id) => {
+      const n = nodeOf(id);
+      return n !== undefined ? (pageStateView(n) as DeepReadonly<PageState>) : undefined;
+    },
   };
 }
 
@@ -109,10 +117,19 @@ function fieldInlineValue(f: IField, label: LabelResolver): string {
   }
 }
 
+/** Context for COMPUTED checkboxes (feature-review Item 3): the page being rendered, the
+ *  render ctx (cross-page reads), and the page type's named {@link ComputedFlag}s. */
+interface ComputedCtx {
+  readonly page: DeepReadonly<PageState>;
+  readonly ctx: IRenderCtx;
+  readonly flags?: Readonly<Record<string, ComputedFlag>>;
+}
+
 function renderListField(
   f: { kind: "list"; elementType: string; elements: IItem[] },
   sr: SectionRender,
   label: LabelResolver,
+  computed?: ComputedCtx,
 ): string {
   if (sr.groupBy !== undefined && sr.groups !== undefined) {
     const blocks: string[] = [];
@@ -127,12 +144,16 @@ function renderListField(
   const template = sr.item ?? "{text}";
   if (f.elements.length === 0) return placeholder();
   if (sr.as === "checklist") {
-    // Declarative status→checkbox glyph (no logic): `[x]` when status === checkedWhen, else `[ ]`.
-    return bulletList(
-      f.elements.map(
-        (el) => `[${el.status === sr.checkedWhen ? "x" : " "}] ${fillTemplate(template, el, label)}`,
-      ),
-    );
+    // A box is checked when the element status === checkedWhen — UNLESS the element binds
+    // to a computed flag (`meta.computed`), in which case the box is COMPUTED from that
+    // flag (a projection of the real fact, possibly cross-page) and cannot be hand-driven.
+    const isChecked = (el: IItem): boolean => {
+      const key = typeof el.meta?.["computed"] === "string" ? (el.meta["computed"] as string) : undefined;
+      const flag = key !== undefined ? computed?.flags?.[key] : undefined;
+      if (flag !== undefined && computed !== undefined) return flag(computed.page, computed.ctx);
+      return el.status === sr.checkedWhen;
+    };
+    return bulletList(f.elements.map((el) => `[${isChecked(el) ? "x" : " "}] ${fillTemplate(template, el, label)}`));
   }
   const items = f.elements.map((el) => fillTemplate(template, el, label));
   if (sr.as === "numbered") return numbered(items);
@@ -143,6 +164,7 @@ function renderFieldBody(
   f: IField,
   sr: SectionRender,
   label: LabelResolver,
+  computed?: ComputedCtx,
 ): string {
   switch (f.kind) {
     case "scalar":
@@ -158,7 +180,7 @@ function renderFieldBody(
     case "blocks":
       return f.blocks.length === 0 ? placeholder() : renderBlocks(f.blocks, label);
     case "list":
-      return renderListField(f, sr, label);
+      return renderListField(f, sr, label, computed);
   }
 }
 
@@ -175,6 +197,7 @@ export function renderPage(state: IWorkspaceState, pageId: PageId, registry: Reg
   const def = registry.page(node.type);
   const config: RenderConfig = def.render;
   const label = makeLabelResolver(state, node, ctx);
+  const computed: ComputedCtx = { page: pageStateView(node) as DeepReadonly<PageState>, ctx, flags: def.computed };
 
   const blocks: string[] = [];
   const title = config.title !== undefined ? config.title.replace("{title}", node.title) : node.title;
@@ -209,7 +232,7 @@ export function renderPage(state: IWorkspaceState, pageId: PageId, registry: Reg
     } else {
       const fieldKey = sr.field ?? Object.keys(sec.fields)[0];
       const f = fieldKey !== undefined ? sec.fields[fieldKey] : undefined;
-      body = f === undefined ? (sr.placeholder ?? placeholder()) : renderFieldBody(f, sr, label);
+      body = f === undefined ? (sr.placeholder ?? placeholder()) : renderFieldBody(f, sr, label, computed);
       if (body.length === 0) body = sr.placeholder ?? placeholder();
     }
     blocks.push(section(heading(2, headingText), body));

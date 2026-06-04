@@ -472,6 +472,13 @@ export interface IRenderCtx {
   childrenOf(id: PageId | RootId): readonly PageId[];
   linksOf(id: PageId): readonly { readonly to: PageId; readonly role: string }[];
   backlinksOf(id: PageId): readonly { readonly from: PageId; readonly role: string }[];
+  /**
+   * Read another page's full folded state — the render-side twin of
+   * {@link IRelatedReader.page}. Lets a {@link ComputedFlag} derive a value from a
+   * sibling's ELEMENT-level state (e.g. "all testing-plan cases passed"), the same
+   * cross-page read preconditions already do (feature-review Item 3).
+   */
+  pageState(id: PageId): DeepReadonly<PageState> | undefined;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -655,6 +662,16 @@ export interface RenderConfig {
 // Page type definition (§9) — declarative; no author apply/render/produces
 // ────────────────────────────────────────────────────────────────────────────
 
+/**
+ * A model-declared, PURE boolean a renderer computes from folded state — possibly
+ * cross-page via {@link IRenderCtx} (feature-review Item 3). A checklist element binds
+ * to one by name via `meta.computed = "<key>"`: its checkbox is then COMPUTED from this
+ * flag (a projection of the real fact, e.g. "all testing-plan cases passed") rather than
+ * a stored, hand-toggled status — so it cannot lie, and the engine refuses to drive such
+ * an element's FSM by hand. Must be deterministic (no clock/RNG) like every renderer.
+ */
+export type ComputedFlag = (page: DeepReadonly<PageState>, ctx: IRenderCtx) => boolean;
+
 export interface IPageTypeDef<Status extends string = string> {
   readonly type: string;
   /**
@@ -675,6 +692,9 @@ export interface IPageTypeDef<Status extends string = string> {
   readonly requiredChildren?: readonly string[];
   readonly commands: DeclarativeCommandMap;
   readonly render: RenderConfig;
+  /** Named pure flags a renderer computes from folded state; an element binds via
+   *  `meta.computed = "<key>"` to derive its checkbox (feature-review Item 3). */
+  readonly computed?: Readonly<Record<string, ComputedFlag>>;
   /** Upcasters keyed by from-version, over `SectionOp` payloads (§10). */
   readonly upcasters?: Readonly<Record<number, (payload: unknown) => unknown>>;
 }

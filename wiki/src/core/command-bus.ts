@@ -372,6 +372,13 @@ export class CommandBus {
     if (item === undefined || elementType === undefined) {
       throw new ItemNotFoundError(sectionKey, elementId);
     }
+    // A COMPUTED element's status is DERIVED (its checkbox is rendered from a flag), so it
+    // must never be driven by hand — reject any element transition on it (Item 3). This
+    // keeps the rendered checkbox the single source of truth and prevents a stored status
+    // from silently diverging from the computed fact.
+    if (item.meta?.["computed"] !== undefined) {
+      throw new MutationNotAllowedError(`${type}.${elementType}`, item.status ?? "", command, []);
+    }
     const eg = this.registry.elementGuard(type, elementType);
     const st = item.status ?? "";
     if (eg !== undefined && !eg.can(st, event)) {
