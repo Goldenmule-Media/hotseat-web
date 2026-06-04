@@ -68,9 +68,15 @@ function FloatingEdge({ source, target, markerEnd, style, label, data }: EdgePro
     const cx = (sx + tx) / 2 + (-dy / len) * bend;
     const cy = (sy + ty) / 2 + (dx / len) * bend;
     path = `M ${sx},${sy} Q ${cx},${cy} ${tx},${ty}`;
-    // Quadratic bezier point at t=0.5, for the label.
-    labelX = 0.25 * sx + 0.5 * cx + 0.25 * tx;
-    labelY = 0.25 * sy + 0.5 * cy + 0.25 * ty;
+    // Bias the label toward the source (quadratic point at t≈0.3) instead of the
+    // midpoint, so the two labels of a bidirectional pair sit at different points along
+    // their curves (different heights) and don't overlap — even when the text is wide.
+    const t = 0.3;
+    const a = (1 - t) ** 2;
+    const b = 2 * (1 - t) * t;
+    const c = t ** 2;
+    labelX = a * sx + b * cx + c * tx;
+    labelY = a * sy + b * cy + c * ty;
   }
 
   return (
@@ -178,10 +184,25 @@ function FsmGraphInner({
           <Controls showInteractive={false} />
         </ReactFlow>
       </div>
-      <p className="muted" style={{ marginTop: 8 }}>
-        <code>{fsm.type}</code> — current state <strong>{currentStatus}</strong>. Green = available now,
-        amber 🔒 = blocked by a precondition, grey = not reachable from here.
-      </p>
+      <div className="fsm-legend">
+        <p className="fsm-legend-head">
+          <code>{fsm.type}</code> — current state <strong>{currentStatus}</strong>
+        </p>
+        <ul className="fsm-legend-keys">
+          <li>
+            <span className="fsm-key-swatch" style={{ background: EDGE_COLOR.available }} />
+            Available now
+          </li>
+          <li>
+            <span className="fsm-key-swatch" style={{ background: EDGE_COLOR.blocked }} />
+            <span className="fsm-key-lock">🔒</span> Blocked by a precondition
+          </li>
+          <li>
+            <span className="fsm-key-swatch" style={{ background: EDGE_COLOR.inert }} />
+            Not reachable from here
+          </li>
+        </ul>
+      </div>
       {blocked.length > 0 && (
         <ul className="fsm-blocked">
           {blocked.map((e) => (

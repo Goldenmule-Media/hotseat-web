@@ -317,6 +317,38 @@ code {
   white-space: nowrap;
   pointer-events: none;
 }
+.fsm-legend {
+  margin-top: 12px;
+}
+.fsm-legend-head {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.fsm-legend-keys {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fsm-legend-keys li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.fsm-key-swatch {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+}
+.fsm-key-lock {
+  font-size: 11px;
+}
 .fsm-blocked {
   list-style: none;
   padding: 0;
