@@ -81,11 +81,15 @@ describe("architecture: a typed graph node describing the codebase", () => {
     expect(block(await ws.toMarkdown(container), "Components")).toBe(`- [Child A!](${childA})\n- [Child B](${childB})`);
   });
 
-  it("renders a dependency edge with a render-derived target title", async () => {
-    expect(block(await ws.toMarkdown(engine), "Dependencies")).toBe("- **exposes** → Schema layer — the feature bundle");
+  it("renders a dependency edge as a link with a render-derived target title", async () => {
+    expect(block(await ws.toMarkdown(engine), "Dependencies")).toBe(
+      `- **exposes** → [Schema layer](${schema}) — the feature bundle`,
+    );
     // Renaming the target page reflows the dependency label (it's render-derived, not stored text).
     await ws.setPageTitle(schema, "Schema");
-    expect(block(await ws.toMarkdown(engine), "Dependencies")).toBe("- **exposes** → Schema — the feature bundle");
+    expect(block(await ws.toMarkdown(engine), "Dependencies")).toBe(
+      `- **exposes** → [Schema](${schema}) — the feature bundle`,
+    );
   });
 
   it("rejects a dependency that is non-existent or self-referential", async () => {
@@ -153,12 +157,12 @@ describe("architecture: composes under a toc Architecture Overview", () => {
     await harness.stop();
   });
 
-  it("renders architecture nodes as entries of their toc parent, reflowing on rename", async () => {
+  it("renders architecture nodes as linked entries of their toc parent, reflowing on rename", async () => {
     const toc = (await ws.createPage("toc", { title: "Architecture Overview", parentId: null })).value;
     const node = (await ws.createPage("architecture", { title: "Engine", parentId: toc })).value;
-    expect(contents(await ws.toMarkdown(toc))).toBe("- Engine");
+    expect(contents(await ws.toMarkdown(toc))).toBe(`- [Engine](${node})`);
     await ws.setPageTitle(node, "The Engine");
-    expect(contents(await ws.toMarkdown(toc))).toBe("- The Engine");
+    expect(contents(await ws.toMarkdown(toc))).toBe(`- [The Engine](${node})`);
   });
 
   it("rejects a dependency to a non-architecture (toc) page", async () => {

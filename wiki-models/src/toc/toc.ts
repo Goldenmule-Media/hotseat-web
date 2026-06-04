@@ -50,13 +50,16 @@ const contents: DerivedList = (page, ctx: IRenderCtx) => {
   const children = ctx.childrenOf(selfId);
   const childSet = new Set<string>(children.map((c) => String(c)));
   const titleOf = (id: PageId | string): string => ctx.titleOf(id as PageId) ?? String(id);
+  // A child entry is a Markdown link to the child page (href = its stable page id; label is
+  // render-derived, so renames reflow). Group rows below are not pages, so they stay plain.
+  const link = (id: PageId | string): string => `[${titleOf(id)}](${String(id)})`;
 
   const groups = listItems(page, "groups", "items");
   const placements = listItems(page, "placement", "items");
 
-  // No curation yet → a plain TOC of every child, in tree order.
+  // No curation yet → a flat TOC of every child (linked), in tree order.
   if (groups.length === 0) {
-    return children.map((c) => ({ id: String(c), text: titleOf(c) }));
+    return children.map((c) => ({ id: String(c), text: link(c) }));
   }
 
   const groupIds = new Set<string>(groups.map((g) => g.id));
@@ -91,14 +94,14 @@ const contents: DerivedList = (page, ctx: IRenderCtx) => {
     const blurb = fieldStr(g, "blurb");
     out.push({ id: g.id, level: 0, text: blurb.length > 0 ? `**${title}** — ${blurb}` : `**${title}**` });
     for (const child of inGroup.get(g.id) ?? []) {
-      out.push({ id: child, level: 1, text: titleOf(child) });
+      out.push({ id: child, level: 1, text: link(child) });
     }
   }
   // Children not (validly) placed in any group → a trailing bucket, in tree order.
   const ungrouped = children.filter((c) => !assigned.has(String(c)));
   if (ungrouped.length > 0) {
     out.push({ id: "@ungrouped", level: 0, text: "**Ungrouped**" });
-    for (const c of ungrouped) out.push({ id: String(c), level: 1, text: titleOf(c) });
+    for (const c of ungrouped) out.push({ id: String(c), level: 1, text: link(c) });
   }
   return out;
 };

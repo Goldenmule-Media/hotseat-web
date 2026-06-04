@@ -75,12 +75,15 @@ const codeReferenceRows: DerivedList = (page) =>
 const dependencyRows: DerivedList = (page, ctx: IRenderCtx) =>
   listItems(page, "dependencies", "items").map((el) => {
     const targetId = refPageId(el, "target");
-    const title = targetId !== undefined ? (ctx.titleOf(targetId) ?? String(targetId)) : "(unknown)";
+    // Link the target page (href = its stable page id; label is render-derived, so renames
+    // reflow), matching how Components and the toc render page references.
+    const label =
+      targetId !== undefined ? `[${ctx.titleOf(targetId) ?? String(targetId)}](${String(targetId)})` : "(unknown)";
     // Ref integrity is write-time only; a target archived afterward still resolves, so flag it.
     const archived = targetId !== undefined && ctx.statusOf(targetId) === "archived" ? " (archived)" : "";
     const role = fieldStr(el, "role");
     const note = fieldStr(el, "note");
-    return { id: el.id, text: `**${role}** → ${title}${archived}${note.length > 0 ? ` — ${note}` : ""}` };
+    return { id: el.id, text: `**${role}** → ${label}${archived}${note.length > 0 ? ` — ${note}` : ""}` };
   });
 
 /** The node's contained sub-nodes (its page-tree children), each rendered as a Markdown link

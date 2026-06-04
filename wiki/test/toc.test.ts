@@ -19,6 +19,10 @@ describe("toc: a derived, groupable table of contents of children", () => {
   let alpha: PageId;
   let beta: PageId;
   let gamma: PageId;
+  let delta: PageId;
+
+  /** A child entry as it renders: a Markdown link to the child page (href = its id). */
+  const entry = (id: PageId, title: string): string => `[${title}](${id})`;
 
   /** The "## Contents" block of the rendered TOC (heading stripped, trailing trimmed). */
   async function contents(): Promise<string> {
@@ -47,51 +51,61 @@ describe("toc: a derived, groupable table of contents of children", () => {
     await harness.stop();
   });
 
-  it("with no groups, lists every child as a flat plain bullet list in tree order", async () => {
+  it("with no groups, lists every child as a flat linked list in tree order", async () => {
     const block = await contents();
     expect(await contents()).toBe(block); // deterministic
-    expect(block).toBe("- Alpha\n- Beta\n- Gamma");
+    expect(block).toBe(`- ${entry(alpha, "Alpha")}\n- ${entry(beta, "Beta")}\n- ${entry(gamma, "Gamma")}`);
   });
 
   it("buckets assigned children under group rows and the rest under Ungrouped (nested)", async () => {
     const groupId = ((await ws.mutate(toc, "addGroup", { title: "Core" })).value as { groupId: string }).groupId;
     await ws.mutate(toc, "assignChild", { childId: String(alpha), groupId });
     await ws.mutate(toc, "assignChild", { childId: String(beta), groupId });
-    expect(await contents()).toBe("- **Core**\n  - Alpha\n  - Beta\n- **Ungrouped**\n  - Gamma");
+    expect(await contents()).toBe(
+      `- **Core**\n  - ${entry(alpha, "Alpha")}\n  - ${entry(beta, "Beta")}\n- **Ungrouped**\n  - ${entry(gamma, "Gamma")}`,
+    );
   });
 
   it("renders a group blurb inline on the group row", async () => {
     const groups = await groupIds();
     await ws.mutate(toc, "setGroupBlurb", { groupId: groups[0], blurb: "Foundational." });
-    expect(await contents()).toBe("- **Core** — Foundational.\n  - Alpha\n  - Beta\n- **Ungrouped**\n  - Gamma");
+    expect(await contents()).toBe(
+      `- **Core** — Foundational.\n  - ${entry(alpha, "Alpha")}\n  - ${entry(beta, "Beta")}\n- **Ungrouped**\n  - ${entry(gamma, "Gamma")}`,
+    );
   });
 
   it("reorders within a group by reordering placement (within-group = placement order)", async () => {
     await ws.mutate(toc, "reorderChildren", { orderedChildIds: [String(beta), String(alpha)] });
-    expect(await contents()).toBe("- **Core** — Foundational.\n  - Beta\n  - Alpha\n- **Ungrouped**\n  - Gamma");
+    expect(await contents()).toBe(
+      `- **Core** — Foundational.\n  - ${entry(beta, "Beta")}\n  - ${entry(alpha, "Alpha")}\n- **Ungrouped**\n  - ${entry(gamma, "Gamma")}`,
+    );
     // restore for later assertions
     await ws.mutate(toc, "reorderChildren", { orderedChildIds: [String(alpha), String(beta)] });
   });
 
   it("is DERIVED, not a snapshot: child renames and new children flow through with no TOC write", async () => {
     await ws.setPageTitle(alpha, "Alpha (core)");
-    expect(await contents()).toBe("- **Core** — Foundational.\n  - Alpha (core)\n  - Beta\n- **Ungrouped**\n  - Gamma");
-    // A brand-new child appears under Ungrouped automatically.
-    await child("Delta");
     expect(await contents()).toBe(
-      "- **Core** — Foundational.\n  - Alpha (core)\n  - Beta\n- **Ungrouped**\n  - Gamma\n  - Delta",
+      `- **Core** — Foundational.\n  - ${entry(alpha, "Alpha (core)")}\n  - ${entry(beta, "Beta")}\n- **Ungrouped**\n  - ${entry(gamma, "Gamma")}`,
+    );
+    // A brand-new child appears under Ungrouped automatically.
+    delta = await child("Delta");
+    expect(await contents()).toBe(
+      `- **Core** — Foundational.\n  - ${entry(alpha, "Alpha (core)")}\n  - ${entry(beta, "Beta")}\n- **Ungrouped**\n  - ${entry(gamma, "Gamma")}\n  - ${entry(delta, "Delta")}`,
     );
   });
 
   it("unassigning returns a child to Ungrouped; removing a group ungroups its members", async () => {
     await ws.mutate(toc, "unassignChild", { childId: String(beta) });
     expect(await contents()).toBe(
-      "- **Core** — Foundational.\n  - Alpha (core)\n- **Ungrouped**\n  - Beta\n  - Gamma\n  - Delta",
+      `- **Core** — Foundational.\n  - ${entry(alpha, "Alpha (core)")}\n- **Ungrouped**\n  - ${entry(beta, "Beta")}\n  - ${entry(gamma, "Gamma")}\n  - ${entry(delta, "Delta")}`,
     );
     const groups = await groupIds();
     await ws.mutate(toc, "removeGroup", { groupId: groups[0] });
-    // No groups left → back to a flat list of all children in tree order.
-    expect(await contents()).toBe("- Alpha (core)\n- Beta\n- Gamma\n- Delta");
+    // No groups left → back to a flat linked list of all children in tree order.
+    expect(await contents()).toBe(
+      `- ${entry(alpha, "Alpha (core)")}\n- ${entry(beta, "Beta")}\n- ${entry(gamma, "Gamma")}\n- ${entry(delta, "Delta")}`,
+    );
   });
 
   /** Read the current group element ids from the rendered state (helper for assertions). */
