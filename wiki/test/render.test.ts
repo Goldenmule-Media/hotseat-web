@@ -111,13 +111,13 @@ _None._
 - **Which formats in v1?** → CSV and JSON; Parquet later.
 
 ## References
-- depends-on → Access control (RBAC)
+- depends-on → [Access control (RBAC)](feature-brief:id-3)
 
 ## Child pages
-- Implementation plan
-- Implementation checklist
-- Testing plan
-- Spec
+- [Implementation plan](implementation-plan:id-14)
+- [Implementation checklist](implementation-checklist:id-15)
+- [Testing plan](testing-plan:id-16)
+- [Spec](feature-spec:id-17)
 
 ## Commits
 - \`a1b2c3d\` feat(api): streaming export endpoint

@@ -258,13 +258,16 @@ export function renderPage(state: IWorkspaceState, pageId: PageId, registry: Reg
 function renderReferences(id: PageId, ctx: IRenderCtx): string {
   const links = ctx.linksOf(id);
   if (links.length === 0) return placeholder();
-  return bulletList(links.map((l) => `${l.role} → ${ctx.titleOf(l.to) ?? l.to}`));
+  // The link target is a page → render it as a Markdown link (href = its stable page id;
+  // label render-derived). Consistent with how page references render everywhere else.
+  return bulletList(links.map((l) => `${l.role} → [${ctx.titleOf(l.to) ?? l.to}](${l.to})`));
 }
 
 function renderChildList(id: PageId, ctx: IRenderCtx): string {
   const children = ctx.childrenOf(id);
   if (children.length === 0) return placeholder();
-  return bulletList(children.map((childId) => ctx.titleOf(childId) ?? childId));
+  // Each child is a page → render its title as a Markdown link (href = its stable page id).
+  return bulletList(children.map((childId) => `[${ctx.titleOf(childId) ?? childId}](${childId})`));
 }
 
 /**
