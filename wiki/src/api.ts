@@ -625,6 +625,15 @@ export interface DeclarativeCommand {
     | { readonly level: "page"; readonly event: string }
     | { readonly level: "element"; readonly event: string };
   readonly preconditions?: readonly Precondition[];
+  /**
+   * SIGN-OFF (feature-review). When this page-transition command runs, the engine ALSO
+   * drives each PINNED CHILD to its declared {@link IPageTypeDef.finalize} transition in
+   * the SAME atomic commit — each child fully FSM- + precondition-validated, so a child
+   * that isn't ready (e.g. a spec with undocumented decisions) rejects the whole sign-off.
+   * One action lands the entire bundle in an aligned terminal state; a child already
+   * finalized is skipped. Non-recursive (direct pinned children).
+   */
+  readonly cascadeFinalize?: boolean;
   /** Escape hatch (§9.4): compute the effect as the same closed op vocabulary. */
   readonly produces?: (page: DeepReadonly<PageState>, args: unknown, ctx: ICommandContext) => SectionOp[];
 }
@@ -713,6 +722,10 @@ export interface IPageTypeDef<Status extends string = string> {
   readonly requiredChildren?: readonly string[];
   readonly commands: DeclarativeCommandMap;
   readonly render: RenderConfig;
+  /** The page-transition command/event that drives this page to its terminal "done"
+   *  status, applied when an ancestor's {@link DeclarativeCommand.cascadeFinalize} command
+   *  signs the bundle off (feature-review sign-off). */
+  readonly finalize?: string;
   /** Named pure flags a renderer computes from folded state; an element binds via
    *  `meta.computed = "<key>"` to derive its checkbox (feature-review Item 3). */
   readonly computed?: Readonly<Record<string, ComputedFlag>>;

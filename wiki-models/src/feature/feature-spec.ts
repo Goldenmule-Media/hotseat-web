@@ -95,6 +95,7 @@ export const FeatureSpec = definePageType({
   version: 1,
   initialStatus: "drafting",
   statusTransitions: [t("drafting", "seal", "sealed"), t("sealed", "reopen", "drafting")],
+  finalize: "seal",
   sections: {
     overview: {
       name: "Overview",

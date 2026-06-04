@@ -12,6 +12,7 @@ export const TestingPlan = definePageType({
   version: 1,
   initialStatus: "draft",
   statusTransitions: [t("draft", "markReady", "ready")],
+  finalize: "markReady",
   sections: {
     cases: {
       name: "Test cases",

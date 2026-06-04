@@ -53,6 +53,7 @@ describe("worked example: plan → build → ship a feature", () => {
   let plan: PageId;
   let checklist: PageId;
   let testPlan: PageId;
+  let spec: PageId;
 
   // Item ids captured from command results.
   let q1: string;
@@ -118,7 +119,7 @@ describe("worked example: plan → build → ship a feature", () => {
       "testing-plan",
       "feature-spec",
     ]);
-    [plan, checklist, testPlan] = children.map((c) => c.id);
+    [plan, checklist, testPlan, spec] = children.map((c) => c.id);
 
     // Tree assertion: @root → [RBAC, Bulk export]; Bulk export → its 3 children.
     const tree = await ws.tree({ consistentWith: briefToken });
@@ -298,7 +299,11 @@ describe("worked example: plan → build → ship a feature", () => {
     // checks task statuses directly. Completing it should now satisfy the checklist.
     await ws.mutate(checklist, "checkTask", { taskId: t3 });
 
-    // All gates satisfied now (3/3 done, 1/1 passed, 0 open questions on brief).
+    // Sign-off also requires the spec to be sealable: every resolved decision threaded in.
+    // The brief's lone resolved question is q1, so document it before shipping.
+    await ws.mutate(spec, "addDecision", { questionId: q1, text: "v1 ships CSV and JSON." });
+
+    // All gates satisfied now (3/3 done, 1/1 passed, 0 open questions, spec complete).
     const shipCommit = await ws.mutate(brief, "ship", {});
     expect(await (await ws.page(brief, { consistentWith: shipCommit.token })).status()).toBe(
       "shipped",
@@ -333,16 +338,17 @@ describe("worked example: plan → build → ship a feature", () => {
 
     expect(md).toBe(expected);
 
-    // Final tree: the brief and its 3 children, with terminal/derived statuses.
+    // Final tree: the brief shipped, and sign-off cascaded EVERY child to its terminal
+    // status in the same commit — the whole bundle is aligned, not a mix of mid-states.
     const briefNode = (await ws.tree()).children.find((c) => c.id === brief);
     expect(briefNode?.status).toBe("shipped");
     expect(
       briefNode?.children.map((c) => ({ type: c.type, status: c.status })),
     ).toEqual([
-      { type: "implementation-plan", status: "draft" },
-      { type: "implementation-checklist", status: "building" },
-      { type: "testing-plan", status: "draft" },
-      { type: "feature-spec", status: "drafting" },
+      { type: "implementation-plan", status: "ready" },
+      { type: "implementation-checklist", status: "complete" },
+      { type: "testing-plan", status: "ready" },
+      { type: "feature-spec", status: "sealed" },
     ]);
   });
 });

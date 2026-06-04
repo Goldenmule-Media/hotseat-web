@@ -23,6 +23,7 @@ export const ImplementationPlan = definePageType({
   version: 1,
   initialStatus: "draft",
   statusTransitions: [t("draft", "markReady", "ready")],
+  finalize: "markReady",
   sections: {
     steps: { name: "Steps", required: true, mutableIn: ["draft"], fields: { items: { kind: "list", element: "step", ordered: true } } },
     dataModels: {

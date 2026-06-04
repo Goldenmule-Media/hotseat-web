@@ -192,7 +192,7 @@ export class CommandBus {
    * Resolves to a {@link CommitOutcome} (result + committed-head version, §8.6).
    */
   async runPage(projection: BusProjection, req: PageRequest): Promise<CommitOutcome> {
-    const decide = (state: IWorkspaceState) => this.decidePage(state, req);
+    const decide = (state: IWorkspaceState) => this.decidePageCascading(state, req);
     return this.commit(projection, decide, {
       actor: req.actor,
       commandId: req.commandId,
@@ -214,6 +214,46 @@ export class CommandBus {
       return (a as { label: string }).label;
     }
     return req.command;
+  }
+
+  /**
+   * Decide a page command and, when it declares `cascadeFinalize`, ALSO drive each pinned
+   * child to its declared `finalize` transition in the SAME commit — the atomic "sign-off"
+   * that lands the whole bundle in an aligned terminal state (feature-review). Each child
+   * is decided through the normal {@link decidePage} path against the pre-commit state, so
+   * its FSM legality AND preconditions are enforced: a child that can't be finalized (e.g.
+   * a spec with undocumented decisions) throws and rejects the entire sign-off. A child
+   * already at its terminal status (finalize event not legal) is skipped. Decisions are
+   * all taken against the same pre-commit state — the children are independent pages, so
+   * order is irrelevant — and applied together by {@link commit}.
+   */
+  private decidePageCascading(
+    state: IWorkspaceState,
+    req: PageRequest,
+  ): { events: DomainEvent[]; result: unknown } {
+    const outcome = this.decidePage(state, req);
+    const node = state.pages.get(req.pageId);
+    if (node === undefined) return outcome;
+    const declared = this.registry.page(node.type).commands[req.command];
+    if (declared?.cascadeFinalize !== true) return outcome;
+
+    const events: DomainEvent[] = [...outcome.events];
+    for (const childId of state.children.get(req.pageId) ?? []) {
+      const child = state.pages.get(childId);
+      if (child === undefined || child.pinned !== true) continue;
+      const finalize = this.registry.page(child.type).finalize;
+      if (finalize === undefined) continue;
+      // Skip a child already finalized (its finalize event is no longer legal).
+      if (!this.registry.pageGuard(child.type).can(child.status, finalize)) continue;
+      const { events: childEvents } = this.decidePage(state, {
+        ...req,
+        pageId: childId,
+        command: finalize,
+        args: {},
+      });
+      events.push(...childEvents);
+    }
+    return { events, result: outcome.result };
   }
 
   /** Pure page-command decision (resolve → validate → gate → effect → check). */

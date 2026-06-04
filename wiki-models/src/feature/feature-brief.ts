@@ -204,6 +204,11 @@ export const FeatureBrief = definePageType({
       args: zodSchema(empty),
       transition: { level: "page", event: "ship" },
       preconditions: [checklistComplete, allCasesPassed, noOpenQuestions],
+      // Sign-off: shipping the brief also drives every pinned child to its terminal status
+      // (plan→ready, checklist→complete, testing-plan→ready, spec→sealed) in one atomic
+      // commit — so the whole bundle lands aligned, and a child that isn't ready (e.g. a
+      // spec whose decisions aren't all referenced) rejects the ship.
+      cascadeFinalize: true,
     },
     abandon: { args: zodSchema(empty), transition: { level: "page", event: "abandon" } },
   },

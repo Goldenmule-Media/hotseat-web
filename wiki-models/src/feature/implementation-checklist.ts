@@ -74,6 +74,7 @@ export const ImplementationChecklist = definePageType({
   version: 1,
   initialStatus: "building",
   statusTransitions: [t("building", "markComplete", "complete")],
+  finalize: "markComplete",
   sections: {
     tasks: {
       name: "Tasks",
