@@ -25,6 +25,7 @@ import type {
   Unsubscribe,
   WorkspaceId,
 } from "wiki";
+import { getConfig } from "./config";
 import { getWiki } from "./engine";
 
 export type ConnectionState = "connecting" | "live" | "reconnecting" | "error";
@@ -46,6 +47,10 @@ class WorkspaceSession {
   private unsub: Unsubscribe | null = null;
   private disposed = false;
   private snap: LiveWorkspace;
+  // Connection health probe (drives the indicator; the engine's tail catches content
+  // up on its own, but does not surface connection state, so we probe reachability).
+  private probeTimer: ReturnType<typeof setTimeout> | null = null;
+  private down = false;
 
   constructor(
     private readonly wiki: IWiki,
@@ -84,12 +89,15 @@ class WorkspaceSession {
       if (this.disposed) return;
       this.set({ tree, connection: "live", error: null });
       this.unsub = await h.subscribe((_e: IEventEnvelope) => void this.onEvent());
+      this.scheduleProbe(PROBE_INTERVAL_MS);
     } catch (e) {
       if (!this.disposed) this.set({ connection: "error", error: errMsg(e) });
     }
   }
 
   private async onEvent(): Promise<void> {
+    // An event arriving is itself proof of liveness.
+    this.down = false;
     try {
       const h = await this.handle();
       const tree = await h.tree();
@@ -99,7 +107,48 @@ class WorkspaceSession {
       if (!this.disposed) this.set({ connection: "reconnecting", error: errMsg(e) });
     }
   }
+
+  private scheduleProbe(delayMs: number): void {
+    if (this.disposed) return;
+    this.probeTimer = setTimeout(() => void this.probe(), delayMs);
+  }
+
+  /**
+   * Reachability probe: a HEAD to the workspace stream. A network rejection means the
+   * server is unreachable → "reconnecting" (retried with backoff). On recovery we
+   * re-seed the tree immediately; the engine's tail independently replays missed
+   * commits, so content also catches up.
+   */
+  private async probe(): Promise<void> {
+    if (this.disposed) return;
+    const cfg = getConfig();
+    const url = `${cfg.streamBaseUrl.replace(/\/+$/, "")}/${cfg.namespace}/workspace/${encodeURIComponent(this.id)}`;
+    try {
+      await fetch(url, { method: "HEAD" }); // any HTTP response = reachable
+      if (this.down) {
+        this.down = false;
+        try {
+          const h = await this.handle();
+          const tree = await h.tree();
+          this.set({ tree, connection: "live", lastEventAt: Date.now(), error: null });
+        } catch {
+          this.set({ connection: "live", error: null });
+        }
+      } else if (this.snap.connection !== "live") {
+        this.set({ connection: "live", error: null });
+      }
+      this.scheduleProbe(PROBE_INTERVAL_MS);
+    } catch (e) {
+      this.down = true;
+      this.set({ connection: "reconnecting", error: errMsg(e) });
+      this.scheduleProbe(PROBE_BACKOFF_MS);
+    }
+  }
 }
+
+/** Healthy-state probe cadence and the faster retry cadence while disconnected. */
+const PROBE_INTERVAL_MS = 10_000;
+const PROBE_BACKOFF_MS = 2_000;
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
