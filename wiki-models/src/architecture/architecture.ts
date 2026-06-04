@@ -3,8 +3,8 @@
  *
  * A node documents ONE unit (module / component / subsystem / …, set by `kind`). It carries
  * the sections an architecture doc needs — summary, purpose, the contained sub-nodes
- * (Components, its page-tree children), usage, data model, code references, dependencies,
- * invariants — and is kept current by an AGENT issuing guarded
+ * (Components — links to its page-tree children), usage, data model, code references,
+ * dependencies, invariants — and is kept current by an AGENT issuing guarded
  * mutations (the engine can't watch the filesystem; freshness is an agent-recorded fact, not
  * an engine-faked flag). Two kinds of links, matching "describe and link to code OR modules":
  *  - CODE references — `codeRef {file, symbol?, kind?}` elements: file + function/class names,
@@ -83,6 +83,16 @@ const dependencyRows: DerivedList = (page, ctx: IRenderCtx) =>
     return { id: el.id, text: `**${role}** → ${title}${archived}${note.length > 0 ? ` — ${note}` : ""}` };
   });
 
+/** The node's contained sub-nodes (its page-tree children), each rendered as a Markdown link
+ *  to the child page. The href is the stable page id — the address an agent feeds back into
+ *  getPage/renderPage (the host `wiki://{ns}/page/…` URI isn't available at render time, since
+ *  the engine is namespace/workspace-agnostic). The label is render-derived, so renames reflow.
+ *  Surfaces the package→component hierarchy on the node page, the way a toc lists its children. */
+const componentRows: DerivedList = (page, ctx: IRenderCtx) => {
+  const self = page.id as unknown as PageId;
+  return ctx.childrenOf(self).map((id) => ({ id: String(id), text: `[${ctx.titleOf(id) ?? String(id)}](${id})` }));
+};
+
 const editable = ["current", "stale"];
 
 export const Architecture = definePageType({
@@ -143,7 +153,11 @@ export const Architecture = definePageType({
     invariant: { fields: { statement: { kind: "prose", required: true } } },
   },
   sectionSet: { mode: "closed" },
-  derived: { "code-reference-rows": codeReferenceRows, "dependency-rows": dependencyRows },
+  derived: {
+    "code-reference-rows": codeReferenceRows,
+    "dependency-rows": dependencyRows,
+    "component-rows": componentRows,
+  },
   // The curated enums (kind / role / codeRef-kind) and `required` flags are enforced on these
   // hand-written commands — the authoritative authoring path. The engine ALSO auto-generates
   // unconstrained structural commands (set<Sec><Field>, add/remove/move<Sec><Field>Element) that
@@ -274,10 +288,10 @@ export const Architecture = definePageType({
       { section: "summary", field: "kind", heading: "Kind", as: "inline" },
       { section: "summary", field: "body", heading: "Summary", as: "block" },
       { section: "purpose", field: "body", heading: "Purpose", as: "block" },
-      // Contained sub-nodes = this node's page-tree children. Surfaces the package→component
-      // hierarchy ON the node page (the way a toc surfaces its children); a leaf node shows
-      // the empty placeholder, like its other graph sections.
-      { section: "@children", heading: "Components" },
+      // Contained sub-nodes = this node's page-tree children, rendered as links (page-id href).
+      // Surfaces the package→component hierarchy ON the node page (the way a toc surfaces its
+      // children); a leaf node shows the placeholder.
+      { derived: "component-rows", heading: "Components", placeholder: "_No components._" },
       { derived: "dependency-rows", heading: "Dependencies", placeholder: "_No dependencies._" },
       { derived: "code-reference-rows", heading: "Code references", placeholder: "_No code references._" },
       { section: "dataModel", field: "body", heading: "Data model", as: "block" },

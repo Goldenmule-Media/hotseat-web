@@ -69,12 +69,16 @@ describe("architecture: a typed graph node describing the codebase", () => {
     );
   });
 
-  it("renders contained sub-nodes as a Components section; a leaf shows the placeholder", async () => {
+  it("renders contained sub-nodes as links (page-id href) in a Components section; a leaf shows the placeholder", async () => {
     const container = (await ws.createPage("architecture", { title: "Container", parentId: null })).value;
     const childA = (await ws.createPage("architecture", { title: "Child A", parentId: container })).value;
-    await ws.createPage("architecture", { title: "Child B", parentId: container });
-    expect(block(await ws.toMarkdown(container), "Components")).toBe("- Child A\n- Child B");
-    expect(block(await ws.toMarkdown(childA), "Components")).toBe("_None._");
+    const childB = (await ws.createPage("architecture", { title: "Child B", parentId: container })).value;
+    expect(block(await ws.toMarkdown(container), "Components")).toBe(`- [Child A](${childA})\n- [Child B](${childB})`);
+    // A leaf node shows the derived placeholder.
+    expect(block(await ws.toMarkdown(childA), "Components")).toBe("_No components._");
+    // The link label is render-derived — renaming the child reflows it.
+    await ws.setPageTitle(childA, "Child A!");
+    expect(block(await ws.toMarkdown(container), "Components")).toBe(`- [Child A!](${childA})\n- [Child B](${childB})`);
   });
 
   it("renders a dependency edge with a render-derived target title", async () => {
