@@ -117,8 +117,14 @@ and the embedded **wiki-mcp** streamable-HTTP MCP endpoint (`:4439/mcp`). File s
   `npm run start -w wiki-server -- --models wiki-models/feature` (or `WIKI_SERVER_MODELS=wiki-models/feature`).
   At runtime you can also `POST /_server/models {"id":"feature","specifier":"wiki-models/feature"}`, or
   list with `GET localhost:4438/_server/models`.
+- **Load every bundle at once:** `npm start` (root) runs the server with `--models-dir ../wiki-models/src`,
+  loading each `wiki-models/src/<bundle>/` as a bundle (id = dir name). `--models-dir`
+  (`WIKI_SERVER_MODELS_DIR`) also accepts a built tree (`wiki-models/dist`, each `<bundle>.js`) — a
+  discovered file that isn't a bundle (a build's shared chunk / sourcemap) is skipped with a warning, not a
+  boot failure. An explicit `--models` entry overrides a discovered bundle of the same id (and still hard-fails
+  if it can't load). `npm run start:all -w wiki-server` is the same command.
 - **Config** is `flags → env → defaults`. `wiki-server` reads `WIKI_SERVER_*` (host/port/storage/data-dir/
-  control-port/mcp-port/models) **and** resolves the embedded `wiki-mcp`'s `WIKI_MCP_*` (namespace,
+  control-port/mcp-port/models/models-dir) **and** resolves the embedded `wiki-mcp`'s `WIKI_MCP_*` (namespace,
   `WIKI_MCP_DB` = `pglite`|`pg`, `WIKI_MCP_PG_URL`, data-dir), overriding the MCP's stream URL to its own.
 - `.mcp.json` wires this Claude Code session's `wiki` MCP server to `http://127.0.0.1:4439/mcp` — i.e. a
   locally-running `wiki-server`. The `wiki` MCP tools won't work unless that server is up (with a model loaded).

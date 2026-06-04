@@ -12,8 +12,8 @@ import { defineConfig } from "tsdown";
  * TS source at runtime (ERR_MODULE_NOT_FOUND).
  */
 export default defineConfig({
-  // One named entry per bundle → `dist/feature.js`, etc.
-  entry: { feature: "src/feature/index.ts" },
+  // One named entry per bundle → `dist/feature.js`, `dist/toc.js`, etc.
+  entry: { feature: "src/feature/index.ts", toc: "src/toc/index.ts" },
   format: ["esm"],
   platform: "node",
   target: "node20",

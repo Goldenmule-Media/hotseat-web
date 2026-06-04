@@ -7,6 +7,7 @@
 import type {
   ComputedFlag,
   DeepReadonly,
+  DerivedItem,
   IField,
   IItem,
   IPageNode,
@@ -209,10 +210,7 @@ export function renderPage(state: IWorkspaceState, pageId: PageId, registry: Reg
     // local progress), not a page field (feature-review Item 2). Rendered byte-stably.
     if (sr.derived !== undefined) {
       const items = def.derived?.[sr.derived]?.(computed.page, ctx) ?? [];
-      const body =
-        items.length === 0
-          ? (sr.placeholder ?? placeholder())
-          : bulletList(items.map((it) => `[${it.checked ? "x" : " "}] ${it.text}`));
+      const body = items.length === 0 ? (sr.placeholder ?? placeholder()) : renderDerivedList(items);
       blocks.push(section(heading(2, sr.heading ?? sr.derived), body));
       continue;
     }
@@ -267,6 +265,26 @@ function renderChildList(id: PageId, ctx: IRenderCtx): string {
   const children = ctx.childrenOf(id);
   if (children.length === 0) return placeholder();
   return bulletList(children.map((childId) => ctx.titleOf(childId) ?? childId));
+}
+
+/**
+ * Render a model-declared {@link DerivedList} as a (possibly nested) bullet list. A row
+ * carrying a boolean `checked` renders a checkbox (a derived CHECKLIST, e.g. the plan's
+ * steps); a row without one renders a plain bullet (a table-of-contents entry / group row).
+ * `level` indents nested rows two spaces per level. Pure + deterministic — the order and
+ * shape are exactly the projection's, so equal state renders byte-identically (§10).
+ */
+function renderDerivedList(items: readonly DerivedItem[]): string {
+  return items
+    .map((it) => {
+      const indent = "  ".repeat(Math.max(0, Math.trunc(it.level ?? 0)));
+      const box = it.checked === undefined ? "" : `[${it.checked ? "x" : " "}] `;
+      // Right-trim so an empty-text row collapses to "-" (or "- [ ]") rather than leaving
+      // trailing whitespace — the canonical Markdown contract forbids trailing whitespace,
+      // and joinBlocks only trims the whole block's tail, never interior lines.
+      return `${indent}- ${box}${it.text}`.replace(/\s+$/, "");
+    })
+    .join("\n");
 }
 
 // ────────────────────────────────────────────────────────────────────────────

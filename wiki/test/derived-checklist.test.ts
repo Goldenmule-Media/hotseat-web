@@ -1,9 +1,9 @@
 /**
  * The checklist's "Plan steps" view is DERIVED from the implementation-plan's steps
- * (feature-review.md Item 2) — not a hand-duplicated copy. The plan owns the step list
- * (the canonical breakdown); the checklist stores only per-step done progress. So
- * adding/removing/editing a plan step flows through to the checklist automatically, and
- * progress is tracked locally without duplicating the step text.
+ * (feature-review.md Item 2) — not a hand-duplicated copy. The plan owns BOTH the step list
+ * (the canonical breakdown) AND each step's done-state; the checklist stores no step state at
+ * all. So adding/removing/editing a plan step — and marking one done — flows through to the
+ * checklist automatically, and `markComplete` on the checklist can never freeze progress.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -52,13 +52,13 @@ describe("implementation-checklist: Plan steps are a derived view of the plan", 
     expect(block).toBe("- [ ] Stream the /export endpoint\n- [ ] Add the CLI wrapper");
   });
 
-  it("checks/unchecks a derived step via local progress (no step text stored on the checklist)", async () => {
-    await ws.mutate(checklist, "markStepDone", { stepId: s1 });
+  it("checks/unchecks a derived step via the plan step's own status (the checklist stores no step state)", async () => {
+    // Done-state is recorded on the PLAN step (an element-FSM transition), not on the checklist.
+    await ws.mutate(plan, "markStepDone", { stepId: s1 });
     expect(await planStepsBlock()).toBe("- [x] Stream the /export endpoint\n- [ ] Add the CLI wrapper");
-    // Idempotent — marking done again is a no-op, not a duplicate.
-    await ws.mutate(checklist, "markStepDone", { stepId: s1 });
-    expect(await planStepsBlock()).toBe("- [x] Stream the /export endpoint\n- [ ] Add the CLI wrapper");
-    await ws.mutate(checklist, "markStepTodo", { stepId: s1 });
+    // Reopening the step (markStepTodo) flips the derived box back. Done-ness moves through the
+    // FSM, like the testing-plan's markCasePassed — never a duplicated flag on the checklist.
+    await ws.mutate(plan, "markStepTodo", { stepId: s1 });
     expect(await planStepsBlock()).toBe("- [ ] Stream the /export endpoint\n- [ ] Add the CLI wrapper");
   });
 

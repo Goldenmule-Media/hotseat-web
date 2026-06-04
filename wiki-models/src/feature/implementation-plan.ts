@@ -40,7 +40,15 @@ export const ImplementationPlan = definePageType({
     },
   },
   elements: {
-    step: { fields: { text: { kind: "prose", required: true } } },
+    // Each step owns its done-state (todo ⇄ done). markStepDone/markStepTodo are element-FSM
+    // transitions carrying no content op, so — like the testing-plan's markCasePassed — they
+    // stay legal after the step SET is frozen (`steps` is `mutableIn: ["draft"]`) and after the
+    // plan is sealed (`ready`): progress is recorded as work ships. The checklist's "Plan steps"
+    // view is a pure projection of these statuses, so it can never drift from the plan.
+    step: {
+      fields: { text: { kind: "prose", required: true } },
+      status: { initial: "todo", transitions: [t("todo", "markDone", "done"), t("done", "reopen", "todo")] },
+    },
     question: {
       fields: { text: { kind: "prose", required: true }, answer: { kind: "prose" } },
       status: { initial: "open", transitions: [t("open", "answer", "resolved")] },
@@ -72,6 +80,19 @@ export const ImplementationPlan = definePageType({
         });
         return ops;
       },
+    },
+    // Per-step progress — element-FSM transitions (no content op), so they remain legal after
+    // `markReady` seals the plan, exactly like the testing-plan's markCasePassed (feature-review
+    // Item 5). The checklist projects these statuses as its derived "Plan steps" checklist.
+    markStepDone: {
+      args: zodSchema(z.object({ stepId: z.string() })),
+      target: { section: "steps", field: "items", element: { idArg: "stepId" } },
+      transition: { level: "element", event: "markDone" },
+    },
+    markStepTodo: {
+      args: zodSchema(z.object({ stepId: z.string() })),
+      target: { section: "steps", field: "items", element: { idArg: "stepId" } },
+      transition: { level: "element", event: "reopen" },
     },
     askQuestion: {
       args: zodSchema(z.object({ text: z.string() })),

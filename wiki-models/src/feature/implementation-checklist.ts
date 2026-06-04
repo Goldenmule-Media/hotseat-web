@@ -9,7 +9,7 @@
  * real gate stays on the brief (e.g. `allCasesPassed` on `ship`), and the brief's
  * `checklistComplete` counts only MANUAL tasks.
  */
-import type { ComputedFlag, DeepReadonly, DerivedList, IItem, IRenderCtx, PageId, PageState } from "wiki/authoring";
+import type { ComputedFlag, DeepReadonly, DerivedList, IItem, IRenderCtx, PageId } from "wiki/authoring";
 import { arg, definePageType, t } from "wiki/authoring";
 import { z, zodSchema } from "wiki/authoring";
 
@@ -40,17 +40,14 @@ const allTestingPlanCasesPassed: ComputedFlag = (page, ctx: IRenderCtx) => {
   return f.elements.length >= 1 && f.elements.every((c) => c.status === "passed");
 };
 
-/** Done-step ids recorded locally on this checklist (a `doneStep` element id IS the stepId). */
-function doneStepIds(page: DeepReadonly<PageState>): Set<string> {
-  const f = page.sections.find((s) => s.key === "stepProgress")?.fields["done"];
-  return new Set(f !== undefined && f.kind === "list" ? f.elements.map((e) => e.id) : []);
-}
-
 /**
  * Derived checklist: the implementation-plan's steps (the canonical breakdown) projected
- * onto this checklist, each checked iff its step id is recorded done locally. The plan
- * stays the single source of the step list — no hand-duplication; adding/removing/editing
- * a plan step flows through automatically (feature-review Item 2).
+ * onto this checklist, each checked iff THAT STEP'S OWN status is `done`. Done-state lives
+ * on the plan step (beside its text), recorded via the plan's `markStepDone` — an element-FSM
+ * transition that, like the testing-plan's `markCasePassed`, stays legal after the plan is
+ * sealed. The checklist stores ZERO step state, so it cannot drift from the plan and
+ * `markComplete` cannot freeze progress (feature-review Item 2). Editing the plan's steps
+ * flows through automatically — this is a pure view.
  */
 const planSteps: DerivedList = (page, ctx: IRenderCtx) => {
   const briefId = page.parentId as unknown as PageId | null;
@@ -65,8 +62,7 @@ const planSteps: DerivedList = (page, ctx: IRenderCtx) => {
   const plan = planId !== undefined ? ctx.pageState(planId) : undefined;
   const stepsF = plan?.sections.find((s) => s.key === "steps")?.fields["items"];
   const steps = stepsF !== undefined && stepsF.kind === "list" ? stepsF.elements : [];
-  const done = doneStepIds(page);
-  return steps.map((s) => ({ id: s.id, text: text(s, "text"), checked: done.has(s.id) }));
+  return steps.map((s) => ({ id: s.id, text: text(s, "text"), checked: s.status === "done" }));
 };
 
 export const ImplementationChecklist = definePageType({
@@ -82,22 +78,12 @@ export const ImplementationChecklist = definePageType({
       mutableIn: ["building"],
       fields: { items: { kind: "list", element: "task" } },
     },
-    // Local per-step progress for the DERIVED "Plan steps" view (Item 2). The step text
-    // lives on the plan (canonical); this section stores only which step ids are done —
-    // a `doneStep` element's id IS the plan step id it marks complete.
-    stepProgress: {
-      name: "Step progress",
-      required: true,
-      mutableIn: ["building"],
-      fields: { done: { kind: "list", element: "doneStep" } },
-    },
   },
   elements: {
     task: {
       fields: { text: { kind: "prose", required: true } },
       status: { initial: "todo", transitions: [t("todo", "check", "done"), t("done", "uncheck", "todo")] },
     },
-    doneStep: { fields: { stepId: { kind: "scalar", required: true } } },
   },
   sectionSet: { mode: "closed" },
   computed: { "all-cases-passed": allTestingPlanCasesPassed },
@@ -148,27 +134,6 @@ export const ImplementationChecklist = definePageType({
       produces: (_page, args) => [
         { op: "removeElement", section: "tasks", field: "items", id: (args as { taskId: string }).taskId },
       ],
-    },
-    // Record/clear progress on a DERIVED plan step (idempotent; the doneStep id == stepId).
-    markStepDone: {
-      args: zodSchema(z.object({ stepId: z.string() })),
-      target: { section: "stepProgress", field: "done" },
-      produces: (page, args) => {
-        const stepId = (args as { stepId: string }).stepId;
-        if (doneStepIds(page).has(stepId)) return [];
-        return [
-          { op: "addElement", section: "stepProgress", field: "done", id: stepId, fields: { stepId: { kind: "scalar", value: stepId } } },
-        ];
-      },
-    },
-    markStepTodo: {
-      args: zodSchema(z.object({ stepId: z.string() })),
-      target: { section: "stepProgress", field: "done" },
-      produces: (page, args) => {
-        const stepId = (args as { stepId: string }).stepId;
-        if (!doneStepIds(page).has(stepId)) return [];
-        return [{ op: "removeElement", section: "stepProgress", field: "done", id: stepId }];
-      },
     },
     markComplete: { args: zodSchema(empty), transition: { level: "page", event: "markComplete" } },
   },

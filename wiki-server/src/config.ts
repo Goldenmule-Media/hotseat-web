@@ -8,6 +8,9 @@
  * server has no request middleware, so those live in a reverse proxy (DESIGN §9).
  */
 
+import { existsSync, readdirSync } from "node:fs";
+import { basename, extname, join, resolve } from "node:path";
+
 /** Fully-resolved server configuration. */
 export interface WikiServerConfig {
   /** Bind address. Default "127.0.0.1" (loopback — explicit opt-in to expose). */
@@ -46,6 +49,16 @@ export interface WikiServerConfig {
    * embedded `wiki-mcp` starts, so the engine gains its page types via dynamic import.
    */
   readonly models: { readonly id: string; readonly specifier: string }[];
+  /**
+   * A DIRECTORY of model bundles to load at boot (ADR-M6). Every bundle found by
+   * {@link discoverModelBundles} is loaded in addition to {@link models}; an explicit
+   * `--models` entry of the same id overrides a discovered one. Point it at the source
+   * tree (`wiki-models/src` — each `<bundle>/index.ts` is a bundle, run under tsx) or at a
+   * built tree (`wiki-models/dist` — each `<bundle>.js`). A discovered FILE that turns out
+   * not to be a bundle (a build's shared chunk / sourcemap) is skipped with a warning at
+   * load time, never aborting boot. Undefined = scan nothing.
+   */
+  readonly modelsDir?: string;
 }
 
 /** Loopback hosts that need no reverse proxy / auth to stay private. */
@@ -105,6 +118,48 @@ function parseModels(raw: string): { id: string; specifier: string }[] {
     });
 }
 
+/** A bundle index file name (source or built). */
+const BUNDLE_INDEX_NAMES = ["index.ts", "index.js", "index.mjs"] as const;
+/** Bundle file extensions in a flat (built) directory layout. */
+const BUNDLE_FILE_EXTS = new Set([".js", ".mjs", ".ts"]);
+
+/**
+ * Discover model bundles under a directory (`--models-dir` / `WIKI_SERVER_MODELS_DIR`),
+ * returning `{ id, specifier }` (absolute path) for each, sorted by id for a deterministic
+ * load order. Two layouts are supported:
+ *  - SUBDIRECTORY (source, e.g. `wiki-models/src`): each `<bundle>/index.{ts,js,mjs}` is a
+ *    bundle whose id is the directory name;
+ *  - FLAT (built, e.g. `wiki-models/dist`): each `<bundle>.{js,mjs,ts}` is a CANDIDATE whose id
+ *    is the basename (sourcemaps / `.d.ts` are skipped). A flat tree may also hold a build's
+ *    shared chunks, which look like `.js` files; those aren't bundles, so the CALLER load-tests
+ *    each candidate and skips one that doesn't default-export a page-type array (see main.ts).
+ * Dot-prefixed entries are ignored. Throws a descriptive error if `dir` can't be read.
+ */
+export function discoverModelBundles(dir: string): { id: string; specifier: string }[] {
+  const root = resolve(dir);
+  let entries: import("node:fs").Dirent[];
+  try {
+    entries = readdirSync(root, { withFileTypes: true });
+  } catch (err) {
+    throw new Error(`--models-dir "${dir}" could not be read (${(err as Error).message})`);
+  }
+  const found: { id: string; specifier: string }[] = [];
+  for (const entry of entries) {
+    if (entry.name.startsWith(".")) continue;
+    if (entry.isDirectory()) {
+      const index = BUNDLE_INDEX_NAMES.map((n) => join(root, entry.name, n)).find((p) => existsSync(p));
+      if (index !== undefined) found.push({ id: entry.name, specifier: index });
+      continue;
+    }
+    if (entry.isFile()) {
+      const ext = extname(entry.name);
+      if (!BUNDLE_FILE_EXTS.has(ext) || entry.name.endsWith(".d.ts")) continue;
+      found.push({ id: basename(entry.name, ext), specifier: join(root, entry.name) });
+    }
+  }
+  return found.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
 /**
  * Resolve the effective {@link WikiServerConfig} from CLI flags and environment,
  * applying defaults. Pure over its inputs except for the `logFormat: "auto"`
@@ -153,8 +208,9 @@ export function resolveConfig(
   const mcpPort = toInt(pick("mcp-port", "WIKI_SERVER_MCP_PORT", String(port + 2)), "--mcp-port");
   const logBuffer = toInt(pick("log-buffer", "WIKI_SERVER_LOG_BUFFER", "1000"), "--log-buffer");
   const models = parseModels(pick("models", "WIKI_SERVER_MODELS", ""));
+  const modelsDir = flags["models-dir"] ?? env.WIKI_SERVER_MODELS_DIR;
 
-  return { host, port, storage, dataDir, longPollTimeout, logFormat, controlPort, mcpPort, models, logBuffer };
+  return { host, port, storage, dataDir, longPollTimeout, logFormat, controlPort, mcpPort, models, modelsDir, logBuffer };
 }
 
 /**

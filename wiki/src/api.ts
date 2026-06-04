@@ -686,11 +686,21 @@ export interface RenderConfig {
  */
 export type ComputedFlag = (page: DeepReadonly<PageState>, ctx: IRenderCtx) => boolean;
 
-/** One row of a {@link DerivedList}: a stable id, display text, and checked state. */
+/**
+ * One row of a {@link DerivedList}: a stable `id` and display `text`, plus optional
+ * presentation hints so a derived section can render either a CHECKLIST or a (possibly
+ * nested) plain list such as a table of contents:
+ *  - `checked` present → a checkbox `[x]`/`[ ]` (a derived checklist, e.g. the plan's
+ *    steps); omitted → a plain bullet (a TOC entry / group row).
+ *  - `level` → nesting depth (0 = top level); each level indents the bullet two spaces,
+ *    so a grouped or recursive outline reads as a nested list. Defaults to 0.
+ * Order is the projection's own order; like every renderer it must be deterministic.
+ */
 export interface DerivedItem {
   readonly id: string;
   readonly text: string;
-  readonly checked: boolean;
+  readonly checked?: boolean;
+  readonly level?: number;
 }
 
 /**

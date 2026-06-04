@@ -28,7 +28,7 @@ import { createWikiMcp, resolveConfig as resolveMcpConfig, type McpTransport, ty
 // `node dist/main.js` (raw Node ESM needs explicit extensions). This differs from
 // `wiki/`, which is consumed as TS source and so imports extensionless. The
 // `wiki-mcp` / `@durable-streams/server` imports above are bare package specifiers.
-import { configWarnings, resolveConfig, type WikiServerConfig } from "./config.js";
+import { configWarnings, discoverModelBundles, resolveConfig, type WikiServerConfig } from "./config.js";
 import { createLogger, type IConsolidatingLogger } from "./logger.js";
 import { startControlServer, type ControlServer } from "./control.js";
 
@@ -152,12 +152,34 @@ export async function startWikiServer(
 
   // Load boot-time model bundles (ADR-M6) so the engine gains its page types via dynamic
   // import; `mcp.models.load` awaits the rebind + reproject. (Absent when a test stubs the
-  // hosted module out.)
+  // hosted module out.) Bundles discovered under `--models-dir` load alongside the explicit
+  // `--models`; an explicit entry of the same id wins. Discovered loads are RESILIENT — a
+  // file that isn't a bundle (e.g. a shared chunk in a built tree, or a sourcemap) is skipped
+  // with a warning rather than aborting boot; an explicit `--models` entry still hard-fails.
   const models = mcp?.models;
   if (models !== undefined) {
+    const explicit = new Set(cfg.models.map((m) => m.id));
+    const discovered = cfg.modelsDir !== undefined ? discoverModelBundles(cfg.modelsDir) : [];
+    if (cfg.modelsDir !== undefined) {
+      serverLog.info("model bundles discovered", { dir: cfg.modelsDir, ids: discovered.map((m) => m.id) });
+      if (discovered.length === 0) serverLog.warn("no model bundles discovered", { dir: cfg.modelsDir });
+    }
+    for (const m of discovered) {
+      if (explicit.has(m.id)) continue; // an explicit --models entry of the same id wins (loaded below)
+      try {
+        await models.load(m.id, m.specifier);
+        serverLog.info("model bundle loaded", { id: m.id, specifier: m.specifier, source: "discovered" });
+      } catch (err) {
+        serverLog.warn("skipped unloadable discovered bundle", {
+          id: m.id,
+          specifier: m.specifier,
+          error: (err as Error).message,
+        });
+      }
+    }
     for (const m of cfg.models) {
       await models.load(m.id, m.specifier);
-      serverLog.info("model bundle loaded", { id: m.id, specifier: m.specifier });
+      serverLog.info("model bundle loaded", { id: m.id, specifier: m.specifier, source: "explicit" });
     }
   }
 
