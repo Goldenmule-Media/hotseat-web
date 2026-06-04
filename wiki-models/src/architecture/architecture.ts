@@ -97,7 +97,9 @@ export const Architecture = definePageType({
       name: "Summary",
       required: true,
       mutableIn: editable,
-      fields: { kind: { kind: "scalar" }, body: { kind: "prose" } },
+      // The `kind` enum is declared on the FIELD (not just setKind's arg) so the engine
+      // enforces it on every path — including the auto-generated setSummaryKind command.
+      fields: { kind: { kind: "scalar", schema: zodSchema(z.enum(KINDS)) }, body: { kind: "prose" } },
     },
     purpose: { name: "Purpose", required: true, mutableIn: editable, fields: { body: { kind: "prose" } } },
     usage: { name: "Usage", required: true, mutableIn: editable, fields: { body: { kind: "prose" } } },
@@ -127,13 +129,13 @@ export const Architecture = definePageType({
       fields: {
         file: { kind: "scalar", required: true },
         symbol: { kind: "scalar" },
-        kind: { kind: "scalar" },
+        kind: { kind: "scalar", schema: zodSchema(z.enum(CODEREF_KINDS)) },
       },
     },
     dependency: {
       fields: {
         target: { kind: "ref", required: true, targetKinds: ["page"] },
-        role: { kind: "scalar", required: true },
+        role: { kind: "scalar", required: true, schema: zodSchema(z.enum(ROLES)) },
         note: { kind: "prose" },
       },
     },

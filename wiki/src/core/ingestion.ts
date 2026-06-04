@@ -9,17 +9,19 @@
  *   form, and ref integrity over the whole page (§7).
  */
 import type {
+  FieldDecl,
   IBlock,
   IField,
   IInline,
   IPageNode,
+  IPageTypeDef,
   IWorkspaceState,
   Mark,
   PageId,
   RefTarget,
   ISection,
 } from "../api";
-import { BlockNormalFormError, FieldKindError, RefIntegrityError } from "./errors";
+import { BlockNormalFormError, FieldKindError, RefIntegrityError, ValidationError } from "./errors";
 import type { Registry } from "./registry";
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -299,10 +301,86 @@ function validateSection(state: IWorkspaceState, page: IPageNode, section: ISect
   for (const f of Object.values(section.fields)) validateField(state, page, f);
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// Declared-constraint validation (§6/§9.2) — required fields + scalar field schemas
+//
+// The engine auto-generates structural commands (setField / setElementField / addElement)
+// that pass caller values straight to the reducer; without this pass they would bypass a
+// page type's declared `required` flags and scalar `schema` (e.g. an enum). Enforced here,
+// on the post-op state, so EVERY write path (declarative, produces, generated) is covered
+// uniformly. This runs only on the write-side dry-run — never on projection/fold — so it
+// constrains new writes without rejecting already-committed history.
+// ────────────────────────────────────────────────────────────────────────────
+
+/** A scalar value must satisfy its FieldDecl's declared `schema` (e.g. an enum). An empty
+ *  string on a NON-required scalar is treated as unset — required SECTIONS materialize their
+ *  scalars to `""` at create (operations.materializeSectionFields), and that empty must not be
+ *  rejected before a real value is set. A required scalar's `""` IS validated (and so rejected
+ *  by an enum), since required element fields are never materialized — an empty there is a real,
+ *  invalid caller value (e.g. a generated setElementField setting `dependency.role` to `""`).
+ *  Surfaces the schema's own {@link ValidationError} (stable `VALIDATION` code) so the
+ *  generated path matches the curated command's arg-validation, with the field location added. */
+function validateScalarSchema(value: IField, decl: FieldDecl, where: string): void {
+  if (decl.kind !== "scalar" || decl.schema === undefined) return;
+  if (value.kind !== "scalar") return;
+  if (value.value === "" && decl.required !== true) return;
+  try {
+    decl.schema.parse(value.value);
+  } catch (err) {
+    if (err instanceof ValidationError) throw new ValidationError(`${where} has an invalid value: ${err.message}`, err.issues);
+    throw err;
+  }
+}
+
+/** Every FieldDecl marked `required` must be present in the materialized field set. */
+function validateRequiredPresent(
+  fields: Record<string, IField>,
+  decls: Readonly<Record<string, FieldDecl>>,
+  where: string,
+): void {
+  for (const [key, decl] of Object.entries(decls)) {
+    if (decl.required === true && fields[key] === undefined) {
+      throw new FieldKindError(`${where} is missing required field "${key}".`);
+    }
+  }
+}
+
+/** Enforce a page type's DECLARED field constraints (required + scalar schema) over a
+ *  section's own fields and its list elements' fields. Top-level declared sections only
+ *  (ad-hoc / nested sections carry no top-level decl and are left to the grammar check). */
+function validateDeclaredConstraints(section: ISection, def: IPageTypeDef, type: string): void {
+  const sd = def.sections[section.key];
+  if (sd === undefined) return;
+  validateRequiredPresent(section.fields, sd.fields, `${type}.${section.key}`);
+  for (const [fk, fd] of Object.entries(sd.fields)) {
+    const f = section.fields[fk];
+    if (f === undefined) continue;
+    if (fd.kind === "scalar") {
+      validateScalarSchema(f, fd, `${type}.${section.key}.${fk}`);
+    } else if (fd.kind === "list" && f.kind === "list") {
+      const elDecl = def.elements?.[fd.element];
+      if (elDecl === undefined) continue;
+      for (const el of f.elements) {
+        const at = `${type}.${section.key}.${fk}[${el.id}]`;
+        validateRequiredPresent(el.fields, elDecl.fields, at);
+        for (const [efk, efd] of Object.entries(elDecl.fields)) {
+          const ef = el.fields[efk];
+          if (ef !== undefined && efd.kind === "scalar") validateScalarSchema(ef, efd, `${at}.${efk}`);
+        }
+      }
+    }
+  }
+}
+
 /**
  * Engine well-formedness over a page's resulting sections (§7): field-kind grammar,
- * no-markdown-in-text-leaf, block normal form, and ref integrity (deep). Pure.
+ * no-markdown-in-text-leaf, block normal form, ref integrity (deep), PLUS the page type's
+ * declared `required`/scalar-`schema` constraints (so generated structural commands can't
+ * bypass them). Pure.
  */
-export function validatePage(state: IWorkspaceState, page: IPageNode, _registry: Registry): void {
+export function validatePage(state: IWorkspaceState, page: IPageNode, registry: Registry): void {
   for (const section of page.sections) validateSection(state, page, section);
+  if (!registry.has(page.type)) return;
+  const def = registry.page(page.type);
+  for (const section of page.sections) validateDeclaredConstraints(section, def, page.type);
 }

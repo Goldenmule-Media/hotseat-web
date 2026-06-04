@@ -155,3 +155,45 @@ describe("architecture: composes under a toc Architecture Overview", () => {
     await expect(ws.mutate(node, "addDependency", { targetId: String(other), role: "depends-on" })).rejects.toThrow();
   });
 });
+
+describe("architecture: declared field constraints hold even on auto-generated structural commands", () => {
+  let harness: ITestWiki;
+  let wiki: IWiki;
+  let ws: IWorkspaceHandle;
+  let node: PageId;
+
+  beforeAll(async () => {
+    harness = await createTestWiki(architecturePageTypes);
+    wiki = harness.wiki;
+    ws = await wiki.createWorkspace({ name: "Arch constraints" });
+    node = (await ws.createPage("architecture", { title: "Node", parentId: null })).value;
+  });
+
+  afterAll(async () => {
+    await harness.stop();
+  });
+
+  it("enforces the kind enum on the generated setSummaryKind (not just the curated setKind)", async () => {
+    await expect(ws.mutate(node, "setSummaryKind", { value: "not-a-kind" })).rejects.toThrow();
+    await ws.mutate(node, "setSummaryKind", { value: "service" }); // a valid enum value still works
+    expect(block(await ws.toMarkdown(node), "Kind")).toBe("service");
+  });
+
+  it("enforces a required element field on the generated addElement (codeRef.file)", async () => {
+    await expect(
+      ws.mutate(node, "addCodeReferencesItemsElement", { fields: { kind: { kind: "scalar", value: "function" } } }),
+    ).rejects.toThrow();
+  });
+
+  it("enforces an element-field enum (incl. empty) on the generated setElementField", async () => {
+    const target = (await ws.createPage("architecture", { title: "Target", parentId: null })).value;
+    const dp = (await ws.mutate(node, "addDependency", { targetId: String(target), role: "calls" })).value as {
+      dependencyId: string;
+    };
+    await expect(ws.mutate(node, "setDependenciesItemsRole", { id: dp.dependencyId, value: "not-a-role" })).rejects.toThrow();
+    // A REQUIRED enum element field also rejects "" — element fields are never materialized, so an
+    // empty there is a real, invalid value (unlike a materialized-empty section scalar).
+    await expect(ws.mutate(node, "setDependenciesItemsRole", { id: dp.dependencyId, value: "" })).rejects.toThrow();
+    await ws.mutate(node, "setDependenciesItemsRole", { id: dp.dependencyId, value: "owns" }); // a valid value still works
+  });
+});
