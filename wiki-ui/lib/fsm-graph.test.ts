@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { FsmDescriptor } from "wiki";
-import { buildFsmGraph } from "./fsm-graph";
+import type { FsmDescriptor, IMutationDescriptor } from "wiki";
+import { buildFsmGraph, resolveTransitionTarget, type EdgeRef } from "./fsm-graph";
 
 const fsm: FsmDescriptor = {
   type: "feature-brief",
@@ -48,5 +48,38 @@ describe("buildFsmGraph", () => {
   it("defaults an outgoing edge with no overlay entry to available", () => {
     const model = buildFsmGraph(fsm, "review", []);
     expect(edge(model, "review", "ship").cls).toBe("available");
+  });
+});
+
+describe("resolveTransitionTarget", () => {
+  const descriptors: readonly IMutationDescriptor[] = [
+    { name: "requestChanges", argsSchema: { type: "object" }, available: true },
+    { name: "ship", argsSchema: { type: "object" }, available: false, unmet: "all testing-plan cases must be passed" },
+  ];
+  const ref = (event: string, cls: EdgeRef["cls"], from = "review", to = "x"): EdgeRef => ({ event, from, to, cls });
+
+  it("resolves an available edge to a runnable target", () => {
+    const t = resolveTransitionTarget(ref("requestChanges", "available", "review", "building"), descriptors);
+    expect(t).not.toBeNull();
+    expect(t!.descriptor.name).toBe("requestChanges");
+    expect(t!.available).toBe(true);
+    expect(t!.from).toBe("review");
+    expect(t!.to).toBe("building");
+    expect(t!.unmet).toBeUndefined();
+  });
+
+  it("resolves a blocked edge to a read-only target carrying the descriptor's unmet reason", () => {
+    const t = resolveTransitionTarget(ref("ship", "blocked", "review", "shipped"), descriptors);
+    expect(t).not.toBeNull();
+    expect(t!.available).toBe(false);
+    expect(t!.unmet).toMatch(/cases/);
+  });
+
+  it("ignores an inert edge", () => {
+    expect(resolveTransitionTarget(ref("requestChanges", "inert"), descriptors)).toBeNull();
+  });
+
+  it("ignores an edge whose command is absent from the overlay", () => {
+    expect(resolveTransitionTarget(ref("unknownCmd", "available"), descriptors)).toBeNull();
   });
 });

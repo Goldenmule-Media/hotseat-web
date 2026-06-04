@@ -14,7 +14,7 @@
  * live for the tab's lifetime (a browser app keeps few open); there is no ref-counted
  * teardown in v1.
  */
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import type {
   IEventEnvelope,
   IMutationDescriptor,
@@ -396,4 +396,58 @@ export function usePageMutations(workspaceId: WorkspaceId, pageId: PageId): Page
   }, [workspaceId, pageId, ws.lastEventAt]);
 
   return state;
+}
+
+export interface PageMutator {
+  /** Run a page-scoped command; resolves `true` on commit, `false` on a rejected write
+   *  (with {@link PageMutator.error} set). The committed event flows back through the
+   *  live tail, so the caller does not refresh any view itself. */
+  run(command: string, args: Record<string, unknown>): Promise<boolean>;
+  readonly pending: boolean;
+  /** The engine's `ValidationError` / precondition message, formatted; `null` when clear. */
+  readonly error: string | null;
+  reset(): void;
+}
+
+/**
+ * The page's WRITE path (feature: wiki-ui interactive FSM transitions) — the single place
+ * the engine handle's `mutate` is called. It reuses the very {@link IWorkspaceHandle} the
+ * read side already opened (constraint #3): no second engine, no server endpoint, no
+ * polling. On success the existing {@link WorkspaceSession} tail receives the commit and
+ * re-projects the page (status + descriptors), so this hook never touches view state
+ * beyond clearing `pending`. A rejected write is classified to a readable `error`.
+ */
+export function usePageMutator(workspaceId: WorkspaceId, pageId: PageId): PageMutator {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = useCallback(
+    async (command: string, args: Record<string, unknown>): Promise<boolean> => {
+      const session = sessionFor(workspaceId);
+      if (session === null) {
+        setError("Engine not ready.");
+        return false;
+      }
+      setPending(true);
+      setError(null);
+      try {
+        const h = await session.handle();
+        await h.mutate(pageId, command, args);
+        setPending(false);
+        return true;
+      } catch (e) {
+        setError(classify(e).message);
+        setPending(false);
+        return false;
+      }
+    },
+    [workspaceId, pageId],
+  );
+
+  const reset = useCallback(() => {
+    setError(null);
+    setPending(false);
+  }, []);
+
+  return { run, pending, error, reset };
 }

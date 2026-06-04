@@ -11,7 +11,7 @@
  * No React / React Flow here so it is trivially unit-testable; <FsmGraph> lays this out
  * (dagre) and renders it.
  */
-import type { FsmDescriptor } from "wiki";
+import type { FsmDescriptor, IMutationDescriptor } from "wiki";
 
 export type EdgeClass = "available" | "blocked" | "inert";
 
@@ -80,4 +80,52 @@ export function buildFsmGraph(
   });
 
   return { nodes, edges };
+}
+
+// ── interactive transitions (feature: wiki-ui interactive FSM transitions) ──────
+
+/**
+ * The clicked-edge context handed to the transition form: which command to run, the
+ * states it moves between, whether it is runnable now, and — when blocked — why.
+ */
+export interface TransitionTarget {
+  /** The command behind the edge; `descriptor.name === FsmTransition.event`. */
+  readonly descriptor: IMutationDescriptor;
+  readonly from: string;
+  readonly to: string;
+  /** From the overlay: runnable now (the edge was `available`). */
+  readonly available: boolean;
+  /** When blocked, the first failed precondition's reason (from the descriptor). */
+  readonly unmet?: string;
+}
+
+/** The minimal per-edge data the graph carries so a click can be resolved purely. */
+export interface EdgeRef {
+  readonly event: string;
+  readonly from: string;
+  readonly to: string;
+  readonly cls: EdgeClass;
+}
+
+/**
+ * Resolve a clicked edge to a runnable/blocked {@link TransitionTarget}, or `null` when
+ * the edge is not interactive: `inert` edges (they don't leave the current state) and
+ * edges whose command is absent from the overlay are ignored. Pure, so the interaction
+ * rule is unit-testable without React Flow. `available` maps to a runnable form; `blocked`
+ * maps to a read-only form carrying the descriptor's `unmet` reason.
+ */
+export function resolveTransitionTarget(
+  edge: EdgeRef,
+  descriptors: readonly IMutationDescriptor[],
+): TransitionTarget | null {
+  if (edge.cls === "inert") return null;
+  const descriptor = descriptors.find((d) => d.name === edge.event);
+  if (descriptor === undefined) return null;
+  return {
+    descriptor,
+    from: edge.from,
+    to: edge.to,
+    available: edge.cls === "available",
+    ...(edge.cls === "blocked" && descriptor.unmet !== undefined ? { unmet: descriptor.unmet } : {}),
+  };
 }

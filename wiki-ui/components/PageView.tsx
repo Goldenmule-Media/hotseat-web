@@ -125,7 +125,13 @@ export function PageView({
       </header>
 
       {mode === "model" && fsm !== null ? (
-        <FsmGraph fsm={fsm} currentStatus={currentStatus} overlay={descriptors} />
+        <FsmGraph
+          fsm={fsm}
+          currentStatus={currentStatus}
+          descriptors={descriptors}
+          workspaceId={workspaceId}
+          pageId={pageId}
+        />
       ) : loading && markdown === null ? (
         <p className="muted">Loading page…</p>
       ) : (
