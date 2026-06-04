@@ -294,6 +294,39 @@ code {
   border-bottom-color: #fff;
 }
 
+/* ── model-inspection graph ──────────────────────────────────────────────── */
+.fsm-graph-canvas {
+  height: 480px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+/* Floating edges route by node geometry, not handles — hide the default handle dots. */
+.fsm-graph .react-flow__handle {
+  opacity: 0;
+}
+.fsm-edge-label {
+  position: absolute;
+  background: #fff;
+  color: #0f172a;
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 1px 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.fsm-blocked {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0 0;
+}
+.fsm-blocked li {
+  color: var(--amber);
+  padding: 2px 0;
+}
+
 .markdown h1 {
   margin-top: 0;
 }
