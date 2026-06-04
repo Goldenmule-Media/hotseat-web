@@ -35,6 +35,7 @@ import type {
   WorkspaceId,
 } from "../api";
 import {
+  BatchCommandError,
   ConcurrencyError,
   FieldKindError,
   ItemNotFoundError,
@@ -43,6 +44,7 @@ import {
   PreconditionUnmetError,
   SectionContractError,
   StaleEditError,
+  WikiError,
   WorkspaceArchivedError,
 } from "./errors";
 import type { IBlock, TextEdit } from "../api";
@@ -130,6 +132,14 @@ export interface PageRequest {
   readonly pageId: PageId;
   readonly command: string;
   readonly args: unknown;
+  readonly commandId?: string;
+  readonly actor?: string;
+}
+
+/** An ordered atomic batch of commands on ONE page. */
+export interface PageBatchRequest {
+  readonly pageId: PageId;
+  readonly commands: readonly { readonly command: string; readonly args: unknown }[];
   readonly commandId?: string;
   readonly actor?: string;
 }
@@ -254,6 +264,91 @@ export class CommandBus {
       events.push(...childEvents);
     }
     return { events, result: outcome.result };
+  }
+
+  /**
+   * Run an ordered batch of page commands as ONE atomic commit (§5). Reuses
+   * {@link commit} verbatim — so OCC rebase-retry, idempotency (`commandId`),
+   * snapshotting, fan-out, and the single committed-head token all come for free; the
+   * whole batch re-decides wholesale on a 409. The one new ingredient is the in-flight
+   * fold ({@link decidePageBatch}).
+   *
+   * History label: every event in the batch is stamped `meta.command = "mutateMany"`
+   * (commit applies one shared meta per commit) rather than each command's own semantic
+   * label — DELIBERATELY: the batch is the audit unit. The SECTION_OPS payload still
+   * fully describes each op; nothing reads `meta.command` functionally (it is history
+   * metadata, §9.4). A per-command `label`-arg override is likewise not honored in a batch.
+   */
+  async runPageBatch(projection: BusProjection, req: PageBatchRequest): Promise<CommitOutcome> {
+    const decide = (state: IWorkspaceState) => this.decidePageBatch(state, req);
+    return this.commit(projection, decide, {
+      actor: req.actor,
+      commandId: req.commandId,
+      command: "mutateMany",
+      defaultPageId: req.pageId,
+    });
+  }
+
+  /**
+   * Decide an ordered batch by FOLDING each command over an evolving in-flight copy of
+   * the state: decide cₖ against the state left by c₀…cₖ₋₁, apply cₖ's events to the
+   * copy, repeat — so an order-dependent batch (set a field, then a transition gated on
+   * it) is legal. The accumulated events are handed to {@link commit} as one array, so
+   * the whole batch lands (or fails) atomically. The clone is essential: `decide` MUST
+   * NOT mutate the passed-in `state` (commit re-invokes it against the live projection
+   * on every rebase attempt). A command's rejection throws {@link BatchCommandError}
+   * before any append, so nothing is committed. The injected `now`/`newId` for the REAL
+   * events are minted by {@link commit}'s `envelope`; the fold's envelopes are throwaway
+   * (a fixed id + one timestamp) and only drive the in-memory apply.
+   */
+  private decidePageBatch(
+    state: IWorkspaceState,
+    req: PageBatchRequest,
+  ): { events: DomainEvent[]; result: unknown } {
+    if (req.commands.length === 0) return { events: [], result: { results: [] } };
+    const work = structuredClone(state);
+    const foldNow = this.services.now();
+    const events: DomainEvent[] = [];
+    const results: unknown[] = [];
+    for (let i = 0; i < req.commands.length; i++) {
+      const { command, args } = req.commands[i]!;
+      let outcome: { events: DomainEvent[]; result: unknown };
+      try {
+        outcome = this.decidePageCascading(work, {
+          pageId: req.pageId,
+          command,
+          args,
+          ...(req.actor !== undefined ? { actor: req.actor } : {}),
+          ...(req.commandId !== undefined ? { commandId: req.commandId } : {}),
+        });
+      } catch (cause) {
+        // Atomic: nothing has been appended (we only mutated the throwaway clone), so
+        // the whole batch aborts. Pin the failing index for the caller to self-correct.
+        if (cause instanceof WikiError) throw new BatchCommandError(i, command, cause);
+        throw cause;
+      }
+      results.push(outcome.result);
+      // Fold this command's events into the working copy so the NEXT command decides
+      // against post-command state. These envelopes are throwaway — only the events
+      // (with their already-minted ids in the payload) flow on to the real commit.
+      for (const ev of outcome.events) {
+        const pageId = ev.pageId ?? (isStructuralEvent(ev.type) ? undefined : req.pageId);
+        const env: IEventEnvelope = {
+          eventId: "batch-fold",
+          streamId: work.id,
+          ...(pageId !== undefined ? { pageId } : {}),
+          version: work.version,
+          type: ev.type,
+          schemaVersion: this.schemaVersionFor(work, ev, pageId),
+          payload: ev.payload,
+          meta: { occurredAt: foldNow, ...(req.actor !== undefined ? { actor: req.actor } : {}) },
+        };
+        applyWorkspace(work, env, this.registry);
+        work.version += 1;
+      }
+      events.push(...outcome.events);
+    }
+    return { events, result: { results } };
   }
 
   /** Pure page-command decision (resolve → validate → gate → effect → check). */

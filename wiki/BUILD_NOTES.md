@@ -113,7 +113,7 @@ author keeps them consistent (tested).
 ## 3. Command bus (`core/command-bus.ts`) — the hot path (DESIGN §5, §15)
 
 `CommandBus` operates on ONE workspace projection (state + full in-memory `events[]` + cursor) given
-by the handle. Two entry points:
+by the handle. Three entry points (`runStructural`, `runPage`, `runPageBatch`):
 
 - `structural(state, {handlerName, args, commandId?, actor?})`: validate light, ensure workspace
   active (else `WorkspaceArchivedError`), call the structure handler → `{events, result}`, then
@@ -128,6 +128,15 @@ by the handle. Two entry points:
   else `MutationNotAllowedError`. Build `ctx: ICommandContext` (newId, now, actor, commandId, related
   reader over `state`). `const {events, result} = cmd.produces(pageStateView(node), parsed, ctx)`.
   Then **commit**.
+- `pageBatch(state, {pageId, commands[], …})` (powers `IWorkspaceHandle.mutateMany`): an ATOMIC
+  ordered batch on one page. `decidePageBatch` clones the state (`structuredClone` — `decide` must
+  stay pure for commit's rebase re-runs), then FOLDS each command over the clone: decide cₖ (via the
+  same `decidePageCascading`) against the state left by c₀…cₖ₋₁, apply its events to the clone with a
+  throwaway envelope (fixed `eventId "batch-fold"`, one `foldNow`) so cₖ₊₁ sees them, accumulate. The
+  concatenated events are handed to the SAME **commit** as one array-message — so OCC rebase-retry
+  (re-clones + re-folds wholesale on 409), idempotency, snapshot, fan-out, and the single token all
+  come for free. A command's rejection throws `BatchCommandError(index, command, cause)` before any
+  append (nothing commits). Events are stamped `meta.command = "mutateMany"` (the batch is the audit unit).
 
 **commit(state, rawEvents, meta):**
 1. `expectedVersion = state.version`.

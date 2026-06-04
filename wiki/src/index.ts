@@ -82,10 +82,15 @@ export type {
   // IPageView
   IMutationDescriptor,
   IPageView,
+  // atomic batch (IWorkspaceHandle.mutateMany)
+  BatchResult,
   // FSM transition + its serializable descriptor (IWiki.fsmOf)
   ITransition,
   FsmTransition,
   FsmDescriptor,
+  // type-level authoring surface (IWiki.describeType)
+  TypeCommandDescriptor,
+  TypeDescriptor,
   // authoring API
   ISchema,
   ICommandContext,
@@ -138,6 +143,7 @@ export {
   BlockNormalFormError,
   PreconditionUnmetError,
   StaleEditError,
+  BatchCommandError,
 } from "./core/errors";
 export type { SchemaIssue } from "./core/errors";
 

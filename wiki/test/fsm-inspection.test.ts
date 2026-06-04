@@ -54,6 +54,78 @@ describe("IWiki.fsmOf — serializable status-FSM descriptor", () => {
   });
 });
 
+describe("IWiki.describeType / pageTypes — instance-free authoring surface", () => {
+  let harness: ITestWiki;
+  let wiki: IWiki;
+
+  beforeAll(async () => {
+    harness = await createTestWiki(featurePageTypes);
+    wiki = harness.wiki;
+  });
+  afterAll(async () => {
+    await harness.stop();
+  });
+
+  it("lists every registered page type", () => {
+    const types = wiki.pageTypes();
+    expect(types).toEqual(
+      expect.arrayContaining([
+        "feature-brief",
+        "feature-spec",
+        "implementation-plan",
+        "implementation-checklist",
+        "testing-plan",
+      ]),
+    );
+  });
+
+  it("describes feature-brief: FSM + declared commands with real arg schemas, no instance needed", () => {
+    const desc = wiki.describeType("feature-brief");
+    expect(desc.type).toBe("feature-brief");
+    expect(desc.fsm.initial).toBe("draft");
+    expect(desc.fsm.transitions.length).toBeGreaterThan(0);
+
+    // A declared content command surfaces its REAL args schema + result + the section
+    // it targets — the exact thing an author otherwise had to read model source for.
+    const addComponent = desc.commands.find((c) => c.name === "addComponent");
+    expect(addComponent).toBeDefined();
+    expect(addComponent!.generated).toBe(false);
+    const props = (addComponent!.argsSchema as { properties?: Record<string, unknown>; required?: string[] });
+    expect(props.properties).toHaveProperty("name");
+    expect(props.required).toContain("name");
+    expect(addComponent!.resultSchema).toBeDefined();
+
+    // A declared page-transition command carries the FSM event it fires.
+    const ship = desc.commands.find((c) => c.name === "ship");
+    expect(ship?.transition).toEqual({ level: "page", event: "ship" });
+  });
+
+  it("includes generated structural commands (empty args schema, target only), declared first", () => {
+    const desc = wiki.describeType("feature-brief");
+    const declared = desc.commands.filter((c) => !c.generated);
+    const generated = desc.commands.filter((c) => c.generated);
+    expect(declared.length).toBeGreaterThan(0);
+    expect(generated.length).toBeGreaterThan(0);
+    // Declared commands come before generated ones (stable ordering).
+    const firstGenerated = desc.commands.findIndex((c) => c.generated);
+    const lastDeclared = desc.commands.map((c) => c.generated).lastIndexOf(false);
+    expect(lastDeclared).toBeLessThan(firstGenerated);
+    // A generated command mirrors describeMutations: empty args schema + a target.
+    const gen = generated[0]!;
+    expect(gen.argsSchema).toEqual({});
+    expect(gen.target?.section).toBeTruthy();
+  });
+
+  it("is JSON-serializable — crosses the engine→UI/MCP boundary cleanly", () => {
+    const desc = wiki.describeType("feature-brief");
+    expect(JSON.parse(JSON.stringify(desc))).toEqual(desc);
+  });
+
+  it("throws UnknownPageTypeError for an unregistered type", () => {
+    expect(() => wiki.describeType("does-not-exist")).toThrow(UnknownPageTypeError);
+  });
+});
+
 describe("describeMutations — precondition-aware availability + unmet reason", () => {
   let harness: ITestWiki;
   let wiki: IWiki;

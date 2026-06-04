@@ -320,6 +320,25 @@ export interface IWiki {
    * {@link UnknownPageTypeError} for an unregistered type. Pure (no I/O).
    */
   fsmOf(type: PageTypeName): FsmDescriptor;
+  /** Every registered page-type tag, in declaration order. Pure (no I/O). */
+  pageTypes(): readonly PageTypeName[];
+  /**
+   * The full TYPE-level authoring surface of a registered page type (DESIGN §6.1,
+   * §7.2): its status FSM plus every command it can ever run — each with the
+   * machine-readable {@link JsonSchema} for its args, its description, the
+   * section/field it edits, and (for a page-transition command) the FSM event it
+   * fires. This is the companion to {@link fsmOf}: it answers "what can I author on
+   * this type, and with what args?" WITHOUT needing a page instance — so a tool/UI
+   * can build a form for a transition or discover a command before any page exists.
+   *
+   * What it deliberately omits (because it is instance-state-dependent, not type-
+   * level): whether a command is currently legal in a given status and whether its
+   * preconditions hold — that lives on {@link IPageView.describeMutations}. Generated
+   * structural commands carry `argsSchema: {}` (their shape is implied by the target
+   * section/field), mirroring `describeMutations`. Pure (no I/O); throws
+   * {@link UnknownPageTypeError} for an unregistered type.
+   */
+  describeType(type: PageTypeName): TypeDescriptor;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -380,6 +399,19 @@ export interface IWorkspaceHandle {
     command: C,
     args: CommandArgs<K, C>,
   ): Promise<Committed<CommandResult<K, C>>>;
+  /**
+   * Run an ordered batch of commands on ONE page as a single ATOMIC commit (§5):
+   * each command is decided against the state left by the previous one (so an
+   * order-dependent sequence — set a field, then a transition gated on it — works),
+   * all the resulting events are appended as one array-message, and the whole batch
+   * shares one {@link Committed} token. All-or-nothing: if any command is rejected the
+   * batch aborts with {@link BatchCommandError} (carrying the failing index) and NOTHING
+   * is committed. The token reflects every command, so a read gated on it sees them all.
+   */
+  mutateMany(
+    pageId: PageId,
+    commands: readonly { command: string; args?: Record<string, unknown> }[],
+  ): Promise<Committed<BatchResult>>;
 
   // ── reads (token-gated; async — §8.6) ──
   // Pass `consistentWith` a write's token to read-your-writes (waits up to `timeoutMs`,
@@ -397,6 +429,15 @@ export interface IWorkspaceHandle {
 // ────────────────────────────────────────────────────────────────────────────
 // IPageView (DESIGN §10.4)
 // ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The result of an atomic batch ({@link IWorkspaceHandle.mutateMany}): the per-command
+ * results, positionally aligned to the submitted commands (each is the same value the
+ * single-command `mutate` would have returned — e.g. a created element's `{ …Id }`).
+ */
+export interface BatchResult {
+  readonly results: readonly unknown[];
+}
 
 export interface IMutationDescriptor {
   readonly name: string;
@@ -434,6 +475,8 @@ export interface IPageView<K extends PageTypeName = PageTypeName> {
   describeMutations(opts?: IReadOpts): Promise<readonly IMutationDescriptor[]>;
   toMarkdown(opts?: IReadOpts): Promise<string>;
   mutate<C extends CommandName<K>>(command: C, args: CommandArgs<K, C>): Promise<Committed<CommandResult<K, C>>>;
+  /** Atomic ordered batch of commands on this page — see {@link IWorkspaceHandle.mutateMany}. */
+  mutateMany(commands: readonly { command: CommandName<K>; args?: Record<string, unknown> }[]): Promise<Committed<BatchResult>>;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -474,6 +517,46 @@ export interface FsmDescriptor {
   readonly states: readonly string[];
   /** Every declared transition (the directed, labeled edges). */
   readonly transitions: readonly FsmTransition[];
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Type descriptor — the serializable, INSTANCE-FREE authoring surface of a page
+// type (DESIGN §6.1). Built by {@link IWiki.describeType}; the type-level companion
+// to the instance-level {@link IMutationDescriptor} (which adds availability).
+// ────────────────────────────────────────────────────────────────────────────
+
+/** One command in a {@link TypeDescriptor}: its static, instance-free shape. */
+export interface TypeCommandDescriptor {
+  /** The command name passed to `mutate` (e.g. "addConstraint", "ship"). */
+  readonly name: string;
+  /**
+   * JSON Schema of the command's args. For a model-declared command this is the real
+   * schema (from its Zod validator); for a GENERATED structural command it is `{}`
+   * (the args are implied by `target`), mirroring {@link IPageView.describeMutations}.
+   */
+  readonly argsSchema: JsonSchema;
+  /** JSON Schema of the command's result, when it returns one. */
+  readonly resultSchema?: JsonSchema;
+  /** Human description of what the command does, when declared. */
+  readonly description?: string;
+  /** The section/field this command edits, when it targets one. */
+  readonly target?: { readonly section: string; readonly field?: string };
+  /** The FSM event this command fires, when it is a page/element transition. */
+  readonly transition?: { readonly level: "page" | "element"; readonly event: string };
+  /** True for an engine-generated structural command (vs a model-declared one). */
+  readonly generated: boolean;
+}
+
+/** A page type's complete type-level authoring surface: FSM + every command. */
+export interface TypeDescriptor {
+  /** The page-type tag (e.g. "feature-brief"). */
+  readonly type: string;
+  /** The type's human label, when declared. */
+  readonly label?: string;
+  /** The status FSM (same shape as {@link IWiki.fsmOf}). */
+  readonly fsm: FsmDescriptor;
+  /** Every command the type can run — declared commands first, then generated. */
+  readonly commands: readonly TypeCommandDescriptor[];
 }
 
 // ────────────────────────────────────────────────────────────────────────────

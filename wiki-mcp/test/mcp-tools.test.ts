@@ -202,6 +202,139 @@ describe("MCP tools + token manager + resources", () => {
     expect(wsRes.text).toContain("Note");
   });
 
+  it("describePageType: type-level FSM + commands, no page instance needed", async () => {
+    // No type → lists the loaded types.
+    const list = await tools.get("describePageType")!.handle({}, ctx("d1"));
+    expect((list.data as { types: string[] }).types).toContain("note");
+
+    // A known type → FSM + declared (real args) + generated (empty args) commands.
+    const desc = await tools.get("describePageType")!.handle({ type: "note" }, ctx("d1"));
+    const data = desc.data as {
+      type: string;
+      fsm: { initial: string };
+      commands: Array<{ name: string; generated: boolean; argsSchema: Record<string, unknown>; transition?: { event: string } }>;
+    };
+    expect(data.type).toBe("note");
+    expect(data.fsm.initial).toBe("draft");
+
+    const setBody = data.commands.find((c) => c.name === "setBody")!;
+    expect(setBody.generated).toBe(false);
+    expect((setBody.argsSchema as { properties?: Record<string, unknown> }).properties).toHaveProperty("text");
+
+    expect(data.commands.find((c) => c.name === "publish")!.transition?.event).toBe("publish");
+
+    const generated = data.commands.find((c) => c.generated)!;
+    expect(generated.name).toBe("setBodyText");
+    expect(generated.argsSchema).toEqual({});
+
+    // The human text lists the FSM + commands compactly.
+    expect(desc.text).toContain("Status FSM");
+    expect(desc.text).toContain("setBody");
+  });
+
+  it("describePageType: unknown type returns a helpful error listing known types", async () => {
+    const desc = await tools.get("describePageType")!.handle({ type: "nope" }, ctx("d2"));
+    expect((desc.data as { error: string }).error).toBe("unknown_type");
+    expect(desc.text).toContain("note");
+  });
+
+  it("tree returns an indented outline + slim nodes (never page content)", async () => {
+    const session = "tree1";
+    const created = await tools.get("createWorkspace")!.handle({ name: "Tree" }, ctx(session));
+    const wsId = (created.data as { workspaceId: string }).workspaceId;
+    const root = await tools.get("createPage")!.handle(
+      { workspaceId: wsId, type: "note", title: "Root", parentId: null },
+      ctx(session),
+    );
+    const rootId = (root.data as { pageId: string }).pageId;
+    await tools.get("createPage")!.handle(
+      { workspaceId: wsId, type: "note", title: "Child", parentId: rootId },
+      ctx(session),
+    );
+    // Body content on Root must NOT leak into the tree payload.
+    await tools.get("mutatePage")!.handle(
+      { workspaceId: wsId, pageId: rootId, command: "setBody", args: { text: "SECRET-BODY-CONTENT" } },
+      ctx(session),
+    );
+    await drain();
+
+    const tree = await tools.get("tree")!.handle({ workspaceId: wsId }, ctx(session));
+    // Indented outline: Root at depth 0, Child nested one level under it.
+    expect(tree.text).toContain("- Root (note) [draft]");
+    expect(tree.text).toMatch(/\n {2}- Child \(note\) \[draft\]/);
+    // Slim data: nodes carry metadata ONLY — never the `sections` blob / body content.
+    const data = tree.data as { nodes: Array<Record<string, unknown>>; edges: unknown[] };
+    expect(data.nodes.length).toBe(2);
+    for (const n of data.nodes) {
+      expect(Object.keys(n).sort()).toEqual(["id", "parentId", "status", "title", "type"]);
+    }
+    expect(JSON.stringify(tree.data)).not.toContain("SECRET-BODY-CONTENT");
+    expect(data.edges.length).toBe(2);
+  });
+
+  it("mutatePageBatch applies an ordered batch atomically with one recorded token", async () => {
+    const session = "batch1";
+    const created = await tools.get("createWorkspace")!.handle({ name: "B" }, ctx(session));
+    const wsId = (created.data as { workspaceId: string }).workspaceId;
+    const page = await tools.get("createPage")!.handle(
+      { workspaceId: wsId, type: "note", title: "N", parentId: null },
+      ctx(session),
+    );
+    const pageId = (page.data as { pageId: string }).pageId;
+
+    const batch = await tools.get("mutatePageBatch")!.handle(
+      {
+        workspaceId: wsId,
+        pageId,
+        commands: [
+          { command: "setBody", args: { text: "first" } },
+          { command: "setBody", args: { text: "second" } },
+          { command: "publish" },
+        ],
+      },
+      ctx(session),
+    );
+    const data = batch.data as { results: unknown[]; token: string };
+    expect(data.results).toHaveLength(3);
+    // Exactly one high-water token recorded for the whole batch (read-your-writes).
+    expect(tokens.consistentWith(session, wsId as WorkspaceId)).toBe(data.token);
+
+    await drain();
+    const rendered = await tools.get("renderPage")!.handle({ workspaceId: wsId, pageId }, ctx(session));
+    expect(rendered.text).toContain("second"); // last write wins
+    const desc = await tools.get("describeMutations")!.handle({ workspaceId: wsId, pageId }, ctx(session));
+    // `publish` ran in the batch → page is now published (publish no longer legal).
+    expect((desc.data as Array<{ name: string; available: boolean }>).find((d) => d.name === "publish")!.available).toBe(false);
+  });
+
+  it("mutatePageBatch is atomic: a mid-batch failure commits nothing and surfaces the failing index", async () => {
+    const session = "batch2";
+    const created = await tools.get("createWorkspace")!.handle({ name: "B2" }, ctx(session));
+    const wsId = (created.data as { workspaceId: string }).workspaceId;
+    const page = await tools.get("createPage")!.handle(
+      { workspaceId: wsId, type: "note", title: "N", parentId: null },
+      ctx(session),
+    );
+    const pageId = (page.data as { pageId: string }).pageId;
+
+    // publish twice: the 2nd publish is illegal (already published) → batch aborts at index 1.
+    await expect(
+      tools.get("mutatePageBatch")!.handle(
+        {
+          workspaceId: wsId,
+          pageId,
+          commands: [{ command: "publish" }, { command: "publish" }, { command: "setBody", args: { text: "x" } }],
+        },
+        ctx(session),
+      ),
+    ).rejects.toMatchObject({ code: "BATCH_COMMAND_FAILED" });
+
+    // Nothing committed: the page is still in draft (the first publish rolled back too).
+    await drain();
+    const desc = await tools.get("describeMutations")!.handle({ workspaceId: wsId, pageId }, ctx(session));
+    expect((desc.data as Array<{ name: string; available: boolean }>).find((d) => d.name === "publish")!.available).toBe(true);
+  });
+
   it("an illegal mutation surfaces the engine's structured WikiError", async () => {
     const session = "s3";
     const created = await tools.get("createWorkspace")!.handle({ name: "W" }, ctx(session));

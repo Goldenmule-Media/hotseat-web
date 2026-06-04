@@ -1056,6 +1056,24 @@ export interface IWorkspaceHandle {
     args: CommandArgs<K, C>,
   ): Promise<Committed<CommandResult<K, C>>>;
 
+  /**
+   * Apply an ORDERED batch of commands to ONE page as a single ATOMIC commit — the
+   * batched form of `mutate`, built to collapse the N round-trips of populating a page
+   * (e.g. `setSummary` + many `addComponent`/`addConstraint`) into one call/one append.
+   * Each command is decided against the state left by the previous one (an in-flight
+   * fold), so an ORDER-DEPENDENT sequence — set a field, then a transition gated on it —
+   * is legal; a command's `cascadeFinalize` child-page events ride inside the same commit.
+   * All-or-nothing: any rejection throws {@link BatchCommandError} (carrying the failing
+   * 0-based index) with NOTHING committed. Returns one {@link Committed} `{ results }`
+   * (positionally aligned to `commands`) whose token reflects every command — a read
+   * gated on it sees them all. The batch re-decides wholesale on an OCC rebase, and its
+   * events are stamped `mutateMany` in history (the batch is the audit unit, §9.4).
+   */
+  mutateMany(
+    pageId: PageId,
+    commands: readonly { command: string; args?: Record<string, unknown> }[],
+  ): Promise<Committed<BatchResult>>;
+
   // ── reads (token-gated; async — §8.6) ──
   // Pass `consistentWith` a write's token to read-your-writes (waits up to `timeoutMs`,
   // default IWikiConfig.readConsistencyTimeoutMs); omit it for current/eventually-consistent state.
@@ -1131,6 +1149,8 @@ export interface IPageView<K extends PageTypeName = PageTypeName> {
   toMarkdown(opts?: IReadOpts): Promise<string>;
   /** Sugar for {@link IWorkspaceHandle.mutate} bound to this page; resolves to a {@link Committed} result (§8.6). */
   mutate<C extends CommandName<K>>(command: C, args: CommandArgs<K, C>): Promise<Committed<CommandResult<K, C>>>;
+  /** Sugar for {@link IWorkspaceHandle.mutateMany} bound to this page — an atomic ordered batch. */
+  mutateMany(commands: readonly { command: CommandName<K>; args?: Record<string, unknown> }[]): Promise<Committed<BatchResult>>;
 }
 
 /** One command described for tool/function-calling (`describeMutations`). */

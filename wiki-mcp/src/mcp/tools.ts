@@ -306,6 +306,73 @@ const mutatePageTool: WikiTool = {
   },
 };
 
+const mutatePageBatchTool: WikiTool = {
+  name: "mutatePageBatch",
+  description:
+    "Run an ORDERED batch of commands on ONE page as a single ATOMIC commit — collapses the " +
+    "N round-trips of populating a page (e.g. setSummary + many addComponent/addConstraint) " +
+    "into one call. Each command is decided against the state left by the previous one, so " +
+    "order-dependent sequences work (set a field, then a transition gated on it). All-or-" +
+    "nothing: if any command is rejected the WHOLE batch aborts and nothing is committed — " +
+    "the error names the failing index + command + reason (with the legal set), so fix that " +
+    "command and resubmit. Command names/args come from describePageType / describeMutations. " +
+    "To cross-reference an element you add in the same batch, pass its `id` explicitly in the " +
+    "add command's args and reuse it.",
+  inputSchema: obj(
+    {
+      workspaceId: STR,
+      pageId: STR,
+      commands: {
+        type: "array",
+        minItems: 1,
+        maxItems: 50,
+        description: "Ordered commands, applied as one atomic commit.",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["command"],
+          properties: {
+            command: str("The command name (see describePageType / describeMutations)."),
+            args: { type: "object", description: "The command's arguments (validated by the engine).", additionalProperties: true },
+          },
+        },
+      },
+    },
+    ["workspaceId", "pageId", "commands"],
+  ),
+  write: true,
+  async handle(args, ctx) {
+    const ws = asWorkspaceId(reqStr(args, "workspaceId"));
+    const handle = await ctx.engine.open(ws);
+    const pageId = asPageId(reqStr(args, "pageId"));
+    const raw = args.commands;
+    if (!Array.isArray(raw) || raw.length === 0) {
+      throw new Error('"commands" must be a non-empty array of { command, args? }');
+    }
+    // Enforce the advertised cap (the SDK does not validate inputSchema for us): one
+    // batch is one append held under the per-workspace mutex, so bound its size.
+    if (raw.length > 50) {
+      throw new Error(`mutatePageBatch accepts at most 50 commands; got ${raw.length}.`);
+    }
+    const commands = raw.map((c) => {
+      const entry = c as { command?: unknown; args?: unknown };
+      if (typeof entry.command !== "string" || entry.command.length === 0) {
+        throw new Error('each batch entry needs a non-empty "command" string');
+      }
+      return { command: entry.command, args: (entry.args ?? {}) as Record<string, unknown> };
+    });
+    // Atomic: the engine throws BatchCommandError (with the failing index) on rejection,
+    // committing nothing — server.ts surfaces it as a structured [BATCH_COMMAND_FAILED] error.
+    const { value, token } = await handle.mutateMany(pageId, commands);
+    ctx.tokens.recordWrite(ctx.sessionId, token);
+    return {
+      text: `Ran ${commands.length} command(s) on ${reqStr(args, "pageId")} in one atomic commit.`,
+      // `value` is undefined on an idempotent (commandId) replay — guard the contract.
+      data: { results: value?.results ?? [], token },
+    };
+  },
+};
+
 const describeMutationsTool: WikiTool = {
   name: "describeMutations",
   description:
@@ -327,6 +394,76 @@ const describeMutationsTool: WikiTool = {
       text: `Mutations for ${view.id} (${view.type}):\n${lines.join("\n")}`,
       data: descriptors,
     };
+  },
+};
+
+/** Compact one-line hint for a command's args JSON Schema (full schema is in `data`). */
+function summarizeArgs(schema: JsonSchema): string {
+  const props = (schema as { properties?: Record<string, unknown> }).properties;
+  if (props === undefined || Object.keys(props).length === 0) return "(none)";
+  const required = new Set((schema as { required?: readonly string[] }).required ?? []);
+  const parts = Object.entries(props).map(([k, v]) => {
+    const t = (v as { type?: unknown }).type;
+    const ts = Array.isArray(t) ? t.join("|") : typeof t === "string" ? t : "any";
+    return `${k}${required.has(k) ? "*" : ""}: ${ts}`;
+  });
+  return `{ ${parts.join(", ")} }`;
+}
+
+const describePageTypeTool: WikiTool = {
+  name: "describePageType",
+  description:
+    "Describe a page TYPE's authoring surface WITHOUT a page instance: its status FSM plus " +
+    "every command — model-declared commands carry their real JSON-Schema args, description, " +
+    "target section/field, and the FSM event they fire; generated structural commands carry " +
+    "their target. Omit `type` to list the loaded page types. Use this before createPage / " +
+    "mutatePage to learn exact command names + args. (Whether a command is legal right now, " +
+    "and unmet preconditions, are instance-specific — use describeMutations for that.)",
+  inputSchema: obj(
+    { type: nullableStr('The page-type tag (e.g. "feature-brief"). Omit/null to list all loaded types.') },
+    [],
+  ),
+  write: false,
+  async handle(args, ctx) {
+    const wiki = ctx.engine.raw;
+    const type = optStrOrNull(args, "type");
+    if (type === null) {
+      const types = wiki.pageTypes();
+      const lines = types.map((t) => {
+        const fsm = wiki.fsmOf(t);
+        // `states` is an unordered set (initial first), NOT a path — summarize as a
+        // count so we never imply a linear progression the FSM doesn't have. The full
+        // edge list is one drill-down away: describePageType({ type }).
+        return `- ${t} (initial: ${fsm.initial}; ${fsm.states.length} statuses, ${fsm.transitions.length} transitions)`;
+      });
+      return {
+        text: types.length === 0 ? "No page types loaded." : `Loaded page types:\n${lines.join("\n")}`,
+        data: { types },
+      };
+    }
+    if (!wiki.pageTypes().includes(type)) {
+      const known = wiki.pageTypes();
+      return {
+        text: `Unknown page type "${type}". Known types: ${known.join(", ") || "(none)"}.`,
+        data: { error: "unknown_type", type, known },
+      };
+    }
+    const desc = wiki.describeType(type);
+    const fsmLine =
+      desc.fsm.transitions.map((tr) => `${tr.from} —${tr.event}→ ${tr.to}`).join("; ") || "(no transitions)";
+    const cmdLines = desc.commands.map((c) => {
+      const tgt = c.target !== undefined ? ` →${c.target.section}${c.target.field !== undefined ? `.${c.target.field}` : ""}` : "";
+      const ev = c.transition !== undefined ? ` [fires ${c.transition.event}]` : "";
+      const gen = c.generated ? " (generated)" : "";
+      const why = c.description !== undefined ? ` — ${c.description}` : "";
+      // A generated structural command carries no curated schema (argsSchema is `{}`),
+      // but it is NOT zero-arg — its args are implied by the target section/field. Say
+      // so, rather than printing the bare "(none)" a real zero-arg command shows.
+      const argHint = c.generated ? "(implied by target)" : summarizeArgs(c.argsSchema);
+      return `- ${c.name}${tgt}${ev}${gen}  args ${argHint}${why}`;
+    });
+    const head = `${desc.type}${desc.label !== undefined ? ` — ${desc.label}` : ""}\nStatus FSM (initial: ${desc.fsm.initial}): ${fsmLine}\nCommands:`;
+    return { text: `${head}\n${cmdLines.join("\n")}`, data: desc };
   },
 };
 
@@ -363,16 +500,44 @@ const getPageTool: WikiTool = {
 
 const treeTool: WikiTool = {
   name: "tree",
-  description: "The ordered page tree of a workspace (parent → child edges, by ordinal).",
+  description:
+    "The ordered page tree of a workspace as an indented outline (title, type, status, id), " +
+    "plus a slim { nodes, edges } payload. Structure + metadata ONLY — never page content " +
+    "(use renderPage or getPage for a page's body).",
   inputSchema: obj({ workspaceId: STR }, ["workspaceId"]),
   write: false,
   async handle(args, ctx) {
     const ws = asWorkspaceId(reqStr(args, "workspaceId"));
     await awaitConsistency(ctx, ws);
     const [pages, edges] = await Promise.all([ctx.readModel.listPages(ws), ctx.readModel.treeEdges(ws)]);
-    const title = new Map(pages.map((p) => [p.id, p.title] as const));
-    const lines = edges.map((e) => `${e.parent_id} → ${e.child_id} (${title.get(e.child_id) ?? "?"}) @${e.ord}`);
-    return { text: lines.join("\n") || "(empty)", data: { pages, edges } };
+    // Slim per-page metadata — deliberately DROP the heavy `sections` jsonb. Shipping
+    // every page's full folded state here is what made the whole-tree payload blow the
+    // response token cap; the structure + light metadata is all `tree` should carry.
+    const nodes = pages.map((p) => ({ id: p.id, type: p.type, title: p.title, status: p.status, parentId: p.parent_id }));
+    const meta = new Map(nodes.map((n) => [n.id, n] as const));
+    // Children by parent, in ordinal order. Roots are parents that are never a child
+    // (the `@root` sentinel, plus any orphan whose parent is gone) — derived, so we
+    // don't hard-code the sentinel literal.
+    const sorted = [...edges].sort((a, b) => a.ord - b.ord);
+    const childrenOf = new Map<string, typeof sorted>();
+    for (const e of sorted) {
+      const list = childrenOf.get(e.parent_id) ?? [];
+      list.push(e);
+      childrenOf.set(e.parent_id, list);
+    }
+    const childIds = new Set(edges.map((e) => e.child_id));
+    const roots = [...childrenOf.keys()].filter((p) => !childIds.has(p)).sort();
+    const lines: string[] = [];
+    const walk = (parentId: string, depth: number): void => {
+      for (const e of childrenOf.get(parentId) ?? []) {
+        const n = meta.get(e.child_id);
+        const label = n !== undefined ? `${n.title} (${n.type}) [${n.status}]` : "?";
+        lines.push(`${"  ".repeat(depth)}- ${label}  ${e.child_id}`);
+        walk(e.child_id, depth + 1);
+      }
+    };
+    for (const root of roots) walk(root, 0);
+    return { text: lines.join("\n") || "(empty)", data: { nodes, edges } };
   },
 };
 
@@ -836,10 +1001,12 @@ export function wikiTools(): readonly WikiTool[] {
     linkTool,
     unlinkTool,
     mutatePageTool,
+    mutatePageBatchTool,
     // semantic operations (write, Phase 3)
     renameSymbolTool,
     // reads
     describeMutationsTool,
+    describePageTypeTool,
     listWorkspacesTool,
     getPageTool,
     treeTool,

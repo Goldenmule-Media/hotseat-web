@@ -13,6 +13,7 @@
  * resolved by the bus's rebase-and-retry.
  */
 import type {
+  BatchResult,
   Committed,
   ConsistencyToken,
   DeepReadonly,
@@ -33,6 +34,8 @@ import type {
   PageId,
   PageState,
   RootId,
+  TypeCommandDescriptor,
+  TypeDescriptor,
   Unsubscribe,
   WorkspaceId,
   WorkspaceStatus,
@@ -259,6 +262,46 @@ class Wiki implements IWiki {
     };
   }
 
+  /** Every registered page-type tag, in declaration order (§6.1). */
+  pageTypes(): readonly string[] {
+    return this.registry.types();
+  }
+
+  /**
+   * The TYPE-level authoring surface of a page type (§6.1): its FSM plus every
+   * command — declared commands (with real args schema, description, target, and the
+   * FSM event they fire) then generated structural commands (args implied by target).
+   * The instance-free companion to {@link PageView.describeMutations}; it deliberately
+   * omits availability/preconditions, which need a folded page instance. Pure; throws
+   * {@link UnknownPageTypeError} for an unregistered type (via `registry.page`).
+   */
+  describeType(type: string): TypeDescriptor {
+    const def = this.registry.page(type);
+    const commands: TypeCommandDescriptor[] = [];
+    for (const [name, cmd] of Object.entries(def.commands)) {
+      commands.push({
+        name,
+        generated: false,
+        argsSchema: cmd.args.toJsonSchema(),
+        ...(cmd.result !== undefined ? { resultSchema: cmd.result.toJsonSchema() } : {}),
+        ...(cmd.description !== undefined ? { description: cmd.description } : {}),
+        ...(cmd.target !== undefined
+          ? { target: { section: cmd.target.section, ...(cmd.target.field !== undefined ? { field: cmd.target.field } : {}) } }
+          : {}),
+        ...(cmd.transition !== undefined ? { transition: { level: cmd.transition.level, event: cmd.transition.event } } : {}),
+      });
+    }
+    for (const [name, gen] of this.registry.generatedCommands(type)) {
+      commands.push({ name, generated: true, argsSchema: {}, target: { section: gen.section, field: gen.field } });
+    }
+    return {
+      type,
+      ...(def.label !== undefined ? { label: def.label } : {}),
+      fsm: this.fsmOf(type),
+      commands,
+    };
+  }
+
   /** Start the live tail, register the handle, and return it. */
   private async attach(id: WorkspaceId, projection: BusProjection): Promise<WorkspaceHandle> {
     const handle = new WorkspaceHandle(
@@ -464,6 +507,21 @@ class WorkspaceHandle implements IWorkspaceHandle {
       });
       return this.commit(outcome);
     });
+  }
+
+  mutateMany(
+    pageId: PageId,
+    commands: readonly { command: string; args?: Record<string, unknown> }[],
+  ): Promise<Committed<BatchResult>> {
+    // One per-workspace mutex span → one bus commit → one atomic append → one token.
+    return this.mutex.run(async () => {
+      const outcome = await this.bus.runPageBatch(this.projection, {
+        pageId,
+        commands: commands.map((c) => ({ command: c.command, args: c.args ?? {} })),
+        ...(this.config.actor !== undefined ? { actor: this.config.actor } : {}),
+      });
+      return this.commit(outcome);
+    }) as Promise<Committed<BatchResult>>;
   }
 
   /**
@@ -719,6 +777,10 @@ class PageView implements IPageView {
 
   mutate(command: string, args: Record<string, unknown>): Promise<Committed<unknown>> {
     return this.handle.mutate(this.id, command, args);
+  }
+
+  mutateMany(commands: readonly { command: string; args?: Record<string, unknown> }[]): Promise<Committed<BatchResult>> {
+    return this.handle.mutateMany(this.id, commands);
   }
 }
 

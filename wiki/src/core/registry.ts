@@ -226,6 +226,11 @@ export class Registry {
     return def;
   }
 
+  /** Every registered page-type tag, in declaration order. */
+  types(): readonly string[] {
+    return [...this.pages.keys()];
+  }
+
   has(type: string): boolean {
     return this.pages.has(type);
   }

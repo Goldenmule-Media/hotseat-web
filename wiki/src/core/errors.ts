@@ -228,6 +228,31 @@ export class StaleEditError extends WikiError {
 }
 
 /**
+ * Thrown when one command in an atomic batch (`IWorkspaceHandle.mutateMany`) is
+ * rejected. The batch is all-or-nothing: the decision runs entirely in memory before
+ * the single append, so a failure aborts the WHOLE batch with nothing committed. This
+ * wraps the underlying typed `cause` (e.g. {@link MutationNotAllowedError} carrying the
+ * legal set, {@link PreconditionUnmetError} carrying the reason) and pins the 0-based
+ * `index` of the failing command so the caller can fix that one command and resubmit.
+ * `index`/`command` reflect the FINAL rebase attempt (legality is evaluated against the
+ * in-flight state after the prior commands in the same batch — a command legal alone can
+ * be illegal mid-batch). The full cause message (incl. the legal set) is embedded so a
+ * `WikiError`-to-text mapping surfaces it without inspecting `cause`.
+ */
+export class BatchCommandError extends WikiError {
+  readonly index: number;
+  readonly command: string;
+  /** The underlying typed rejection (narrows the standard `Error.cause`). */
+  override readonly cause: WikiError;
+  constructor(index: number, command: string, cause: WikiError) {
+    super("BATCH_COMMAND_FAILED", `Batch aborted at command [${index}] "${command}": ${cause.message}`);
+    this.index = index;
+    this.command = command;
+    this.cause = cause;
+  }
+}
+
+/**
  * Thrown when a token-gated read's `waitFor` exceeds its timeout — the read model
  * hasn't applied the requested {@link ConsistencyToken} in time (DESIGN §8.6/§14).
  * Carries the awaited `token` + `timeoutMs` so a caller can retry or fall back to an
