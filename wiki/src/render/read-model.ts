@@ -205,6 +205,17 @@ export function renderPage(state: IWorkspaceState, pageId: PageId, registry: Reg
   blocks.push(statusBadge(node.status));
 
   for (const sr of config.sections) {
+    // A DERIVED checklist: a model projection of folded state (e.g. the plan's steps +
+    // local progress), not a page field (feature-review Item 2). Rendered byte-stably.
+    if (sr.derived !== undefined) {
+      const items = def.derived?.[sr.derived]?.(computed.page, ctx) ?? [];
+      const body =
+        items.length === 0
+          ? (sr.placeholder ?? placeholder())
+          : bulletList(items.map((it) => `[${it.checked ? "x" : " "}] ${it.text}`));
+      blocks.push(section(heading(2, sr.heading ?? sr.derived), body));
+      continue;
+    }
     // Engine-derived sections (links / tree), positionable in render order.
     if (sr.section === "@references") {
       blocks.push(section(heading(2, sr.heading ?? "References"), renderReferences(node.id, ctx)));
@@ -215,7 +226,7 @@ export function renderPage(state: IWorkspaceState, pageId: PageId, registry: Reg
       continue;
     }
     const sec: ISection | undefined = node.sections.find((s) => s.key === sr.section);
-    const headingText = sr.heading ?? (sec?.name ?? sr.section);
+    const headingText = sr.heading ?? sec?.name ?? sr.section ?? "";
 
     // grouped list → emit each group as its own H2 section (no parent heading).
     if (sr.groupBy !== undefined && sr.groups !== undefined && sec !== undefined && sr.field !== undefined) {

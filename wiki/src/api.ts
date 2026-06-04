@@ -636,7 +636,12 @@ export type DeclarativeCommandMap = Readonly<Record<string, DeclarativeCommand>>
 // ────────────────────────────────────────────────────────────────────────────
 
 export interface SectionRender {
-  readonly section: string;
+  /** A page section key, the engine pseudo-sections `@references`/`@children`, or — when
+   *  `derived` is set — ignored (the body comes from the named {@link DerivedList}). */
+  readonly section?: string;
+  /** Render this section's body from a model-declared {@link DerivedList} (Item 2) rather
+   *  than a page field — a projection of cross-page state (e.g. the plan's steps). */
+  readonly derived?: string;
   readonly heading?: string;
   readonly placeholder?: string;
   /** Which field of the section to render as the body. */
@@ -672,6 +677,22 @@ export interface RenderConfig {
  */
 export type ComputedFlag = (page: DeepReadonly<PageState>, ctx: IRenderCtx) => boolean;
 
+/** One row of a {@link DerivedList}: a stable id, display text, and checked state. */
+export interface DerivedItem {
+  readonly id: string;
+  readonly text: string;
+  readonly checked: boolean;
+}
+
+/**
+ * A model-declared, PURE projection that synthesizes a checklist from folded state —
+ * typically a SIBLING page's list joined to this page's local progress (feature-review
+ * Item 2: the checklist is a DERIVED VIEW of `plan.steps`, not a hand-duplicated copy).
+ * Referenced from a render section via `derived: "<key>"`. Deterministic like every
+ * renderer (no clock/RNG); order is the projection's order.
+ */
+export type DerivedList = (page: DeepReadonly<PageState>, ctx: IRenderCtx) => readonly DerivedItem[];
+
 export interface IPageTypeDef<Status extends string = string> {
   readonly type: string;
   /**
@@ -695,6 +716,9 @@ export interface IPageTypeDef<Status extends string = string> {
   /** Named pure flags a renderer computes from folded state; an element binds via
    *  `meta.computed = "<key>"` to derive its checkbox (feature-review Item 3). */
   readonly computed?: Readonly<Record<string, ComputedFlag>>;
+  /** Named pure projections a render section materializes via `derived: "<key>"` —
+   *  e.g. a checklist DERIVED from a sibling's list + local progress (Item 2). */
+  readonly derived?: Readonly<Record<string, DerivedList>>;
   /** Upcasters keyed by from-version, over `SectionOp` payloads (§10). */
   readonly upcasters?: Readonly<Record<number, (payload: unknown) => unknown>>;
 }
