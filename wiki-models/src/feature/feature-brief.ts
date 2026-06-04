@@ -223,6 +223,8 @@ export const FeatureBrief = definePageType({
         section: "questions",
         heading: "Questions",
         field: "items",
+        // Numbered so each open question is referenceable by index when answering.
+        as: "numbered",
         groupBy: "status",
         groups: [
           { when: "open", heading: "Open questions", item: "**{text}**" },

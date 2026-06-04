@@ -132,12 +132,15 @@ function renderListField(
   label: LabelResolver,
   computed?: ComputedCtx,
 ): string {
+  // `as: "numbered"` → ordered list (`1.`), so items stay referenceable; bullets otherwise.
+  // Applies to grouped and flat lists alike (the checklist path below stays unordered).
+  const asList = (rows: string[]): string => (sr.as === "numbered" ? numbered(rows) : bulletList(rows));
   if (sr.groupBy !== undefined && sr.groups !== undefined) {
     const blocks: string[] = [];
     for (const g of sr.groups) {
       const matched = f.elements.filter((el) => (el.status ?? "") === g.when);
       const body =
-        matched.length === 0 ? placeholder() : bulletList(matched.map((el) => fillTemplate(g.item, el, label)));
+        matched.length === 0 ? placeholder() : asList(matched.map((el) => fillTemplate(g.item, el, label)));
       blocks.push(section(heading(2, g.heading ?? g.when), body));
     }
     return blocks.join("\n\n");
@@ -156,9 +159,7 @@ function renderListField(
     };
     return bulletList(f.elements.map((el) => `[${isChecked(el) ? "x" : " "}] ${fillTemplate(template, el, label)}`));
   }
-  const items = f.elements.map((el) => fillTemplate(template, el, label));
-  if (sr.as === "numbered") return numbered(items);
-  return bulletList(items);
+  return asList(f.elements.map((el) => fillTemplate(template, el, label)));
 }
 
 function renderFieldBody(

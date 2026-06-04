@@ -108,7 +108,7 @@ Let users export their workspace as CSV/JSON.
 _None._
 
 ## Resolved questions
-- **Which formats in v1?** → CSV and JSON; Parquet later.
+1. **Which formats in v1?** → CSV and JSON; Parquet later.
 
 ## References
 - depends-on → [Access control (RBAC)](feature-brief:id-3)
