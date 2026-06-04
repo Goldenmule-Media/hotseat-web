@@ -2,8 +2,9 @@
  * `architecture` page type — one node in a typed graph that describes the codebase.
  *
  * A node documents ONE unit (module / component / subsystem / …, set by `kind`). It carries
- * the sections an architecture doc needs — summary, purpose, usage, data model, code
- * references, dependencies, invariants — and is kept current by an AGENT issuing guarded
+ * the sections an architecture doc needs — summary, purpose, the contained sub-nodes
+ * (Components, its page-tree children), usage, data model, code references, dependencies,
+ * invariants — and is kept current by an AGENT issuing guarded
  * mutations (the engine can't watch the filesystem; freshness is an agent-recorded fact, not
  * an engine-faked flag). Two kinds of links, matching "describe and link to code OR modules":
  *  - CODE references — `codeRef {file, symbol?, kind?}` elements: file + function/class names,
@@ -273,6 +274,10 @@ export const Architecture = definePageType({
       { section: "summary", field: "kind", heading: "Kind", as: "inline" },
       { section: "summary", field: "body", heading: "Summary", as: "block" },
       { section: "purpose", field: "body", heading: "Purpose", as: "block" },
+      // Contained sub-nodes = this node's page-tree children. Surfaces the package→component
+      // hierarchy ON the node page (the way a toc surfaces its children); a leaf node shows
+      // the empty placeholder, like its other graph sections.
+      { section: "@children", heading: "Components" },
       { derived: "dependency-rows", heading: "Dependencies", placeholder: "_No dependencies._" },
       { derived: "code-reference-rows", heading: "Code references", placeholder: "_No code references._" },
       { section: "dataModel", field: "body", heading: "Data model", as: "block" },

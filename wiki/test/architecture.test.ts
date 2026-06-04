@@ -69,6 +69,14 @@ describe("architecture: a typed graph node describing the codebase", () => {
     );
   });
 
+  it("renders contained sub-nodes as a Components section; a leaf shows the placeholder", async () => {
+    const container = (await ws.createPage("architecture", { title: "Container", parentId: null })).value;
+    const childA = (await ws.createPage("architecture", { title: "Child A", parentId: container })).value;
+    await ws.createPage("architecture", { title: "Child B", parentId: container });
+    expect(block(await ws.toMarkdown(container), "Components")).toBe("- Child A\n- Child B");
+    expect(block(await ws.toMarkdown(childA), "Components")).toBe("_None._");
+  });
+
   it("renders a dependency edge with a render-derived target title", async () => {
     expect(block(await ws.toMarkdown(engine), "Dependencies")).toBe("- **exposes** → Schema layer — the feature bundle");
     // Renaming the target page reflows the dependency label (it's render-derived, not stored text).
