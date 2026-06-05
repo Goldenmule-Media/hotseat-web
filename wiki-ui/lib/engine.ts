@@ -9,6 +9,7 @@
  */
 import { createWiki, type IWiki } from "wiki";
 import { getConfig } from "./config";
+import { getSearchDb } from "./search-db";
 
 let singleton: IWiki | undefined;
 
@@ -19,6 +20,10 @@ export function getWiki(): IWiki | null {
     singleton = createWiki({
       stream: { baseUrl: cfg.streamBaseUrl, namespace: cfg.namespace },
       pageTypes: cfg.pageTypes,
+      // Run the engine's full-text search index in the browser, persisted to IndexedDB
+      // via PGlite. With this wired, opening a workspace folds AND indexes it, and
+      // `wiki.search` / `handle.search` return real ranked hits (see lib/search-db.ts).
+      search: { db: getSearchDb() },
     });
   }
   return singleton;

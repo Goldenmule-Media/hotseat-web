@@ -12,12 +12,13 @@
  *  live, precondition-aware mutation overlay. */
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, type MouseEvent } from "react";
 import type { PageId, WorkspaceId } from "wiki";
 import { getWiki } from "../lib/engine";
 import { useLiveWorkspace, usePage, usePageMutations, useStructuralMutator } from "../lib/live";
 import { renderMarkdown } from "../lib/markdown";
 import { pageHref } from "../lib/routes";
+import { clearScrollTarget, scrollToTerms, useScrollTarget } from "../lib/search-scroll";
 import { findNode } from "../lib/tree";
 import { isTerminalStatus } from "../lib/fsm-graph";
 import { setViewMode, useViewMode } from "../lib/view-mode";
@@ -50,6 +51,23 @@ export function PageView({
   }, [markdown]);
 
   const html = useMemo(() => renderMarkdown(body, workspaceId), [body, workspaceId]);
+
+  // Scroll-to-match: when a search result for THIS page is chosen, the palette parks a
+  // target; once the body is rendered we scroll to and highlight the matched text, then
+  // clear it so it fires once. Only meaningful in the content view.
+  const articleRef = useRef<HTMLElement>(null);
+  const scrollTarget = useScrollTarget();
+  useEffect(() => {
+    if (mode !== "content") return;
+    if (scrollTarget === null || scrollTarget.workspaceId !== workspaceId || scrollTarget.pageId !== pageId) return;
+    const el = articleRef.current;
+    if (el === null || html === "") return;
+    const raf = requestAnimationFrame(() => {
+      scrollToTerms(el, scrollTarget.terms);
+      clearScrollTarget();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [scrollTarget, workspaceId, pageId, html, mode]);
 
   const node = findNode(ws.tree, pageId);
   const children = node?.children ?? [];
@@ -175,7 +193,7 @@ export function PageView({
       ) : (
         <>
           {/* eslint-disable-next-line react/no-danger */}
-          <article className="markdown" onClick={onClick} dangerouslySetInnerHTML={{ __html: html }} />
+          <article ref={articleRef} className="markdown" onClick={onClick} dangerouslySetInnerHTML={{ __html: html }} />
           {children.length > 0 && (
             <nav className="child-links" aria-label="Child pages">
               <h2>Child pages</h2>

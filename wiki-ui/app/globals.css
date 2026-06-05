@@ -599,6 +599,149 @@ code {
   padding: 4px 0;
 }
 
+/* ── search palette (Ctrl/Cmd+K) ─────────────────────────────────────────────── */
+.search-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 12vh 16px 16px;
+  background: rgba(2, 5, 10, 0.62);
+  backdrop-filter: blur(2px);
+  animation: fade 0.12s ease;
+}
+.search-modal {
+  width: 100%;
+  max-width: 640px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+.search-input {
+  width: 100%;
+  padding: 16px 18px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+}
+.search-input::placeholder {
+  color: var(--muted);
+}
+.search-input:focus {
+  outline: none;
+}
+.search-status {
+  padding: 14px 18px;
+  font-size: 13px;
+}
+.search-status.error {
+  color: var(--red);
+}
+.search-results {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+}
+.search-result {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 12px;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.search-result.selected {
+  background: var(--accent-dim);
+}
+.search-result-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.search-result-title {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.search-result-meta {
+  flex: none;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.search-snippet {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  /* Clamp long snippets to two lines so rows stay scannable. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.search-snippet-hit {
+  background: transparent;
+  color: var(--text);
+  font-weight: 600;
+}
+.search-result.selected .search-snippet-hit {
+  color: #fff;
+}
+.search-footer {
+  display: flex;
+  gap: 16px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--muted);
+}
+.search-footer kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+/* In-page highlight when search scrolls to a match: a brief flash that fades to nothing
+   (the <mark> remains but goes transparent; the body re-renders on the next event). */
+.markdown mark.search-highlight {
+  border-radius: 3px;
+  padding: 0 1px;
+  animation: search-hit-fade 2.8s ease forwards;
+}
+@keyframes search-hit-fade {
+  0%,
+  60% {
+    background: var(--accent);
+    color: #06121f;
+  }
+  100% {
+    background: transparent;
+    color: inherit;
+  }
+}
+
 /* ── interactive transitions (click an edge → run a transition) ───────────── */
 /* Clickable edges (those leaving the current state): pointer cursor + a thicken-on-hover
    cue so they read as actionable. */
