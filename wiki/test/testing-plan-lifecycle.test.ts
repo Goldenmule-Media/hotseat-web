@@ -57,7 +57,7 @@ describe("testing-plan: author the set in draft, record results after markReady"
     const c1 = (await ws.mutate(testPlan, "addCase", { text: "10k-row export < 2s" })).value as { caseId: string };
     const c2 = (await ws.mutate(testPlan, "addCase", { text: "memory stays flat" })).value as { caseId: string };
 
-    // Seal the plan: draft → ready (irreversible). This is where results used to freeze.
+    // Seal the plan: draft → ready. This is where results used to freeze.
     const ready = await ws.mutate(testPlan, "markReady", {});
     expect(await (await ws.page(testPlan, { consistentWith: ready.token })).status()).toBe("ready");
 
@@ -79,5 +79,18 @@ describe("testing-plan: author the set in draft, record results after markReady"
     await expect(ws.mutate(testPlan, "addCase", { text: "added too late" })).rejects.toBeInstanceOf(
       MutationNotAllowedError,
     );
+  });
+
+  it("reopen backs out of `ready` → `draft`, restoring the frozen case SET for editing", async () => {
+    const reopened = await ws.mutate(testPlan, "reopen", {});
+    expect(await (await ws.page(testPlan, { consistentWith: reopened.token })).status()).toBe("draft");
+
+    // Authoring the set is mutable again in `draft`.
+    const added = await ws.mutate(testPlan, "addCase", { text: "added after reopen" });
+    expect(await (await ws.page(testPlan, { consistentWith: added.token })).status()).toBe("draft");
+
+    // ...and we can re-seal.
+    const ready = await ws.mutate(testPlan, "markReady", {});
+    expect(await (await ws.page(testPlan, { consistentWith: ready.token })).status()).toBe("ready");
   });
 });

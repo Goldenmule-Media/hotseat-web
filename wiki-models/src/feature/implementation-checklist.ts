@@ -1,6 +1,7 @@
 /**
  * `implementation-checklist` page type — declarative. Tracked work items:
- * building → complete, with `task` list elements (todo ⇄ done).
+ * building ⇄ complete (reopen backs out of the sealed state), with `task`
+ * list elements (todo ⇄ done).
  *
  * A task may be MANUAL (hand-checked build work) or a GATE-TASK bound to a structural
  * fact via `meta.computed` (feature-review Item 3). A gate-task's checkbox is COMPUTED
@@ -69,7 +70,7 @@ export const ImplementationChecklist = definePageType({
   type: "implementation-checklist",
   version: 1,
   initialStatus: "building",
-  statusTransitions: [t("building", "markComplete", "complete")],
+  statusTransitions: [t("building", "markComplete", "complete"), t("complete", "reopen", "building")],
   finalize: "markComplete",
   sections: {
     tasks: {
@@ -136,6 +137,9 @@ export const ImplementationChecklist = definePageType({
       ],
     },
     markComplete: { args: zodSchema(empty), transition: { level: "page", event: "markComplete" } },
+    // Back out of the sealed `complete` state to keep editing tasks (`tasks` is
+    // `mutableIn: ["building"]`). Mirrors feature-spec's `reopen`.
+    reopen: { args: zodSchema(empty), transition: { level: "page", event: "reopen" } },
   },
   render: {
     title: "{title}",

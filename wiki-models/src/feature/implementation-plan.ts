@@ -1,6 +1,7 @@
 /**
  * `implementation-plan` page type — declarative. An ordered plan of attack:
- * draft → ready, with `step` and `question` list elements.
+ * draft ⇄ ready (reopen backs out of the sealed state), with `step` and
+ * `question` list elements.
  */
 import type { BlockId, DeepReadonly, PageState, Precondition, SectionOp } from "wiki/authoring";
 import { arg, definePageType, t } from "wiki/authoring";
@@ -22,7 +23,7 @@ export const ImplementationPlan = definePageType({
   type: "implementation-plan",
   version: 1,
   initialStatus: "draft",
-  statusTransitions: [t("draft", "markReady", "ready")],
+  statusTransitions: [t("draft", "markReady", "ready"), t("ready", "reopen", "draft")],
   finalize: "markReady",
   sections: {
     steps: { name: "Steps", required: true, mutableIn: ["draft"], fields: { items: { kind: "list", element: "step", ordered: true } } },
@@ -141,6 +142,10 @@ export const ImplementationPlan = definePageType({
       transition: { level: "page", event: "markReady" },
       preconditions: [planHasDataModel],
     },
+    // Back out of the sealed `ready` state to keep editing the plan (sections are
+    // `mutableIn: ["draft"]`). Re-running `markReady` re-checks `planHasDataModel`.
+    // Mirrors feature-spec's `reopen`.
+    reopen: { args: zodSchema(empty), transition: { level: "page", event: "reopen" } },
   },
   render: {
     title: "{title}",

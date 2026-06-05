@@ -1,6 +1,7 @@
 /**
- * `testing-plan` page type — declarative. Test cases + results: draft → ready,
- * with `case` list elements (planned → passed/failed, failed → passed).
+ * `testing-plan` page type — declarative. Test cases + results: draft ⇄ ready
+ * (reopen backs out of the sealed state), with `case` list elements
+ * (planned → passed/failed, failed → passed).
  */
 import { arg, definePageType, t } from "wiki/authoring";
 import { z, zodSchema } from "wiki/authoring";
@@ -11,7 +12,7 @@ export const TestingPlan = definePageType({
   type: "testing-plan",
   version: 1,
   initialStatus: "draft",
-  statusTransitions: [t("draft", "markReady", "ready")],
+  statusTransitions: [t("draft", "markReady", "ready"), t("ready", "reopen", "draft")],
   finalize: "markReady",
   sections: {
     cases: {
@@ -65,6 +66,9 @@ export const TestingPlan = definePageType({
       transition: { level: "element", event: "fail" },
     },
     markReady: { args: zodSchema(empty), transition: { level: "page", event: "markReady" } },
+    // Back out of the sealed `ready` state to keep editing the case set (`cases` is
+    // `mutableIn: ["draft"]`). Mirrors feature-spec's `reopen`.
+    reopen: { args: zodSchema(empty), transition: { level: "page", event: "reopen" } },
   },
   render: {
     title: "{title}",
