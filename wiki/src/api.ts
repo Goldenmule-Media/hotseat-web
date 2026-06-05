@@ -367,6 +367,9 @@ export interface ITreeNode {
   readonly status?: string;
   /** Hidden from default views (orthogonal to `status`); present and true only when archived. */
   readonly archived?: boolean;
+  /** Last-mutated timestamp (ISO). For an archived page this is when it was archived — archived
+   *  pages are frozen, so no later mutation moves it (lets views order by archival time). */
+  readonly updatedAt?: string;
   readonly children: readonly ITreeNode[];
 }
 

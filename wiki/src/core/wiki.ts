@@ -820,6 +820,7 @@ function buildTree(state: IWorkspaceState): ITreeNode {
       title: node?.title ?? id,
       ...(node !== undefined ? { type: node.type, status: node.status } : {}),
       ...(node?.archived === true ? { archived: true } : {}),
+      ...(node?.updatedAt !== undefined ? { updatedAt: node.updatedAt } : {}),
       children: childIds.map(visit),
     };
   };

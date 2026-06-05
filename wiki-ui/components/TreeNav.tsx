@@ -33,7 +33,8 @@ interface TreeCtx {
 }
 
 /** The top-most archived page of every branch (does not descend into an archived subtree —
- *  unarchiving the top node restores the whole branch). */
+ *  unarchiving the top node restores the whole branch), newest-archived first. An archived page
+ *  is frozen, so its `updatedAt` is the moment it was archived — exactly what we sort by. */
 function collectArchived(nodes: readonly ITreeNode[]): ITreeNode[] {
   const out: ITreeNode[] = [];
   const walk = (ns: readonly ITreeNode[]): void => {
@@ -43,6 +44,8 @@ function collectArchived(nodes: readonly ITreeNode[]): ITreeNode[] {
     }
   };
   walk(nodes);
+  // ISO timestamps sort lexicographically; newest (largest) first, title as a stable tiebreak.
+  out.sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "") || a.title.localeCompare(b.title));
   return out;
 }
 
