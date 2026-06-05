@@ -14,9 +14,10 @@ every page renders **deterministically** to Markdown. Agents reach it over **MCP
   reads its own prior writes.
 - **Schema is pluggable and hot-reloadable.** Page types live in `wiki-models` and load into a running
   server by reference — the engine ships none baked in.
-- **Renders back to disk (optional).** Point `WIKI_MCP_MD_ROOT` at a directory and the wiki mirrors each
-  workspace's Markdown there, kept current off the same projection tail — content-hashed so the git diff
-  stays honest. The wiki stays the source of truth; the repo gets a faithful, always-current rendered copy.
+- **Renders back to disk (optional).** Enable with `--md` (output defaults to `docs/`, override with
+  `WIKI_MCP_MD_ROOT`) and the wiki mirrors each workspace's Markdown there, kept current off the same projection
+  tail — content-hashed so the git diff stays honest. The wiki stays the source of truth; the repo gets a
+  faithful, always-current rendered copy.
 
 ### The packages
 
