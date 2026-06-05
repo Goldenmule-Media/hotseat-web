@@ -21,7 +21,7 @@
  * (DESIGN §6.2). Write tools advance the session's high-water mark and echo the
  * token in their result so a client MAY also thread it.
  */
-import { encodeToken, StaleEditError, type JsonSchema, type WorkspaceId } from "wiki";
+import { encodeToken, StaleEditError, type ISearchIndex, type JsonSchema, type WorkspaceId } from "wiki";
 
 import { asPageId, asWorkspaceId, type EmbeddedEngine } from "../engine.js";
 import type { SqlReadModel } from "../readmodel/readmodel.js";
@@ -51,6 +51,12 @@ export interface ToolResult {
 export interface WikiToolContext {
   readonly engine: EmbeddedEngine;
   readonly readModel: SqlReadModel;
+  /**
+   * The engine's full-text search index (fed by the projection tailer). The running
+   * server always provides it; it is optional only so a test that exercises non-search
+   * tools need not wire one — the `search` tool degrades to "not configured".
+   */
+  readonly searchIndex?: ISearchIndex;
   readonly tokens: SessionTokenManager;
   /** The MCP session id (undefined for stdio) — the token-manager key (DESIGN §6.2). */
   readonly sessionId: string | undefined;
@@ -125,6 +131,21 @@ async function awaitConsistency(ctx: WikiToolContext, workspace: WorkspaceId): P
 async function awaitAllConsistency(ctx: WikiToolContext): Promise<void> {
   const tokens = ctx.tokens.allWritten(ctx.sessionId);
   await Promise.all(tokens.map((t) => ctx.readModel.waitFor(t)));
+}
+
+/** Wait for the search index (its cursor is independent of the SQL read model's). */
+async function awaitSearchConsistency(
+  index: ISearchIndex,
+  ctx: WikiToolContext,
+  workspace: WorkspaceId,
+): Promise<void> {
+  const token = ctx.tokens.consistentWith(ctx.sessionId, workspace);
+  if (token !== undefined) await index.waitFor(token);
+}
+
+/** Fan out the search-index wait over every workspace the session wrote. */
+async function awaitAllSearchConsistency(index: ISearchIndex, ctx: WikiToolContext): Promise<void> {
+  await Promise.all(ctx.tokens.allWritten(ctx.sessionId).map((t) => index.waitFor(t)));
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -650,32 +671,41 @@ const renderPageTool: WikiTool = {
 const searchTool: WikiTool = {
   name: "search",
   description:
-    "Search pages by a substring of their title across one workspace (or all workspaces when workspaceId is omitted).",
+    "Full-text search over page CONTENT — the page's rendered Markdown (titles, prose, code, " +
+    "decisions, …) — across one workspace (or all workspaces when workspaceId is omitted). Returns " +
+    "ranked hits, each with a highlighted snippet of the match; archived pages are excluded. " +
+    "Case-insensitive: a plain query matches by word PREFIX (so \"concur\" finds \"concurrency\"); " +
+    "a query using web operators (quoted \"phrases\", OR, -excluded) is matched whole-word.",
   inputSchema: obj(
     {
-      query: str("Case-insensitive substring matched against page titles."),
+      query: str("Words to find in page content. Plain words match case-insensitively by prefix; quoted phrases, OR, and -term are honored."),
       workspaceId: { type: ["string", "null"], description: "Restrict to one workspace, or null for all." },
+      limit: { type: ["number", "null"], description: "Max hits to return, a positive integer (default 20)." },
     },
     ["query"],
   ),
   write: false,
   async handle(args, ctx) {
-    const query = reqStr(args, "query").toLowerCase();
-    const oneWs = optStrOrNull(args, "workspaceId");
-    if (oneWs !== null) await awaitConsistency(ctx, asWorkspaceId(oneWs));
-    else await awaitAllConsistency(ctx);
+    const index = ctx.searchIndex;
+    if (index === undefined) return { text: "Search is not configured on this server.", data: [] };
 
-    const workspaces = oneWs !== null ? [asWorkspaceId(oneWs)] : (await ctx.readModel.listWorkspaces()).map((w) => w.id as WorkspaceId);
-    const hits: Array<{ workspaceId: string; pageId: string; title: string; type: string; status: string }> = [];
-    for (const ws of workspaces) {
-      const pages = await ctx.readModel.listPages(ws);
-      for (const p of pages) {
-        if (p.title.toLowerCase().includes(query)) {
-          hits.push({ workspaceId: ws, pageId: p.id, title: p.title, type: p.type, status: p.status });
-        }
-      }
+    const query = reqStr(args, "query");
+    const oneWs = optStrOrNull(args, "workspaceId");
+    // Only a positive number is a meaningful limit; anything else falls back to the
+    // index default (the index also clamps defensively before the value reaches SQL).
+    const limit = typeof args.limit === "number" && args.limit >= 1 ? Math.floor(args.limit) : undefined;
+
+    let workspaces: WorkspaceId[];
+    if (oneWs !== null) {
+      await awaitSearchConsistency(index, ctx, asWorkspaceId(oneWs));
+      workspaces = [asWorkspaceId(oneWs)];
+    } else {
+      await awaitAllSearchConsistency(index, ctx);
+      workspaces = (await ctx.readModel.listWorkspaces()).map((w) => w.id as WorkspaceId);
     }
-    const lines = hits.map((h) => `- [${h.workspaceId}] ${h.title} (${h.type}) ${h.pageId}`);
+
+    const hits = await index.query(workspaces, query, limit !== undefined ? { limit } : undefined);
+    const lines = hits.map((h) => `- [${h.workspaceId}] ${h.title} (${h.type}) ${h.pageId}\n    ${h.snippet}`);
     return { text: hits.length === 0 ? "No matches." : lines.join("\n"), data: hits };
   },
 };

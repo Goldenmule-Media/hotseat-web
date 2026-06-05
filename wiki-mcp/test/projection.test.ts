@@ -116,7 +116,7 @@ describe("SQL read model: fold → serialize → SQL", () => {
 
     // ── capture the FULL contiguous history and project it ──
     const history = await ws.history({ consistentWith: lastToken });
-    const applied = await applyCommit(store.db, registry, { workspaceId: wsId, events: history }, fingerprint);
+    const { version: applied } = await applyCommit(store.db, registry, { workspaceId: wsId, events: history }, fingerprint);
 
     // the engine's own fold of the same history is the source of truth
     const folded = foldWorkspace(history, registry);
@@ -189,7 +189,7 @@ describe("SQL read model: fold → serialize → SQL", () => {
 
     // now project the full history up to (and including) the write's version.
     const history = await ws.history({ consistentWith: writeToken });
-    const applied = await applyCommit(store.db, registry, { workspaceId: wsId, events: history }, fingerprint);
+    const { version: applied } = await applyCommit(store.db, registry, { workspaceId: wsId, events: history }, fingerprint);
 
     await gate; // must resolve, not time out
     expect(resolved).toBe(true);

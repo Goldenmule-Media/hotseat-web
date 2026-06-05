@@ -272,3 +272,49 @@ export class ConsistencyTimeoutError extends WikiError {
     this.timeoutMs = timeoutMs;
   }
 }
+
+/**
+ * Thrown to a parked `waitFor` when its workspace is forgotten (handle teardown /
+ * `wiki.close()`) while the wait is still pending — a token-gated read can never be
+ * satisfied once its read model is gone, so it fails fast instead of hanging until the
+ * timeout. Distinct from {@link ConsistencyTimeoutError} (the wait elapsed): this is a
+ * deliberate teardown. `workspace` is a `WorkspaceId` (opaque `string`); kept as
+ * `string` here to keep this module dependency-free.
+ */
+export class ReadModelClosedError extends WikiError {
+  readonly workspace: string;
+  constructor(workspace: string) {
+    super(
+      "READ_MODEL_CLOSED",
+      `Read model forgot workspace "${workspace}" while a consistency wait was pending.`,
+    );
+    this.workspace = workspace;
+  }
+}
+
+/**
+ * Thrown to a token-gated search when the best-effort search-index reindex for that
+ * workspace FAILED to reach the awaited version (DESIGN — search seam). The durable
+ * write itself succeeded; only the derived full-text index could not apply, so the
+ * caller should retry the search or read without a consistency token (an
+ * eventually-consistent, token-less search still works). Distinct from
+ * {@link ConsistencyTimeoutError}: search fails FAST with the underlying `cause` rather
+ * than hanging until the timeout. Wraps the raw DB/Kysely error so the MCP boundary maps
+ * it by `code` instead of emitting an opaque internal error.
+ */
+export class SearchIndexUnavailableError extends WikiError {
+  override readonly cause: unknown;
+  readonly workspace: string;
+  readonly version: number;
+  constructor(workspace: string, version: number, cause: unknown) {
+    super(
+      "SEARCH_INDEX_UNAVAILABLE",
+      `Search index could not apply workspace "${workspace}" to version ${version}: ` +
+        `${cause instanceof Error ? cause.message : String(cause)}. ` +
+        `The durable write succeeded; retry the search or read without a consistency token.`,
+    );
+    this.cause = cause;
+    this.workspace = workspace;
+    this.version = version;
+  }
+}

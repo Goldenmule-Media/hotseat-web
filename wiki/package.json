@@ -17,11 +17,13 @@
   },
   "dependencies": {
     "@durable-streams/client": "^0.2.6",
+    "kysely": "^0.27.5",
     "zod": "^3.23.0",
     "zod-to-json-schema": "^3.23.0"
   },
   "devDependencies": {
     "@durable-streams/server": "^0.3.5",
+    "@electric-sql/pglite": "^0.2.17",
     "wiki-models": "*"
   }
 }

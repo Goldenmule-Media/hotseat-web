@@ -28,12 +28,17 @@ import {
   decodeToken,
   definePageType,
   encodeToken,
+  migrateSearchToLatest,
+  SqlSearchIndex,
   t,
   z,
   zodSchema,
   type IEventEnvelope,
+  type ISearchIndex,
+  type WikiSearchDatabase,
   type WorkspaceId,
 } from "wiki";
+import type { Kysely } from "kysely";
 import { Registry } from "wiki/registry";
 
 /** Read the `body.text` prose value out of a projected page row's `sections`. */
@@ -96,6 +101,7 @@ describe("wiki-mcp integration: token semantics + read-your-writes + resume", ()
   let engine: EmbeddedEngine;
   let store: ReadModelStore;
   let readModel: SqlReadModel;
+  let searchIndex: ISearchIndex;
   let projection: ProjectionService;
   let tokens: SessionTokenManager;
   const registry = new Registry(PAGE_TYPES);
@@ -118,8 +124,11 @@ describe("wiki-mcp integration: token semantics + read-your-writes + resume", ()
     );
     store = buildStore({ kind: "pglite" });
     await migrateToLatest(store.db, silentLogger);
+    const searchDb = store.db as unknown as Kysely<WikiSearchDatabase>;
+    await migrateSearchToLatest(searchDb);
+    searchIndex = new SqlSearchIndex(searchDb, 2000);
     readModel = new SqlReadModel(store.db, { defaultTimeoutMs: 2000, pollMs: 5 });
-    projection = new ProjectionService(store.db, PAGE_TYPES, readModel, silentLogger);
+    projection = new ProjectionService(store.db, PAGE_TYPES, readModel, silentLogger, undefined, searchIndex);
     tokens = new SessionTokenManager();
   });
 
@@ -131,7 +140,7 @@ describe("wiki-mcp integration: token semantics + read-your-writes + resume", ()
   });
 
   function ctx(sessionId: string | undefined, rm = readModel): WikiToolContext {
-    return { engine, readModel: rm, tokens, sessionId };
+    return { engine, readModel: rm, searchIndex, tokens, sessionId };
   }
   const drain = (): Promise<void> => projection.drain(engineEventSource(engine));
 
@@ -330,11 +339,11 @@ describe("wiki-mcp integration: token semantics + read-your-writes + resume", ()
     const { token } = await ws.mutate(p, "setBody", { text: "x" });
 
     const history = await ws.history({ consistentWith: token });
-    const applied1 = await applyCommit(store.db, registry, { workspaceId: wsId, events: history }, fingerprint);
+    const { version: applied1 } = await applyCommit(store.db, registry, { workspaceId: wsId, events: history }, fingerprint);
 
     // Re-apply the SAME full history: must return the same applied version and not
     // grow the event log / duplicate pages.
-    const applied2 = await applyCommit(store.db, registry, { workspaceId: wsId, events: history }, fingerprint);
+    const { version: applied2 } = await applyCommit(store.db, registry, { workspaceId: wsId, events: history }, fingerprint);
     expect(applied2).toBe(applied1);
     expect((await readModel.events(wsId)).length).toBe(applied1);
     expect((await readModel.listPages(wsId)).length).toBe(1);

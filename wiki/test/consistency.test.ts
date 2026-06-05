@@ -23,7 +23,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { ConsistencyToken, IWiki, IWorkspaceHandle, WorkspaceId } from "../src/api";
-import { ConsistencyTimeoutError } from "../src/core/errors";
+import { ConsistencyTimeoutError, ReadModelClosedError } from "../src/core/errors";
 import { encodeToken, InMemoryReadModel } from "../src/core/readmodel";
 import { featurePageTypes } from "wiki-models/feature";
 import { createTestWiki, type ITestWiki } from "../src/testing";
@@ -159,5 +159,14 @@ describe("InMemoryReadModel: un-tokened read may be stale, token-gated read wait
       ConsistencyTimeoutError,
     );
     expect(await rm.appliedToken(other)).toBe(encodeToken(other, 0));
+  });
+
+  it("forget() rejects a still-parked waiter with ReadModelClosedError (no hang on teardown)", async () => {
+    rm.notifyApplied(WS, 1);
+    // Park a wait for a head the read side hasn't reached, with a generous timeout — so a
+    // regression (forget that only clears timers) surfaces as a 1s timeout FAIL, not a hang.
+    const parked = rm.waitFor(encodeToken(WS, 9), { timeoutMs: 1000 });
+    rm.forget(WS); // teardown while the wait is pending
+    await expect(parked).rejects.toBeInstanceOf(ReadModelClosedError);
   });
 });

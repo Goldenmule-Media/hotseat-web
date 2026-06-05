@@ -22,7 +22,7 @@
  * determinism-sensitive reducer/renderer logic.
  */
 import type { ConsistencyToken, IReadModel, WorkspaceId } from "../api";
-import { ConsistencyTimeoutError } from "./errors";
+import { VersionWaiterRegistry } from "./version-waiters";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Token codec — { workspaceId, version } ↔ opaque comparable string (§8.6)
@@ -62,15 +62,6 @@ function padVersion(version: number): string {
 // InMemoryReadModel — the default IReadModel (§8.4 / §8.6)
 // ────────────────────────────────────────────────────────────────────────────
 
-/** A pending `waitFor` resolved once the workspace reaches `targetVersion`. */
-interface Waiter {
-  readonly targetVersion: number;
-  readonly resolve: () => void;
-  readonly reject: (err: unknown) => void;
-  /** Host timer handle (cleared on resolve/reject). */
-  timer: ReturnType<typeof setTimeout> | undefined;
-}
-
 /**
  * Default in-memory read model. Maintained per open workspace alongside the engine's
  * projection: every time the handle advances its fold (a local commit OR a folded
@@ -78,42 +69,28 @@ interface Waiter {
  * releases any `waitFor`s that the new head satisfies. `waitFor` for an
  * already-applied token resolves immediately; otherwise it parks until
  * `notifyApplied` crosses the threshold or `timeoutMs` elapses
- * ({@link ConsistencyTimeoutError}).
+ * ({@link ConsistencyTimeoutError}). The applied-version + parked-waiter machinery
+ * lives in the shared {@link VersionWaiterRegistry}; this class is a thin `IReadModel`
+ * adapter over it.
  */
 export class InMemoryReadModel implements IReadModel {
-  /** Highest applied `version` per workspace (== read-side head). */
-  private readonly applied = new Map<string, number>();
-  /** Outstanding `waitFor`s per workspace. */
-  private readonly waiters = new Map<string, Set<Waiter>>();
+  private readonly registry: VersionWaiterRegistry;
 
-  constructor(private readonly defaultTimeoutMs: number) {}
+  // Build the registry in the CONSTRUCTOR BODY, never as a field initializer: a field
+  // initializer runs before the `defaultTimeoutMs` parameter-property is assigned, so it
+  // would capture `undefined` and silently break the default `waitFor` timeout.
+  constructor(private readonly defaultTimeoutMs: number) {
+    this.registry = new VersionWaiterRegistry(defaultTimeoutMs);
+  }
 
   // ── IReadModel ──────────────────────────────────────────────────────────────
 
   async appliedToken(workspace: WorkspaceId): Promise<ConsistencyToken> {
-    return encodeToken(workspace, this.appliedVersion(workspace));
+    return this.registry.appliedToken(workspace);
   }
 
-  async waitFor(token: ConsistencyToken, opts?: { timeoutMs?: number }): Promise<void> {
-    const { workspaceId, version } = decodeToken(token);
-
-    // Fast path: already applied (read-your-writes is usually free in-process).
-    if (this.appliedVersion(workspaceId) >= version) return;
-
-    const timeoutMs = opts?.timeoutMs ?? this.defaultTimeoutMs;
-
-    await new Promise<void>((resolve, reject) => {
-      const waiter: Waiter = { targetVersion: version, resolve, reject, timer: undefined };
-      const bucket = this.waitersFor(workspaceId);
-      bucket.add(waiter);
-
-      waiter.timer = setTimeout(() => {
-        bucket.delete(waiter);
-        reject(new ConsistencyTimeoutError(token, timeoutMs));
-      }, timeoutMs);
-      // Don't keep the event loop alive solely for a consistency wait.
-      (waiter.timer as { unref?: () => void }).unref?.();
-    });
+  waitFor(token: ConsistencyToken, opts?: { timeoutMs?: number }): Promise<void> {
+    return this.registry.waitFor(token, opts);
   }
 
   // ── feed side (called by the handle as it advances its fold) ─────────────────
@@ -124,45 +101,11 @@ export class InMemoryReadModel implements IReadModel {
    * of out-of-order or duplicate notifications (keeps the max).
    */
   notifyApplied(workspace: WorkspaceId, version: number): void {
-    const current = this.applied.get(workspace) ?? ZERO_VERSION;
-    if (version <= current) return;
-    this.applied.set(workspace, version);
-
-    const bucket = this.waiters.get(workspace);
-    if (bucket === undefined || bucket.size === 0) return;
-    for (const waiter of [...bucket]) {
-      if (waiter.targetVersion <= version) {
-        if (waiter.timer !== undefined) clearTimeout(waiter.timer);
-        bucket.delete(waiter);
-        waiter.resolve();
-      }
-    }
+    this.registry.notifyApplied(workspace, version);
   }
 
-  /** Forget a workspace and reject any still-parked waiters (handle teardown). */
+  /** Forget a workspace and REJECT any still-parked waiters (handle teardown). */
   forget(workspace: WorkspaceId): void {
-    this.applied.delete(workspace);
-    const bucket = this.waiters.get(workspace);
-    if (bucket !== undefined) {
-      for (const waiter of [...bucket]) {
-        if (waiter.timer !== undefined) clearTimeout(waiter.timer);
-      }
-      this.waiters.delete(workspace);
-    }
-  }
-
-  // ── internals ────────────────────────────────────────────────────────────────
-
-  private appliedVersion(workspace: WorkspaceId): number {
-    return this.applied.get(workspace) ?? ZERO_VERSION;
-  }
-
-  private waitersFor(workspace: WorkspaceId): Set<Waiter> {
-    let bucket = this.waiters.get(workspace);
-    if (bucket === undefined) {
-      bucket = new Set<Waiter>();
-      this.waiters.set(workspace, bucket);
-    }
-    return bucket;
+    this.registry.forget(workspace);
   }
 }

@@ -317,12 +317,25 @@ export async function appliedVersion(
 }
 
 /**
+ * The outcome of {@link applyCommit}: the new applied `version`, plus — when this call
+ * actually applied (i.e. wasn't a no-op) — the freshly-folded `state` and the `newEvents`
+ * this commit added (those past the prior applied version). Downstream projections (the
+ * search index) reuse `state` instead of folding the same history again, and use
+ * `newEvents` to re-index only the pages a commit touched. Both are absent on a no-op.
+ */
+export interface ApplyResult {
+  readonly version: number;
+  readonly state?: IWorkspaceState;
+  readonly newEvents?: readonly IEventEnvelope[];
+}
+
+/**
  * Apply a {@link Commit}: fold its history, serialize the resulting state into SQL,
- * and advance `applied_version` — all in ONE transaction. Returns the new applied
- * version (the folded `state.version - 1`, i.e. the head event's `version`).
+ * and advance `applied_version` — all in ONE transaction. Returns an {@link ApplyResult}
+ * (the new applied version, and the folded state + delta events when it applied).
  *
  * Idempotent: if the commit's head `version` is already `<= applied_version`, the
- * apply is a no-op and the current applied version is returned.
+ * apply is a no-op — only `version` is returned, with no `state`/`newEvents`.
  *
  * @param fingerprint the registry fingerprint stamped on the offset row (§5.3).
  * @param languages the {@link LanguageRegistry} the symbol/reference projection
@@ -335,14 +348,14 @@ export async function applyCommit(
   commit: Commit,
   fingerprint: string,
   languages: LanguageRegistry = DEFAULT_LANGUAGES,
-): Promise<number> {
-  if (commit.events.length === 0) return appliedVersion(db, commit.workspaceId);
+): Promise<ApplyResult> {
+  if (commit.events.length === 0) return { version: await appliedVersion(db, commit.workspaceId) };
 
   // The applied position is the stream length (== the write token's version, the
   // head event's 0-based `version` + 1).
   const headApplied = commit.events[commit.events.length - 1].version + 1;
   const already = await appliedVersion(db, commit.workspaceId);
-  if (headApplied <= already) return already;
+  if (headApplied <= already) return { version: already };
 
   // Fold the full history with the engine's public, pure reducer (ADR-M3).
   const state = foldWorkspace(commit.events, registry);
@@ -411,7 +424,10 @@ export async function applyCommit(
       .execute();
   });
 
-  return newApplied;
+  // The events this commit added past the prior applied position — the delta the search
+  // index uses to re-render only the affected pages (`already` is -1 for a fresh fold).
+  const newEvents = commit.events.filter((e) => e.version + 1 > already);
+  return { version: newApplied, state, newEvents };
 }
 
 /** The most-recent `updatedAt` across the workspace's pages, else its creation-derived stamp. */

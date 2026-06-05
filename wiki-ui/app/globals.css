@@ -425,16 +425,21 @@ code {
   border-radius: 4px;
   padding: 1px 6px;
 }
-/* Terminal-status badge in the page header: a filled chip naming the sealed/final state. */
-.page-terminal-badge {
+/* Status badge in the page header: always present, naming the page's current status. */
+.page-status-badge {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--text);
-  background: var(--accent-dim);
-  border: 1px solid var(--accent);
+  color: var(--muted);
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 1px 6px;
+}
+/* Terminal (sealed/final) status: a filled chip so finished pages stand out. */
+.page-status-badge.page-terminal-badge {
+  color: var(--text);
+  background: var(--accent-dim);
+  border-color: var(--accent);
 }
 .page-archive-error {
   color: #f87171;

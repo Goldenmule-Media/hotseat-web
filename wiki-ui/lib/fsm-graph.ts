@@ -40,13 +40,18 @@ export interface FsmGraphModel {
 }
 
 /**
- * A status is **terminal** when the FSM declares no transition leaving it — the page can
- * change no further by status (it is sealed/final, e.g. `shipped`, `rejected`, `superseded`).
- * Drives the distinct UI treatment for finished pages (terminal badge + sidebar chip). Pure
- * so it is shared by the page header and the sidebar without touching React.
+ * A status is **terminal** when the lifecycle can REACH it but cannot LEAVE it — some
+ * transition lands on `status` and none leaves it (sealed/final, e.g. `shipped`,
+ * `rejected`, `superseded`). Requiring an incoming edge is what distinguishes a true
+ * terminal from the *initial* status of a type with no status lifecycle at all (e.g.
+ * `toc`, whose only state `active` has neither incoming nor outgoing edges) — such a
+ * page is not "sealed", it simply never transitions, so it must NOT get the treatment.
+ * Pure, so it is shared by the page header and the sidebar without touching React.
  */
 export function isTerminalStatus(fsm: FsmDescriptor, status: string): boolean {
-  return fsm.transitions.every((tr) => tr.from !== status);
+  const hasIncoming = fsm.transitions.some((tr) => tr.to === status);
+  const hasOutgoing = fsm.transitions.some((tr) => tr.from === status);
+  return hasIncoming && !hasOutgoing;
 }
 
 /** The per-instance availability the engine's describeMutations reports per command. */

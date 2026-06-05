@@ -22,6 +22,29 @@ export { foldWorkspace, applyWorkspace } from "./core/workspace";
 // codec is part of the public surface alongside the token type.
 export { encodeToken, decodeToken, ZERO_VERSION } from "./core/readmodel";
 
+// ── full-text search index (the engine's first content projection; Kysely-backed) ──
+// Bundled in the engine so client (browser) and server share one implementation; the
+// container injects the DB (pg / PGlite). See `wiki/src/search`.
+export {
+  SqlSearchIndex,
+  migrateSearchToLatest,
+  searchMigrationProvider,
+  renderSearchDocs,
+  renderAffectedDocs,
+  affectedPageIds,
+  SEARCH_CONFIG,
+} from "./search";
+export type {
+  ISearchIndex,
+  IWikiSearchConfig,
+  SearchDoc,
+  SearchDocTable,
+  SearchHit,
+  SearchOffsetTable,
+  SearchQueryOpts,
+  WikiSearchDatabase,
+} from "./search";
+
 // ── public runtime values from the type surface ──────────────────────────────
 export { ROOT } from "./api";
 
@@ -135,6 +158,8 @@ export {
   InvariantViolationError,
   UnknownPageTypeError,
   ConsistencyTimeoutError,
+  ReadModelClosedError,
+  SearchIndexUnavailableError,
   SectionNotFoundError,
   DuplicateSectionKeyError,
   SectionContractError,

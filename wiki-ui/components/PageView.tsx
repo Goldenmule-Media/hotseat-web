@@ -69,7 +69,8 @@ export function PageView({
   }, [pageType]);
 
   const currentStatus = node?.status ?? fsm?.initial ?? "";
-  // A page whose status has no outgoing transition is sealed — surface that in the header.
+  // The header always shows the current status; a terminal (sealed/final) status gets the
+  // distinct filled treatment on top of the always-present chip.
   const isTerminal = fsm !== null && currentStatus !== "" && isTerminalStatus(fsm, currentStatus);
 
   // Keep rewritten intra-wiki links as in-app navigations instead of full reloads.
@@ -106,8 +107,11 @@ export function PageView({
       <header className="page-header">
         <div className="page-header-main">
           {headerTitle !== null && <h1 className="page-title">{headerTitle}</h1>}
-          {isTerminal && (
-            <span className="page-terminal-badge" title="Terminal status — no further transitions">
+          {currentStatus !== "" && (
+            <span
+              className={`page-status-badge${isTerminal ? " page-terminal-badge" : ""}`}
+              title={isTerminal ? "Terminal status — no further transitions" : "Current status"}
+            >
               {currentStatus}
             </span>
           )}

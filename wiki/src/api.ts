@@ -5,7 +5,12 @@
  * Type-level helpers (PageTypeName, CommandName<K>, …) are pragmatic v1 aliases:
  * runtime safety comes from Zod arg-validation + the FSM guard. Full per-registry
  * inference is deferred (DESIGN §10.4 note / §18).
+ *
+ * One exception to "depends on nothing": the optional full-text search seam references
+ * the search index's public types (which ride on Kysely — the engine's one sanctioned
+ * external dependency). These are type-only imports, erased at runtime.
  */
+import type { IWikiSearchConfig, SearchHit, SearchQueryOpts } from "./search/schema";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Branded ids
@@ -298,6 +303,14 @@ export interface IWikiConfig {
   readonly cache?: { readonly maxWorkspaces?: number } | false;
   /** Optional sink for every appended event (logging/metrics). Must not throw. */
   readonly onEvent?: (event: IEventEnvelope) => void;
+  /**
+   * Optional full-text search index (the engine's first content-bearing read
+   * projection). The container injects a Kysely handle over a Postgres-compatible
+   * database (pg or PGlite); when omitted, `search` reads return an empty result. The
+   * index is fed off the same fold the read model is and is read-your-writes via
+   * write tokens (DESIGN — search seam).
+   */
+  readonly search?: IWikiSearchConfig;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -341,6 +354,21 @@ export interface IWiki {
    * {@link UnknownPageTypeError} for an unregistered type.
    */
   describeType(type: PageTypeName): TypeDescriptor;
+  /**
+   * Full-text search over page CONTENT (the deterministic Markdown render), ranked,
+   * with highlighted snippets. Fans out across `workspaces` (default: every open
+   * workspace). Requires {@link IWikiConfig.search}; returns `[]` when search is not
+   * configured. Pass `consistentWith` (a write token) for read-your-writes.
+   */
+  search(
+    query: string,
+    opts?: {
+      workspaces?: readonly WorkspaceId[];
+      limit?: number;
+      consistentWith?: ConsistencyToken;
+      timeoutMs?: number;
+    },
+  ): Promise<readonly SearchHit[]>;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -432,6 +460,13 @@ export interface IWorkspaceHandle {
   page(pageId: PageId, opts?: IReadOpts): Promise<IPageView>;
   toMarkdown(pageId?: PageId, opts?: IReadOpts): Promise<string>;
   history(opts?: IReadOpts): Promise<readonly IEventEnvelope[]>;
+  /**
+   * Full-text search over this workspace's page CONTENT (the deterministic Markdown
+   * render), ranked, with highlighted snippets. Requires {@link IWikiConfig.search};
+   * returns `[]` when search is not configured. Pass `consistentWith` (a write token)
+   * via `opts` for read-your-writes.
+   */
+  search(query: string, opts?: SearchQueryOpts): Promise<readonly SearchHit[]>;
 
   // ── live updates (G6) ──
   subscribe(handler: (event: IEventEnvelope) => void): Promise<Unsubscribe>;

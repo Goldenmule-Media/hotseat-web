@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FsmDescriptor, IMutationDescriptor } from "wiki";
-import { buildFsmGraph, resolveTransitionTarget, type EdgeRef } from "./fsm-graph";
+import { buildFsmGraph, isTerminalStatus, resolveTransitionTarget, type EdgeRef } from "./fsm-graph";
 
 const fsm: FsmDescriptor = {
   type: "feature-brief",
@@ -16,6 +16,24 @@ const fsm: FsmDescriptor = {
 
 const edge = (model: ReturnType<typeof buildFsmGraph>, from: string, ev: string) =>
   model.edges.find((e) => e.source === from && e.label === ev)!;
+
+describe("isTerminalStatus", () => {
+  it("is true for a status the lifecycle reaches but cannot leave", () => {
+    expect(isTerminalStatus(fsm, "shipped")).toBe(true);
+    expect(isTerminalStatus(fsm, "abandoned")).toBe(true);
+  });
+
+  it("is false for the initial status (it has outgoing transitions)", () => {
+    expect(isTerminalStatus(fsm, "draft")).toBe(false);
+  });
+
+  it("is false for the lone status of a type with NO status lifecycle (e.g. toc)", () => {
+    // A `toc`-shaped FSM: one state, no transitions. `active` is the initial state with
+    // neither incoming nor outgoing edges — it is not "sealed", just lifecycle-free.
+    const toc: FsmDescriptor = { type: "toc", initial: "active", states: ["active"], transitions: [] };
+    expect(isTerminalStatus(toc, "active")).toBe(false);
+  });
+});
 
 describe("buildFsmGraph", () => {
   it("marks exactly the current-status node", () => {

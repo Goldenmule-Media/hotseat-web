@@ -47,6 +47,15 @@ import { CommandBus, type BusProjection, type CommandBusConfig, type CommitOutco
 import { PageNotFoundError, WorkspaceNotFoundError } from "./errors";
 import { encodeToken, InMemoryReadModel } from "./readmodel";
 import { Registry } from "./registry";
+import {
+  affectedPageIds,
+  renderAffectedDocs,
+  renderSearchDocs,
+  SqlSearchIndex,
+  type ISearchIndex,
+  type SearchHit,
+  type SearchQueryOpts,
+} from "../search";
 import { STRUCTURAL_HANDLERS } from "./structure";
 import type { CatalogEvent, IEventLog, Services } from "./types";
 import { applyWorkspace, foldWorkspace, pageStateView } from "./workspace";
@@ -131,7 +140,19 @@ export function createWiki(config: IWikiConfig): IWiki {
     config.readConsistencyTimeoutMs ?? DEFAULT_READ_CONSISTENCY_TIMEOUT_MS,
   );
 
-  return new Wiki(config, registry, services, eventLog, bus, readModel);
+  // The optional full-text search index (the engine's first content projection). The
+  // container injects the DB; absent ⇒ no index and `search` reads return empty.
+  const searchIndex: ISearchIndex | undefined =
+    config.search !== undefined
+      ? new SqlSearchIndex(
+          config.search.db,
+          config.search.readConsistencyTimeoutMs ??
+            config.readConsistencyTimeoutMs ??
+            DEFAULT_READ_CONSISTENCY_TIMEOUT_MS,
+        )
+      : undefined;
+
+  return new Wiki(config, registry, services, eventLog, bus, readModel, searchIndex);
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -149,6 +170,7 @@ class Wiki implements IWiki {
     private readonly eventLog: IEventLog,
     private readonly bus: CommandBus,
     private readonly readModel: InMemoryReadModel,
+    private readonly searchIndex: ISearchIndex | undefined,
   ) {}
 
   async createWorkspace(input: { name: string; id?: WorkspaceId }): Promise<IWorkspaceHandle> {
@@ -239,6 +261,7 @@ class Wiki implements IWiki {
     for (const handle of this.open.values()) {
       handle.teardown();
       this.readModel.forget(handle.id);
+      this.searchIndex?.forget(handle.id);
     }
     this.open.clear();
     await this.eventLog.close();
@@ -307,6 +330,30 @@ class Wiki implements IWiki {
     };
   }
 
+  /**
+   * Full-text search over page content across `workspaces` (default: every open
+   * workspace), ranked, with highlighted snippets. Returns `[]` when no search index
+   * is configured ({@link IWikiConfig.search}).
+   */
+  async search(
+    query: string,
+    opts?: {
+      workspaces?: readonly WorkspaceId[];
+      limit?: number;
+      consistentWith?: ConsistencyToken;
+      timeoutMs?: number;
+    },
+  ): Promise<readonly SearchHit[]> {
+    if (this.searchIndex === undefined) return [];
+    const workspaces = opts?.workspaces ?? ([...this.open.keys()] as WorkspaceId[]);
+    const queryOpts: SearchQueryOpts = {
+      ...(opts?.limit !== undefined ? { limit: opts.limit } : {}),
+      ...(opts?.consistentWith !== undefined ? { consistentWith: opts.consistentWith } : {}),
+      ...(opts?.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+    };
+    return this.searchIndex.query(workspaces, query, queryOpts);
+  }
+
   /** Start the live tail, register the handle, and return it. */
   private async attach(id: WorkspaceId, projection: BusProjection): Promise<WorkspaceHandle> {
     const handle = new WorkspaceHandle(
@@ -317,6 +364,7 @@ class Wiki implements IWiki {
       this.config,
       this.readModel,
       this.eventLog,
+      this.searchIndex,
     );
     this.open.set(id, handle);
     // Seed the read model with whatever the projection has already folded so a token
@@ -372,6 +420,11 @@ class WorkspaceHandle implements IWorkspaceHandle {
   readonly id: WorkspaceId;
 
   private readonly mutex = new Mutex();
+  /** Serializes search reindex tasks off the write path (one in flight per workspace). */
+  private readonly searchMutex = new Mutex();
+  /** Workspace version the search index was last advanced to (advanced only on success,
+   *  so a failed/dropped reindex is retried from here by the next write). */
+  private lastIndexedVersion = 0;
   private tailUnsub: Unsubscribe | undefined;
 
   constructor(
@@ -382,6 +435,7 @@ class WorkspaceHandle implements IWorkspaceHandle {
     private readonly config: IWikiConfig,
     private readonly readModel: InMemoryReadModel,
     private readonly eventLog: IEventLog,
+    private readonly searchIndex: ISearchIndex | undefined,
   ) {
     this.id = id;
   }
@@ -404,10 +458,14 @@ class WorkspaceHandle implements IWorkspaceHandle {
           this.projection.cursor = cursor;
           // Advance the read model so token-gated reads see externally-tailed writes.
           this.readModel.notifyApplied(this.id, this.projection.state.version);
+          // Re-index the pages an external write changed (off the write path).
+          this.scheduleReindex();
         });
       },
       { fromCursor: this.projection.cursor },
     );
+    // Index the already-folded head (open/catch-up) so search is current before any write.
+    this.scheduleReindex();
   }
 
   /** Tear down the live tail (called by `wiki.close()`). */
@@ -560,7 +618,61 @@ class WorkspaceHandle implements IWorkspaceHandle {
    */
   private commit(outcome: CommitOutcome): Committed<unknown> {
     this.readModel.notifyApplied(this.id, outcome.committedVersion);
+    // Re-index this write's pages off the write path (best-effort, eventually consistent).
+    this.scheduleReindex();
     return { value: outcome.result, token: encodeToken(this.id, outcome.committedVersion) };
+  }
+
+  /**
+   * Re-index the workspace's content off the write path. The folded state and the
+   * documents are snapshotted SYNCHRONOUSLY (so indexing never interleaves with a later
+   * fold), and only the DB write is queued on the search mutex (so it never blocks the
+   * append). The first index after a (re)open rebuilds the whole workspace; thereafter
+   * only the pages a commit could have changed are re-rendered ({@link affectedPageIds}),
+   * so a one-page edit costs O(affected), not O(workspace). `lastIndexedVersion` advances
+   * only once the write SUCCEEDS, so a dropped best-effort reindex is retried by the next
+   * write's delta (which then spans the gap).
+   */
+  private scheduleReindex(): void {
+    const idx = this.searchIndex;
+    if (idx === undefined) return;
+    const state = this.projection.state;
+    const version = state.version;
+    const since = this.lastIndexedVersion;
+    if (version <= since) return; // nothing new since the last successful index
+
+    const advance = (): void => {
+      this.lastIndexedVersion = Math.max(this.lastIndexedVersion, version);
+    };
+    const swallow = (err: unknown): void => {
+      // Derived index, best-effort: the durable write already succeeded, so this never
+      // halts the append. But a token-gated search waiting on `version` must NOT hang to
+      // its timeout — fail it fast with the cause. `lastIndexedVersion` is not advanced, so
+      // the next write's delta (spanning `since`) retries; that success clears the failure.
+      idx.fail(this.id, version, err);
+    };
+
+    const renderOpts = { onRenderError: this.config.search?.onRenderError };
+
+    if (since === 0) {
+      // First index (open / catch-up): rebuild wholesale so any stale rows are dropped.
+      const docs = renderSearchDocs(state, this.registry, renderOpts);
+      void this.searchMutex.run(() => idx.reconcile(this.id, version, docs)).then(advance, swallow);
+      return;
+    }
+
+    // Steady state: re-render only the pages this delta could have changed.
+    const newEvents = this.projection.events.filter((e) => e.version + 1 > since);
+    const affected = affectedPageIds(newEvents, state);
+    const upserts = renderAffectedDocs(state, affected, this.registry, renderOpts);
+    const removed = [...affected].filter((id) => !state.pages.has(id));
+    void this.searchMutex.run(() => idx.update(this.id, version, upserts, removed)).then(advance, swallow);
+  }
+
+  /** Full-text search over THIS workspace's content (see {@link IWorkspaceHandle.search}). */
+  async search(query: string, opts?: SearchQueryOpts): Promise<readonly SearchHit[]> {
+    if (this.searchIndex === undefined) return [];
+    return this.searchIndex.query([this.id], query, opts);
   }
 
   // ── reads (token-gated; async — §8.6) ─────────────────────────────────────────

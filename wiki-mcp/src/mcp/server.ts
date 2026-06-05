@@ -34,7 +34,7 @@ import {
   type ListToolsResult,
   type ReadResourceResult,
 } from "@modelcontextprotocol/sdk/types.js";
-import { WikiError, decodeToken, type WorkspaceId } from "wiki";
+import { WikiError, decodeToken, type ISearchIndex, type WorkspaceId } from "wiki";
 
 import { asWorkspaceId, type EmbeddedEngine } from "../engine.js";
 import type { Logger } from "../logger.js";
@@ -50,6 +50,8 @@ const SERVER_INFO = { name: "wiki-mcp", version: "0.1.0" } as const;
 export interface McpServerDeps {
   readonly engine: EmbeddedEngine;
   readonly readModel: SqlReadModel;
+  /** The engine's full-text search index backing the `search` tool. */
+  readonly searchIndex: ISearchIndex;
   readonly namespace: string;
   readonly logger: Logger;
   /**
@@ -167,6 +169,7 @@ export class WikiMcpServer {
       const ctx: WikiToolContext = {
         engine: this.deps.engine,
         readModel: this.deps.readModel,
+        searchIndex: this.deps.searchIndex,
         tokens: this.tokens,
         sessionId: extra.sessionId,
       };

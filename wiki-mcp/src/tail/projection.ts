@@ -22,9 +22,16 @@
  * configured page types can't fold **halts** that workspace's projection (§9) rather
  * than corrupting SQL.
  */
-import { UnknownPageTypeError } from "wiki";
+import {
+  UnknownPageTypeError,
+  affectedPageIds,
+  decodeToken,
+  foldWorkspace,
+  renderAffectedDocs,
+  renderSearchDocs,
+} from "wiki";
 import { Registry } from "wiki/registry";
-import type { IEventEnvelope, Unsubscribe, WorkspaceId } from "wiki";
+import type { IEventEnvelope, ISearchIndex, IWorkspaceState, Unsubscribe, WorkspaceId } from "wiki";
 import type { Kysely } from "kysely";
 
 import type { Logger } from "../logger.js";
@@ -97,6 +104,12 @@ export class ProjectionService {
     private readonly readModel: SqlReadModel,
     private readonly logger: Logger,
     languages?: LanguageRegistry,
+    /**
+     * The engine's full-text search index (optional). When present, each projected
+     * commit also re-indexes the workspace's rendered Markdown — so ALL workspaces are
+     * searchable durably (the tailer tails the whole namespace, not just hot handles).
+     */
+    private readonly searchIndex?: ISearchIndex,
   ) {
     this.registry = new Registry(pageTypes);
     this.fingerprint = this.registry.fingerprint();
@@ -112,10 +125,39 @@ export class ProjectionService {
    */
   async project(commit: Commit): Promise<number> {
     try {
-      const applied = await applyCommit(this.db, this.registry, commit, this.fingerprint, this.languages);
-      this.readModel.notifyApplied(commit.workspaceId, applied);
-      this.logger.info("projection applied", { workspace: commit.workspaceId, appliedVersion: applied });
-      return applied;
+      const { version, state, newEvents } = await applyCommit(
+        this.db,
+        this.registry,
+        commit,
+        this.fingerprint,
+        this.languages,
+      );
+      this.readModel.notifyApplied(commit.workspaceId, version);
+      // Re-index the rendered content for full-text search. When this commit applied,
+      // reuse the fold applyCommit already did (`state`/`newEvents`) and re-render ONLY
+      // the affected pages; on a read-model no-op, still catch the index up if it lagged
+      // (a dropped best-effort update, or a fresh/rebuilt search DB). Best-effort: the
+      // read model already committed, so a search failure must not halt projection.
+      if (this.searchIndex !== undefined) {
+        try {
+          if (state !== undefined && newEvents !== undefined) {
+            await this.indexSearch(commit.workspaceId, version, state, newEvents);
+          } else {
+            await this.catchUpSearch(commit, version);
+          }
+        } catch (searchErr) {
+          this.logger.warn("search index update failed", {
+            workspace: commit.workspaceId,
+            error: searchErr instanceof Error ? searchErr.message : String(searchErr),
+          });
+          // Best-effort: the read model already committed, so this never halts projection.
+          // But fail-fast any token-gated search waiting on `version` (vs a silent timeout);
+          // the next commit's catch-up reindex clears the failure on success.
+          this.searchIndex.fail(commit.workspaceId, version, searchErr);
+        }
+      }
+      this.logger.info("projection applied", { workspace: commit.workspaceId, appliedVersion: version });
+      return version;
     } catch (err) {
       if (err instanceof UnknownPageTypeError) {
         this.readModel.halt(commit.workspaceId, err);
@@ -131,6 +173,70 @@ export class ProjectionService {
       }
       throw err;
     }
+  }
+
+  /**
+   * Feed the search index the delta a commit produced, reusing the fold from
+   * {@link applyCommit}. When the index is already current up to the prior applied
+   * version, re-render ONLY the affected pages ({@link affectedPageIds}) — O(affected),
+   * not O(workspace). When it has fallen behind (a dropped best-effort update), the delta
+   * is non-contiguous, so rebuild the workspace to catch up.
+   */
+  private async indexSearch(
+    workspace: WorkspaceId,
+    version: number,
+    state: IWorkspaceState,
+    newEvents: readonly IEventEnvelope[],
+  ): Promise<void> {
+    const index = this.searchIndex;
+    if (index === undefined) return;
+    const indexApplied = decodeToken(await index.appliedToken(workspace)).version;
+    const priorApplied = version - newEvents.length; // contiguous: each event bumps version by 1
+    if (indexApplied < priorApplied) {
+      await index.reconcile(workspace, version, renderSearchDocs(state, this.registry, this.renderOpts(workspace)));
+      return;
+    }
+    const affected = affectedPageIds(newEvents, state);
+    const upserts = renderAffectedDocs(state, affected, this.registry, this.renderOpts(workspace));
+    const removed = [...affected].filter((id) => !state.pages.has(id));
+    await index.update(workspace, version, upserts, removed);
+  }
+
+  /**
+   * Catch the search index up on a read-model NO-OP (applyCommit folded nothing). The
+   * index can still be behind — a dropped best-effort update, or a fresh/rebuilt search
+   * DB against an already-projected read model. Only then do we re-fold (the history
+   * applyCommit didn't need) and rebuild; if the index is current this is a cheap
+   * in-memory check.
+   */
+  private async catchUpSearch(commit: Commit, version: number): Promise<void> {
+    const index = this.searchIndex;
+    if (index === undefined) return;
+    const indexApplied = decodeToken(await index.appliedToken(commit.workspaceId)).version;
+    if (indexApplied >= version) return;
+    const state = foldWorkspace(commit.events, this.registry);
+    await index.reconcile(
+      commit.workspaceId,
+      version,
+      renderSearchDocs(state, this.registry, this.renderOpts(commit.workspaceId)),
+    );
+  }
+
+  /**
+   * Build the render-error hook for a workspace: a page that fails to render is still
+   * indexed (empty body) but logged per page, so an otherwise-silent search-vs-fold drift
+   * surfaces in the tailer's logs (the durable feed path, where this Logger is the signal).
+   */
+  private renderOpts(workspace: WorkspaceId): { onRenderError: (pageId: string, err: unknown) => void } {
+    return {
+      onRenderError: (pageId: string, err: unknown): void => {
+        this.logger.warn("search: page failed to render (indexed with empty body)", {
+          workspace,
+          pageId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      },
+    };
   }
 
   /**

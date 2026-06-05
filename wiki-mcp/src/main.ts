@@ -25,6 +25,8 @@ import { ProjectionService } from "./tail/projection.js";
 import { engineEventSource } from "./tail/engine-source.js";
 import { ModelRegistry } from "./models/registry.js";
 import { WikiMcpServer, type McpTransport } from "./mcp/server.js";
+import { SqlSearchIndex, migrateSearchToLatest, type ISearchIndex, type WikiSearchDatabase } from "wiki";
+import type { Kysely } from "kysely";
 
 export type { Logger } from "./logger.js";
 export { consoleLogger, silentLogger } from "./logger.js";
@@ -67,6 +69,8 @@ export interface CreateWikiMcpOptions {
 export interface WikiMcp {
   readonly engine: EmbeddedEngine;
   readonly readModel: SqlReadModel;
+  /** The engine's full-text search index, backed by the same database as the read model. */
+  readonly searchIndex: ISearchIndex;
   readonly projection: ProjectionService;
   /** The live model registry (ADR-M6) — load/reload/unregister page-type bundles at runtime. */
   readonly models: ModelRegistry;
@@ -101,6 +105,14 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
     pollMs: config.waitForPollMs,
   });
 
+  // ── full-text search index (engine-owned, same database as the read model) ──
+  // The engine ships the schema + queries; the host owns the connection. We run the
+  // search migrations under their own bookkeeping tables (so they coexist with the
+  // read-model migrator on the same DB) and feed the index from the projection tailer.
+  const searchDb = store.db as unknown as Kysely<WikiSearchDatabase>;
+  await migrateSearchToLatest(searchDb);
+  const searchIndex: ISearchIndex = new SqlSearchIndex(searchDb, config.readConsistencyTimeoutMs);
+
   // ── write-side engine (hot LRU) ──
   const engine = new EmbeddedEngine(
     {
@@ -122,6 +134,8 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
     models.pageTypes(),
     readModel,
     logger.child?.({ subsystem: "projection" }) ?? logger,
+    undefined, // languages → built-in default
+    searchIndex,
   );
   const source = engineEventSource(engine);
   const drainOnce = async (): Promise<void> => {
@@ -163,6 +177,7 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
   const server = new WikiMcpServer({
     engine,
     readModel,
+    searchIndex,
     namespace: config.namespace,
     logger: logger.child?.({ subsystem: "mcp" }) ?? logger,
     // A local commit doesn't fan out to its own handle's subscribers, so push each
@@ -174,6 +189,7 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
   return {
     engine,
     readModel,
+    searchIndex,
     projection,
     models,
     server,
