@@ -1,12 +1,12 @@
 "use client";
 
 /** Collapsible page-tree sidebar. Renders the engine's `ITreeNode` tree as in-app links — the
- *  primary navigation surface. On top of the engine's canonical order it layers two UI-only
- *  views (both per-workspace, persisted to localStorage):
- *    - archived pages (and their subtree) are hidden unless "Show archived" is on (the durable
- *      `archived` flag is engine state — engine ADR-011 — toggled here via archive/unarchive);
+ *  primary navigation surface. Two UI-only layers sit on top (per-workspace, localStorage):
  *    - children can be dragged to reorder among their siblings (a local rearrangement, never
- *      written to the stream).
+ *      written to the stream — see `useChildOrder`);
+ *    - archived pages (the durable `archived` flag, engine ADR-011) are kept OUT of the main
+ *      tree and surfaced in a collapsible "Archived" section at the foot, from which they can be
+ *      opened or unarchived. Archiving itself lives on the page content (see PageView).
  */
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -16,7 +16,7 @@ import { pageHref } from "../lib/routes";
 import { useChildOrder, type ChildOrder } from "../lib/useChildOrder";
 import { useCollapsed, type CollapsedState } from "../lib/useCollapsed";
 import { useShowArchived } from "../lib/useShowArchived";
-import { useStructuralMutator, type StructuralMutator } from "../lib/live";
+import { useStructuralMutator } from "../lib/live";
 
 type DragState = { id: string; parentKey: string } | null;
 
@@ -26,20 +26,27 @@ interface TreeCtx {
   activePageId: string | null;
   collapse: CollapsedState;
   order: ChildOrder;
-  showArchived: boolean;
-  structural: StructuralMutator;
   drag: DragState;
   setDrag: (d: DragState) => void;
   overId: string | null;
   setOverId: (id: string | null) => void;
 }
 
-/** True if any node in the forest (at any depth) is archived. */
-function anyArchived(nodes: readonly ITreeNode[]): boolean {
-  return nodes.some((n) => n.archived === true || anyArchived(n.children));
+/** The top-most archived page of every branch (does not descend into an archived subtree —
+ *  unarchiving the top node restores the whole branch). */
+function collectArchived(nodes: readonly ITreeNode[]): ITreeNode[] {
+  const out: ITreeNode[] = [];
+  const walk = (ns: readonly ITreeNode[]): void => {
+    for (const n of ns) {
+      if (n.archived === true) out.push(n);
+      else walk(n.children);
+    }
+  };
+  walk(nodes);
+  return out;
 }
 
-/** One level of siblings: applies the user's order + archived filter, and owns sibling reordering. */
+/** One level of siblings: applies the user's order + drops archived pages, and owns reordering. */
 function TreeChildren({
   parentKey,
   siblings,
@@ -52,7 +59,7 @@ function TreeChildren({
   top?: boolean;
 }): React.JSX.Element | null {
   const ordered = ctx.order.applyOrder(parentKey, siblings);
-  const visible = ordered.filter((n) => ctx.showArchived || n.archived !== true);
+  const visible = ordered.filter((n) => n.archived !== true);
   if (visible.length === 0) return null;
 
   // Reorder within this parent. Direction-aware so an item can be dragged to either end:
@@ -94,20 +101,13 @@ function TreeItem({
   const isActive = id === ctx.activePageId;
   const hasChildren = node.children.length > 0;
   const collapsed = hasChildren && ctx.collapse.isCollapsed(id);
-  const archived = node.archived === true;
   const isDragging = ctx.drag?.id === id;
   const isOver = ctx.overId === id && ctx.drag !== null && ctx.drag.parentKey === parentKey && ctx.drag.id !== id;
-
-  const rowClass =
-    "tree-row" +
-    (isDragging ? " dragging" : "") +
-    (isOver ? " drag-over" : "") +
-    (archived ? " archived" : "");
 
   return (
     <li>
       <div
-        className={rowClass}
+        className={`tree-row${isDragging ? " dragging" : ""}${isOver ? " drag-over" : ""}`}
         draggable
         onDragStart={(e) => {
           ctx.setDrag({ id, parentKey });
@@ -157,29 +157,67 @@ function TreeItem({
           draggable={false}
         >
           <span className="tree-title">{node.title}</span>
-          <span className="tree-meta">
-            {archived && <span className="tree-badge">archived</span>}
-            {node.status !== undefined && <span className="tree-status">{node.status}</span>}
-          </span>
+          {node.status !== undefined && <span className="tree-status">{node.status}</span>}
         </Link>
-        <button
-          type="button"
-          className="tree-archive"
-          aria-label={archived ? "Unarchive page" : "Archive page"}
-          title={archived ? "Unarchive — restore to the sidebar" : "Archive — hide from the sidebar"}
-          disabled={ctx.structural.pending}
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            if (archived) void ctx.structural.unarchive(node.id as PageId);
-            else void ctx.structural.archive(node.id as PageId);
-          }}
-        >
-          {archived ? "unarchive" : "archive"}
-        </button>
       </div>
       {hasChildren && !collapsed && <TreeChildren parentKey={id} siblings={node.children} ctx={ctx} />}
     </li>
+  );
+}
+
+/** Collapsible "Archived (N)" list at the foot of the sidebar — the place to see archived pages
+ *  and restore them. Hidden entirely when nothing is archived. */
+function ArchivedSection({
+  tree,
+  workspaceId,
+  expanded,
+  onToggle,
+}: {
+  tree: ITreeNode;
+  workspaceId: WorkspaceId;
+  expanded: boolean;
+  onToggle: () => void;
+}): React.JSX.Element | null {
+  const structural = useStructuralMutator(workspaceId);
+  const archived = collectArchived(tree.children);
+  if (archived.length === 0) return null;
+
+  return (
+    <div className="tree-archived">
+      <button type="button" className="tree-archived-head" aria-expanded={expanded} onClick={onToggle}>
+        <span className={`caret${expanded ? " open" : ""}`} aria-hidden="true">
+          ▶
+        </span>
+        Archived <span className="muted">({archived.length})</span>
+      </button>
+      {expanded && (
+        <ul className="tree-archived-list">
+          {archived.map((n) => (
+            <li key={n.id} className="tree-archived-item">
+              <Link href={pageHref(workspaceId, n.id)} className="tree-link">
+                <span className="tree-title">{n.title}</span>
+                {n.status !== undefined && <span className="tree-status">{n.status}</span>}
+              </Link>
+              <button
+                type="button"
+                className="tree-archive"
+                aria-label="Unarchive page"
+                title="Unarchive — restore to the sidebar"
+                disabled={structural.pending}
+                onClick={() => void structural.unarchive(n.id as PageId)}
+              >
+                unarchive
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {structural.error !== null && (
+        <p className="tree-error" role="alert">
+          {structural.error}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -197,47 +235,23 @@ export function TreeNav({
   const collapse = useCollapsed(workspaceId);
   const order = useChildOrder(workspaceId);
   const archivedView = useShowArchived(workspaceId);
-  const structural = useStructuralMutator(workspaceId);
   const [drag, setDrag] = useState<DragState>(null);
   const [overId, setOverId] = useState<string | null>(null);
 
   if (tree === null) return <p className="muted">Loading tree…</p>;
   if (tree.children.length === 0) return <p className="muted">No pages in this workspace yet.</p>;
 
-  const ctx: TreeCtx = {
-    workspaceId,
-    activePageId,
-    collapse,
-    order,
-    showArchived: archivedView.show,
-    structural,
-    drag,
-    setDrag,
-    overId,
-    setOverId,
-  };
-  const hasArchived = anyArchived(tree.children);
+  const ctx: TreeCtx = { workspaceId, activePageId, collapse, order, drag, setDrag, overId, setOverId };
 
   return (
     <div className="tree-wrap">
-      {(hasArchived || archivedView.show) && (
-        <div className="tree-toolbar">
-          <button
-            type="button"
-            className="tree-toggle-archived"
-            aria-pressed={archivedView.show}
-            onClick={archivedView.toggle}
-          >
-            {archivedView.show ? "Hide archived" : "Show archived"}
-          </button>
-        </div>
-      )}
-      {structural.error !== null && (
-        <p className="tree-error" role="alert">
-          {structural.error}
-        </p>
-      )}
       <TreeChildren parentKey={String(tree.id)} siblings={tree.children} ctx={ctx} top />
+      <ArchivedSection
+        tree={tree}
+        workspaceId={workspaceId}
+        expanded={archivedView.show}
+        onToggle={archivedView.toggle}
+      />
     </div>
   );
 }

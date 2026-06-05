@@ -210,50 +210,7 @@ code {
   color: var(--muted);
   white-space: nowrap;
 }
-.tree-meta {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  white-space: nowrap;
-}
-
-/* ── tree: archive + drag-to-reorder (UI-only views) ─────────────────────── */
-.tree-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 6px;
-}
-.tree-toggle-archived {
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--muted);
-  font-size: 11px;
-  padding: 2px 8px;
-  cursor: pointer;
-}
-.tree-toggle-archived:hover {
-  color: var(--text);
-  background: var(--accent-dim);
-}
-.tree-toggle-archived[aria-pressed="true"] {
-  color: var(--text);
-  border-color: var(--accent-dim);
-}
-.tree-error {
-  color: #f87171;
-  font-size: 11px;
-  margin: 0 0 6px;
-}
-.tree-badge {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 0 4px;
-}
+/* ── tree: drag-to-reorder + archived section (UI-only views) ────────────── */
 .tree-row {
   cursor: grab;
 }
@@ -265,8 +222,54 @@ code {
 .tree-row.drag-over {
   box-shadow: inset 0 2px 0 var(--text);
 }
-.tree-row.archived .tree-title {
-  opacity: 0.55;
+.tree-error {
+  color: #f87171;
+  font-size: 11px;
+  margin: 6px 0 0;
+}
+/* archived pages live in a collapsible section at the foot of the sidebar */
+.tree-archived {
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.tree-archived-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.tree-archived-head:hover {
+  color: var(--text);
+  background: var(--accent-dim);
+}
+.tree-archived-head .caret {
+  display: inline-block;
+  font-size: 9px;
+  transition: transform 0.12s ease;
+}
+.tree-archived-head .caret.open {
+  transform: rotate(90deg);
+}
+.tree-archived-list {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+}
+.tree-archived-item {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.tree-archived-item .tree-link {
+  opacity: 0.7;
   font-style: italic;
 }
 .tree-archive {
@@ -280,7 +283,7 @@ code {
   padding: 2px 4px;
   border-radius: 4px;
 }
-.tree-row:hover .tree-archive {
+.tree-archived-item:hover .tree-archive {
   opacity: 1;
 }
 .tree-archive:hover {
@@ -373,6 +376,51 @@ code {
 .view-tab.active {
   color: #fff;
   border-bottom-color: #fff;
+}
+.page-header-main {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.page-header-actions {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  flex-shrink: 0;
+}
+.page-archive-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.page-archive-btn:hover {
+  color: var(--text);
+  background: var(--accent-dim);
+}
+.page-archive-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.page-archived-badge {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.page-archive-error {
+  color: #f87171;
+  font-size: 12px;
+  margin: 0 0 14px;
 }
 
 /* ── model-inspection graph ──────────────────────────────────────────────── */

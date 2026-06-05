@@ -15,7 +15,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, type MouseEvent } from "react";
 import type { PageId, WorkspaceId } from "wiki";
 import { getWiki } from "../lib/engine";
-import { useLiveWorkspace, usePage, usePageMutations } from "../lib/live";
+import { useLiveWorkspace, usePage, usePageMutations, useStructuralMutator } from "../lib/live";
 import { renderMarkdown } from "../lib/markdown";
 import { pageHref } from "../lib/routes";
 import { findNode } from "../lib/tree";
@@ -34,6 +34,7 @@ export function PageView({
   const { markdown, loading, error, unknownType } = usePage(workspaceId, pageId);
   const { descriptors } = usePageMutations(workspaceId, pageId);
   const mode = useViewMode();
+  const structural = useStructuralMutator(workspaceId);
 
   // Lift the page's H1 out of the body so it can live in a persistent header (kept in
   // both Content and Model views); render the remaining markdown as the body.
@@ -52,6 +53,7 @@ export function PageView({
   const node = findNode(ws.tree, pageId);
   const children = node?.children ?? [];
   const pageType = node?.type;
+  const archived = node?.archived === true;
 
   // The page TYPE's status FSM, from the in-browser engine (Q2). Null on server render
   // or for an unknown type — the model toggle is then simply not offered.
@@ -99,30 +101,54 @@ export function PageView({
   return (
     <div className="page">
       <header className="page-header">
-        {headerTitle !== null && <h1 className="page-title">{headerTitle}</h1>}
-        {fsm !== null && (
-          <div className="view-toggle" role="tablist" aria-label="Page view">
+        <div className="page-header-main">
+          {headerTitle !== null && <h1 className="page-title">{headerTitle}</h1>}
+          {archived && <span className="page-archived-badge">archived</span>}
+        </div>
+        <div className="page-header-actions">
+          {node !== undefined && (
             <button
               type="button"
-              role="tab"
-              aria-selected={mode === "content"}
-              className={`view-tab ${mode === "content" ? "active" : ""}`}
-              onClick={() => setViewMode("content")}
+              className="page-archive-btn"
+              disabled={structural.pending}
+              title={archived ? "Restore this page to the sidebar" : "Hide this page from the sidebar"}
+              onClick={() => {
+                if (archived) void structural.unarchive(pageId);
+                else void structural.archive(pageId);
+              }}
             >
-              Content
+              {archived ? "Unarchive" : "Archive"}
             </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === "model"}
-              className={`view-tab ${mode === "model" ? "active" : ""}`}
-              onClick={() => setViewMode("model")}
-            >
-              Model
-            </button>
-          </div>
-        )}
+          )}
+          {fsm !== null && (
+            <div className="view-toggle" role="tablist" aria-label="Page view">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mode === "content"}
+                className={`view-tab ${mode === "content" ? "active" : ""}`}
+                onClick={() => setViewMode("content")}
+              >
+                Content
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mode === "model"}
+                className={`view-tab ${mode === "model" ? "active" : ""}`}
+                onClick={() => setViewMode("model")}
+              >
+                Model
+              </button>
+            </div>
+          )}
+        </div>
       </header>
+      {structural.error !== null && (
+        <p className="page-archive-error" role="alert">
+          {structural.error}
+        </p>
+      )}
 
       {mode === "model" && fsm !== null ? (
         <FsmGraph

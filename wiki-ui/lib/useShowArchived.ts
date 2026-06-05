@@ -1,10 +1,9 @@
 "use client";
 
 /**
- * Per-workspace "show archived pages" toggle for the sidebar, persisted to localStorage.
- *
- * Default OFF — archived pages (and their subtrees) are hidden from the tree until revealed.
- * Hydrated in an effect so the first client render matches the server-rendered (hidden) markup.
+ * Per-workspace toggle for the sidebar's "Archived" section (expanded vs collapsed), persisted to
+ * localStorage. Default OFF — the section starts collapsed. Hydrated in an effect so the first
+ * client render matches the server-rendered (collapsed) markup.
  */
 import { useCallback, useEffect, useState } from "react";
 import type { WorkspaceId } from "wiki";
