@@ -210,6 +210,14 @@ code {
   color: var(--muted);
   white-space: nowrap;
 }
+/* Terminal (sealed/final) status: a solid chip so finished pages stand out in the tree. */
+.tree-status.tree-status-terminal {
+  color: var(--text);
+  background: var(--accent-dim);
+  border-radius: 4px;
+  padding: 0 6px;
+  font-weight: 500;
+}
 /* ── tree: drag-to-reorder + archived section (UI-only views) ────────────── */
 .tree-row {
   cursor: grab;
@@ -414,6 +422,17 @@ code {
   letter-spacing: 0.04em;
   color: var(--muted);
   border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+/* Terminal-status badge in the page header: a filled chip naming the sealed/final state. */
+.page-terminal-badge {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text);
+  background: var(--accent-dim);
+  border: 1px solid var(--accent);
   border-radius: 4px;
   padding: 1px 6px;
 }

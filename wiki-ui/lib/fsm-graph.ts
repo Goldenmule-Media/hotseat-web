@@ -39,6 +39,16 @@ export interface FsmGraphModel {
   readonly edges: readonly FsmGraphEdge[];
 }
 
+/**
+ * A status is **terminal** when the FSM declares no transition leaving it — the page can
+ * change no further by status (it is sealed/final, e.g. `shipped`, `rejected`, `superseded`).
+ * Drives the distinct UI treatment for finished pages (terminal badge + sidebar chip). Pure
+ * so it is shared by the page header and the sidebar without touching React.
+ */
+export function isTerminalStatus(fsm: FsmDescriptor, status: string): boolean {
+  return fsm.transitions.every((tr) => tr.from !== status);
+}
+
 /** The per-instance availability the engine's describeMutations reports per command. */
 export interface TransitionAvailability {
   readonly name: string;

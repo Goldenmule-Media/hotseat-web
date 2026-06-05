@@ -17,6 +17,15 @@ import { useChildOrder, type ChildOrder } from "../lib/useChildOrder";
 import { useCollapsed, type CollapsedState } from "../lib/useCollapsed";
 import { useShowArchived } from "../lib/useShowArchived";
 import { useStructuralMutator } from "../lib/live";
+import { isTerminalNodeStatus } from "../lib/terminal";
+
+/** The status chip next to a sidebar title — visually distinct when the status is terminal
+ *  (sealed/final), so finished pages read differently at a glance. */
+function StatusChip({ node }: { node: ITreeNode }): React.JSX.Element | null {
+  if (node.status === undefined) return null;
+  const terminal = isTerminalNodeStatus(node.type, node.status);
+  return <span className={`tree-status${terminal ? " tree-status-terminal" : ""}`}>{node.status}</span>;
+}
 
 type DragState = { id: string; parentKey: string } | null;
 
@@ -160,7 +169,7 @@ function TreeItem({
           draggable={false}
         >
           <span className="tree-title">{node.title}</span>
-          {node.status !== undefined && <span className="tree-status">{node.status}</span>}
+          <StatusChip node={node} />
         </Link>
       </div>
       {hasChildren && !collapsed && <TreeChildren parentKey={id} siblings={node.children} ctx={ctx} />}
@@ -199,7 +208,7 @@ function ArchivedSection({
             <li key={n.id} className="tree-archived-item">
               <Link href={pageHref(workspaceId, n.id)} className="tree-link">
                 <span className="tree-title">{n.title}</span>
-                {n.status !== undefined && <span className="tree-status">{n.status}</span>}
+                <StatusChip node={n} />
               </Link>
               <button
                 type="button"
