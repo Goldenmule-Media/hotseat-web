@@ -674,6 +674,16 @@ export class CommandBus {
         return { kind: "prose", value: String(raw) };
       case "code":
         return { kind: "code", lang: "text", source: String(raw), hash: contentHash(String(raw)) };
+      case "ref": {
+        // A `ref` field set via the declarative `set:` sugar. An already-structured ref
+        // value (e.g. a cross-page element / section / symbol ref) passes through unchanged;
+        // a bare string is the common case — a page-ref to that page id. Ingestion still
+        // enforces the target resolves (RefIntegrityError), so this can never store a dangle.
+        if (raw !== null && typeof raw === "object" && "kind" in (raw as object)) {
+          return raw as IField;
+        }
+        return { kind: "ref", target: { kind: "page", id: String(raw) as PageId } };
+      }
       default:
         if (typeof raw === "number" || typeof raw === "boolean") return { kind: "scalar", value: raw };
         return { kind: "prose", value: String(raw) };

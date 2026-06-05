@@ -497,6 +497,49 @@ engine's unit tests, (a) for any integration test that wants the real bundle. (E
 tests are rewritten against the render read model, not the retired per-type renderer,
 [docs/structured-content.md §12 Phase 1](../docs/structured-content.md).)
 
+### 8.4 The `adr` bundle — decisions as first-class records
+
+A second bundle, `adr` (`src/adr/`), authored on the same surface, ships one page type:
+**`decision-record`** (human label **ADR**). It exists to dissolve a real wart: this project's own
+architecture decisions lived as flat ADR appendices at the bottom of five separate `DESIGN.md` files —
+no status, no lifecycle, no edge from a decision to the one that revises it, and identity that was only
+*per-file* (so `wiki-mcp` and `wiki-models` each shipped a different **ADR-M7**, a collision a single
+namespace makes impossible). The `decision-record` type makes each decision a typed, FSM-governed,
+globally-identified wiki page instead.
+
+- **Shape** — Michael Nygard's template plus the metadata a lossless migration needs: a `meta` section
+  (`date` — a **stored** ISO string, never `new Date()`; `scope` — the package/area, for filtering;
+  `legacyId` — the original label, kept for traceability, *not* identity; and a `deciders` list),
+  `context` (`prose`), `decision` and `consequences` (`blocks`, so a decision can carry a code/interface
+  snippet), and a `relations` section holding a single `supersededBy` `ref`. `sectionSet: { mode: "closed" }`.
+- **Lifecycle** — `proposed → accept → accepted`, `proposed → reject → rejected`; an accepted record is
+  later `supersede`d → `superseded` or `deprecate`d → `deprecated`. The last three are terminal.
+- **Supersession is an integrity-checked edge, not prose.** The `accepted → superseded` transition is
+  gated by a `namesSuccessor` `Precondition`: a record may enter `superseded` only once its `supersededBy`
+  ref resolves to a *live, other* `decision-record`. Because a precondition runs *before* its own
+  command's ops and receives no args, superseding is **two ops in one atomic batch** — `setSupersededBy(id)`
+  (the engine's ref-integrity rejects a dangling target at set time) then `supersede()` (the gate reads the
+  now-committed ref) — landed via `mutateMany`. The reverse "Supersedes" view is a render projection over
+  *incoming* refs, so there is no second source of truth to rot. (This needed exactly **one** generic,
+  schema-agnostic engine change: a `ref` case in `kindFor` so the declarative `set:` sugar builds a
+  page-ref from a string id — refs are now first-class in `set:` for every model. Everything else —
+  `setField` carrying a ref, ingestion ref-integrity — already existed, proven by `architecture`'s
+  dependency ref.)
+- **Render** — title `ADR: {title}`; a derived metadata block; Context → Decision → Consequences; then a
+  derived `Relations` block showing both `Superseded by` (the outgoing ref) and `Supersedes` (the incoming
+  ones). Deterministic and stable-ordered, so a future `docs/adr/` Markdown snapshot is churn-free.
+- **Migration** — `scripts/migrate-adrs.ts` (engine-as-library) parses the five `DESIGN.md` ADR
+  appendices into a **"Decision Records"** TOC inside this repository's own **wiki** workspace —
+  a sibling of its Architecture and Feature Specs TOCs, since a workspace maps to a repo/product and is
+  the single consistency aggregate (one ADR graph, cross-package supersession, not one workspace per
+  package). It preserves each `legacyId`/`date`/`scope`, wires the supersedes edge the prose already
+  states (`wiki-server/ADR-S1` → `ADR-S3`), and writes a wiki-native **meta-ADR** ("design decisions live
+  in the wiki") as the first record — the one record with no `legacyId`, because it was born here, not
+  migrated. It is re-runnable: it archives a prior Decision Records subtree first (renaming the old TOC out
+  of the way, since the unique-sibling-title rule counts archived siblings and there is no hard delete).
+  The `DESIGN.md` appendices are retired only once the separate Markdown-to-disk projection lands, so there
+  is never a window with two sources of truth — nor one with none.
+
 ## 9. Non-goals & future work
 
 - **Not a production hot-swap story.** Runtime reload targets the local *edit → build → reload* loop and

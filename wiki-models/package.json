@@ -6,7 +6,9 @@
   "exports": {
     "./feature": "./src/feature/index.ts",
     "./toc": "./src/toc/index.ts",
-    "./architecture": "./src/architecture/index.ts"
+    "./architecture": "./src/architecture/index.ts",
+    "./adr": "./src/adr/index.ts",
+    "./scripts/migrate-adrs": "./scripts/migrate-adrs.ts"
   },
   "files": [
     "dist"
