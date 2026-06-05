@@ -179,13 +179,15 @@ export class CommandBus {
     return this.commit(projection, decide, { actor: req.actor, commandId: req.commandId });
   }
 
-  /** Pure structural decision: workspace must be active, then run the handler. */
+  /** Pure structural decision: workspace must be active, then run the handler. The sole
+   *  exception is `unarchive`, which by definition runs ON an archived workspace (the way back). */
   private decideStructural(
     handler: StructureHandler,
     state: IWorkspaceState,
     req: StructuralRequest,
   ): { events: DomainEvent[]; result: unknown } {
-    if (state.status === "archived") {
+    const isUnarchive = req.handler === "unarchive" || req.handler === "unarchiveWorkspace";
+    if (state.status === "archived" && !isUnarchive) {
       throw new WorkspaceArchivedError(state.id);
     }
     const { events, result } = handler(state, req.args, this.services, this.registry);

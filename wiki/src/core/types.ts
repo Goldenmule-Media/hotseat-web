@@ -62,7 +62,8 @@ export interface SerializedSnapshot {
 export type CatalogEvent =
   | { readonly type: "WorkspaceRegistered"; readonly id: WorkspaceId; readonly name: string; readonly at: string }
   | { readonly type: "WorkspaceRenamed"; readonly id: WorkspaceId; readonly name: string; readonly at: string }
-  | { readonly type: "WorkspaceArchived"; readonly id: WorkspaceId; readonly at: string };
+  | { readonly type: "WorkspaceArchived"; readonly id: WorkspaceId; readonly at: string }
+  | { readonly type: "WorkspaceUnarchived"; readonly id: WorkspaceId; readonly at: string };
 
 /**
  * The persistence port (DESIGN §9). The ONLY thing that talks to Durable Streams

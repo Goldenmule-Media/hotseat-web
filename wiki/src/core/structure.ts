@@ -442,6 +442,13 @@ export const archiveWorkspace: StructureHandler = () => {
   return { events: [{ type: "WorkspaceArchived", payload: {} }] };
 };
 
+/** Unarchive the whole workspace (the inverse of {@link archiveWorkspace}). Exempt from the
+ *  command bus's archived-workspace guard — it is the one structural verb that runs while the
+ *  workspace IS archived (the way back). */
+export const unarchiveWorkspace: StructureHandler = () => {
+  return { events: [{ type: "WorkspaceUnarchived", payload: {} }] };
+};
+
 // ────────────────────────────────────────────────────────────────────────────
 // Handler map (keyed by command name)
 // ────────────────────────────────────────────────────────────────────────────
@@ -462,6 +469,8 @@ export const STRUCTURAL_HANDLERS: Readonly<Record<string, StructureHandler>> = {
   unlink,
   moveItem,
   archiveWorkspace,
-  // The IWorkspaceHandle exposes `archive()` for workspace archival.
+  unarchiveWorkspace,
+  // The IWorkspaceHandle exposes `archive()` / `unarchive()` for workspace archival.
   archive: archiveWorkspace,
+  unarchive: unarchiveWorkspace,
 };

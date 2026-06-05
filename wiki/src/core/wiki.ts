@@ -225,6 +225,11 @@ class Wiki implements IWiki {
           if (cur !== undefined) cur.status = "archived";
           break;
         }
+        case "WorkspaceUnarchived": {
+          const cur = byId.get(ev.id);
+          if (cur !== undefined) cur.status = "active";
+          break;
+        }
       }
     }
     return [...byId.values()].map((s) => ({ id: s.id, name: s.name, status: s.status }));
@@ -311,6 +316,7 @@ class Wiki implements IWiki {
       this.bus,
       this.config,
       this.readModel,
+      this.eventLog,
     );
     this.open.set(id, handle);
     // Seed the read model with whatever the projection has already folded so a token
@@ -375,6 +381,7 @@ class WorkspaceHandle implements IWorkspaceHandle {
     private readonly bus: CommandBus,
     private readonly config: IWikiConfig,
     private readonly readModel: InMemoryReadModel,
+    private readonly eventLog: IEventLog,
   ) {
     this.id = id;
   }
@@ -476,7 +483,26 @@ class WorkspaceHandle implements IWorkspaceHandle {
   }
 
   async archive(): Promise<Committed<void>> {
-    return this.structural("archive", {}) as Promise<Committed<void>>;
+    const committed = (await this.structural("archive", {})) as Committed<void>;
+    await this.syncCatalogStatus("WorkspaceArchived");
+    return committed;
+  }
+
+  async unarchive(): Promise<Committed<void>> {
+    const committed = (await this.structural("unarchive", {})) as Committed<void>;
+    await this.syncCatalogStatus("WorkspaceUnarchived");
+    return committed;
+  }
+
+  /** Mirror an archive/unarchive into the namespace catalog (the secondary index `listWorkspaces`
+   *  folds) so the workspace's status is consistent there too — best-effort, like registration:
+   *  the workspace stream stays the source of truth. */
+  private async syncCatalogStatus(type: "WorkspaceArchived" | "WorkspaceUnarchived"): Promise<void> {
+    try {
+      await this.eventLog.appendCatalog({ type, id: this.id, at: this.config.clock?.() ?? "" });
+    } catch {
+      /* catalog is a secondary index; the workspace stream remains the source of truth */
+    }
   }
 
   /**

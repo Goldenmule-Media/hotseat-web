@@ -337,7 +337,10 @@ export function useWorkspaces(): WorkspaceList {
     wiki
       .listWorkspaces()
       .then((items) => {
-        if (!cancelled) setState({ items, loading: false, error: null });
+        // Hide archived workspaces from default listings (the landing page + switcher); they
+        // are restored via the `unarchiveWorkspace` MCP tool, not the UI.
+        const active = items.filter((w) => w.status === "active");
+        if (!cancelled) setState({ items: active, loading: false, error: null });
       })
       .catch((e: unknown) => {
         if (!cancelled) setState({ items: [], loading: false, error: errMsg(e) });

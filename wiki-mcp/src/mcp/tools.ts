@@ -291,6 +291,39 @@ const createWorkspaceTool: WikiTool = {
   },
 };
 
+const archiveWorkspaceTool: WikiTool = {
+  name: "archiveWorkspace",
+  description:
+    "Archive a whole workspace — hide it from default workspace listings (listWorkspaces shows it " +
+    "as [archived]). Reversible via unarchiveWorkspace; the workspace's pages, links, and history " +
+    "are preserved untouched.",
+  inputSchema: obj({ workspaceId: STR }, ["workspaceId"]),
+  write: true,
+  async handle(args, ctx) {
+    const ws = asWorkspaceId(reqStr(args, "workspaceId"));
+    const handle = await ctx.engine.open(ws);
+    const { token } = await handle.archive();
+    ctx.tokens.recordWrite(ctx.sessionId, token);
+    return { text: `Workspace ${ws} archived.`, data: { token } };
+  },
+};
+
+const unarchiveWorkspaceTool: WikiTool = {
+  name: "unarchiveWorkspace",
+  description:
+    "Unarchive a workspace previously archived with archiveWorkspace — restore it to default " +
+    "listings. Runnable while the workspace is archived (it is the way back).",
+  inputSchema: obj({ workspaceId: STR }, ["workspaceId"]),
+  write: true,
+  async handle(args, ctx) {
+    const ws = asWorkspaceId(reqStr(args, "workspaceId"));
+    const handle = await ctx.engine.open(ws);
+    const { token } = await handle.unarchive();
+    ctx.tokens.recordWrite(ctx.sessionId, token);
+    return { text: `Workspace ${ws} unarchived.`, data: { token } };
+  },
+};
+
 // ────────────────────────────────────────────────────────────────────────────
 // Page-scoped mutation (engine-validated args) + describeMutations
 // ────────────────────────────────────────────────────────────────────────────
@@ -1044,6 +1077,8 @@ export function wikiTools(): readonly WikiTool[] {
   return [
     // writes
     createWorkspaceTool,
+    archiveWorkspaceTool,
+    unarchiveWorkspaceTool,
     createPageTool,
     reparentTool,
     setPageTitleTool,

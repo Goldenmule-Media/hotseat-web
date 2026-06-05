@@ -43,6 +43,7 @@ export const STRUCTURAL_EVENT_TYPES = [
   "LinkAdded",
   "LinkRemoved",
   "WorkspaceArchived",
+  "WorkspaceUnarchived",
 ] as const;
 
 /** The single engine content event type — its payload is an ordered `SectionOp[]`. */
@@ -356,6 +357,11 @@ function applyStructural(
 
     case "WorkspaceArchived": {
       state.status = "archived";
+      return state;
+    }
+
+    case "WorkspaceUnarchived": {
+      state.status = "active";
       return state;
     }
 

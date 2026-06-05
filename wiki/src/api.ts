@@ -399,7 +399,10 @@ export interface IWorkspaceHandle {
     field: string;
     itemId: string;
   }): Promise<Committed<void>>;
+  /** Archive the whole workspace (hidden from default listings; reversible via {@link unarchive}). */
   archive(): Promise<Committed<void>>;
+  /** Unarchive the whole workspace — the inverse of {@link archive}, runnable while archived. */
+  unarchive(): Promise<Committed<void>>;
 
   // ── page-scoped content/status command ──
   mutate<K extends PageTypeName, C extends CommandName<K>>(
