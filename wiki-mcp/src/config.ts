@@ -7,6 +7,7 @@
  * `createWikiMcp({ … })` rather than the CLI path.
  */
 import { consoleLogger, type Logger } from "./logger.js";
+import type { IMarkdownProjectionConfig } from "./tail/markdown-projection.js";
 
 /**
  * The read-model database tier (DESIGN §5.3). `pglite` is embedded
@@ -29,6 +30,13 @@ export interface WikiMcpConfig {
   readonly readConsistencyTimeoutMs: number;
   /** Backstop poll interval (ms) for `waitFor` when no in-process notify fires (§5.2). @default 50 */
   readonly waitForPollMs: number;
+  /**
+   * The Markdown-disk mirror (off by default). Present only when `--md-root`/`WIKI_MCP_MD_ROOT`
+   * is set; the projection tailer then renders each mirrored workspace's Markdown to disk and
+   * keeps it current (feature: "Markdown projection to disk"). `wiki-server` inherits this
+   * (it resolves the embedded `wiki-mcp`'s config from the same flags/env).
+   */
+  readonly markdown?: IMarkdownProjectionConfig;
 }
 
 /** Resolved config plus the injected runtime {@link Logger} (kept off the plain config). */
@@ -110,7 +118,34 @@ export function resolveConfig(
   );
   const waitForPollMs = toInt(pick("wait-poll-ms", "WIKI_MCP_WAIT_POLL_MS", "50"), "--wait-poll-ms");
 
-  return { namespace, streamBaseUrl, db, readConsistencyTimeoutMs, waitForPollMs };
+  const markdown = resolveMarkdown(flags, env);
+
+  return { namespace, streamBaseUrl, db, readConsistencyTimeoutMs, waitForPollMs, ...(markdown !== undefined ? { markdown } : {}) };
+}
+
+/**
+ * Resolve the Markdown-disk mirror config (off unless a root is given). `--md-root`/
+ * `WIKI_MCP_MD_ROOT` is the master switch — presence enables it. `--md-workspaces`
+ * (`WIKI_MCP_MD_WORKSPACES`) is a comma-separated allowlist of workspace ids or `all`
+ * (default); `--md-archive` (`WIKI_MCP_MD_ARCHIVE`) is `drop` (default) or `mirror`.
+ */
+function resolveMarkdown(
+  flags: Record<string, string>,
+  env: Record<string, string | undefined>,
+): IMarkdownProjectionConfig | undefined {
+  const root = flags["md-root"] ?? env.WIKI_MCP_MD_ROOT;
+  if (root === undefined || root.length === 0) return undefined;
+
+  const wsRaw = flags["md-workspaces"] ?? env.WIKI_MCP_MD_WORKSPACES ?? "all";
+  const workspaces =
+    wsRaw === "all" ? "all" : wsRaw.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+
+  const archive = flags["md-archive"] ?? env.WIKI_MCP_MD_ARCHIVE ?? "drop";
+  if (archive !== "drop" && archive !== "mirror") {
+    throw new Error(`invalid --md-archive "${archive}" (expected "drop" or "mirror")`);
+  }
+
+  return { enabled: true, root, workspaces, layout: "tree", archive };
 }
 
 /**

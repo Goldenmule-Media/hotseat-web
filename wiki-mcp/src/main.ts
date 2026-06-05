@@ -22,6 +22,7 @@ import { EmbeddedEngine, type EngineConfig } from "./engine.js";
 import { openStore, type ReadModelStore } from "./readmodel/store.js";
 import { SqlReadModel } from "./readmodel/readmodel.js";
 import { ProjectionService } from "./tail/projection.js";
+import { MarkdownDiskProjector } from "./tail/markdown-projection.js";
 import { engineEventSource } from "./tail/engine-source.js";
 import { ModelRegistry } from "./models/registry.js";
 import { WikiMcpServer, type McpTransport } from "./mcp/server.js";
@@ -33,6 +34,9 @@ export { consoleLogger, silentLogger } from "./logger.js";
 export type { WikiMcpConfig, DbConfig } from "./config.js";
 export { resolveConfig, resolveRuntime } from "./config.js";
 export type { McpTransport } from "./mcp/server.js";
+export { MarkdownDiskProjector } from "./tail/markdown-projection.js";
+export type { IMarkdownProjectionConfig } from "./tail/markdown-projection.js";
+export type { RenderSink } from "./tail/render-sink.js";
 export { ModelRegistry } from "./models/registry.js";
 export type { ModelRegistryEvent, BundleInfo } from "./models/registry.js";
 
@@ -138,6 +142,25 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
     searchIndex,
   );
   const source = engineEventSource(engine);
+
+  // ── Markdown-disk mirror (optional second render sink, off by default) ──
+  // Registered BEFORE the tail starts so the initial catch-up feeds it; the boot reconcile
+  // below then covers the case where the SQL read model is already at head (so project()
+  // never fires) but the on-disk mirror is fresh/stale.
+  if (config.markdown?.enabled === true) {
+    const mdProjector = new MarkdownDiskProjector(
+      config.markdown,
+      logger.child?.({ subsystem: "markdown-disk" }) ?? logger,
+    );
+    await mdProjector.init();
+    projection.addRenderSink(mdProjector);
+    logger.info("markdown-disk mirror enabled", {
+      root: config.markdown.root,
+      workspaces: config.markdown.workspaces,
+      archive: config.markdown.archive,
+    });
+  }
+
   const drainOnce = async (): Promise<void> => {
     try {
       await projection.drain(source);
@@ -154,6 +177,12 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
   // below) + a low-frequency catalog discovery poll. `start` does the initial catch-up.
   const discoverOpts = options.discoverPollMs !== undefined ? { discoverPollMs: options.discoverPollMs } : {};
   const stopTail = await projection.start(source, discoverOpts);
+
+  // Boot reconcile for render sinks that can lag a current read model (the Markdown-disk
+  // mirror): self-heal the output directory against the stream head (DESIGN §5.1).
+  if (config.markdown?.enabled === true) {
+    await projection.reconcileSinks(source);
+  }
 
   // ── model hot-reload (ADR-M6) ──
   // On a registry change, rebind the engine + the projection's registry, reproject the

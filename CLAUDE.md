@@ -126,5 +126,14 @@ and the embedded **wiki-mcp** streamable-HTTP MCP endpoint (`:4439/mcp`). File s
 - **Config** is `flags → env → defaults`. `wiki-server` reads `WIKI_SERVER_*` (host/port/storage/data-dir/
   control-port/mcp-port/models/models-dir) **and** resolves the embedded `wiki-mcp`'s `WIKI_MCP_*` (namespace,
   `WIKI_MCP_DB` = `pglite`|`pg`, `WIKI_MCP_PG_URL`, data-dir), overriding the MCP's stream URL to its own.
+- **Markdown-disk mirror (off by default).** Setting `WIKI_MCP_MD_ROOT` (or `--md-root`) turns on a second
+  read-side projection in `wiki-mcp` that renders each mirrored workspace's deterministic Markdown to that
+  directory and keeps it current off the **same projection tail** as the SQL read model + search index (one
+  render per commit, fanned out to all sinks — never a second render). Tree layout (`<root>/<workspace>/<page
+  tree>`, a folder + `index.md` per page-with-children), content-hashed so unchanged pages don't churn the git
+  diff, atomic temp+rename writes, and a boot reconcile that self-heals a wiped output dir. Knobs:
+  `WIKI_MCP_MD_WORKSPACES` (`all` | comma-separated workspace ids), `WIKI_MCP_MD_ARCHIVE` (`drop` default |
+  `mirror` under `_archive/`). `wiki-server` inherits these (it resolves the embedded MCP's config from the same
+  flags/env). **Single-writer:** one hosting process owns the output dir (documented, not enforced in v1).
 - `.mcp.json` wires this Claude Code session's `wiki` MCP server to `http://127.0.0.1:4439/mcp` — i.e. a
   locally-running `wiki-server`. The `wiki` MCP tools won't work unless that server is up (with a model loaded).

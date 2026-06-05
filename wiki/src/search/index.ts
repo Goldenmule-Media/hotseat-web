@@ -6,7 +6,7 @@
  */
 export { SqlSearchIndex } from "./sql-search-index";
 export { migrateSearchToLatest, searchMigrationProvider } from "./migrations";
-export { renderSearchDocs, renderAffectedDocs, affectedPageIds } from "./render-docs";
+export { renderSearchDocs, renderAffectedDocs, affectedPageIds, isStructuralCommit } from "./render-docs";
 export { SEARCH_CONFIG } from "./schema";
 export type {
   ISearchIndex,

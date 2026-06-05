@@ -32,6 +32,7 @@ export {
   renderSearchDocs,
   renderAffectedDocs,
   affectedPageIds,
+  isStructuralCommit,
   SEARCH_CONFIG,
 } from "./search";
 export type {

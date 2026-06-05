@@ -25,13 +25,13 @@
 import {
   UnknownPageTypeError,
   affectedPageIds,
-  decodeToken,
   foldWorkspace,
+  isStructuralCommit,
   renderAffectedDocs,
   renderSearchDocs,
 } from "wiki";
 import { Registry } from "wiki/registry";
-import type { IEventEnvelope, ISearchIndex, IWorkspaceState, Unsubscribe, WorkspaceId } from "wiki";
+import type { IEventEnvelope, ISearchIndex, IWorkspaceState, PageId, SearchDoc, Unsubscribe, WorkspaceId } from "wiki";
 import type { Kysely } from "kysely";
 
 import type { Logger } from "../logger.js";
@@ -40,6 +40,7 @@ import type { LanguageRegistry } from "../models/language-registry.js";
 import { applyCommit, type Commit } from "../readmodel/project.js";
 import type { SqlReadModel } from "../readmodel/readmodel.js";
 import type { ReadModelDatabase } from "../readmodel/schema.js";
+import { type RenderSink, SearchRenderSink } from "./render-sink.js";
 
 /**
  * Default cadence (ms) for the catalog DISCOVERY poll — only lists + attaches NEW
@@ -88,6 +89,13 @@ export class ProjectionService {
    * swap re-projects the symbol/reference indexes only, never the write model.
    */
   private readonly languages: LanguageRegistry;
+  /**
+   * Render-side sinks fed by the SINGLE per-commit render (the search index and the
+   * Markdown-disk mirror). Each commit renders its affected pages once and fans the docs out
+   * to every sink (see {@link fanOutRender}); a sink failure is best-effort and never halts
+   * projection. Seeded with the search index (if wired); {@link addRenderSink} appends more.
+   */
+  private readonly renderSinks: RenderSink[];
   /** Live-tail state — set by {@link start}, cleared by {@link stopLive}. */
   private live:
     | {
@@ -105,15 +113,27 @@ export class ProjectionService {
     private readonly logger: Logger,
     languages?: LanguageRegistry,
     /**
-     * The engine's full-text search index (optional). When present, each projected
-     * commit also re-indexes the workspace's rendered Markdown — so ALL workspaces are
-     * searchable durably (the tailer tails the whole namespace, not just hot handles).
+     * The engine's full-text search index (optional). When present it is wrapped as a
+     * {@link RenderSink}, so each projected commit re-indexes the workspace's rendered
+     * Markdown — and ALL workspaces are searchable durably (the tailer tails the whole
+     * namespace, not just hot handles).
      */
-    private readonly searchIndex?: ISearchIndex,
+    searchIndex?: ISearchIndex,
   ) {
     this.registry = new Registry(pageTypes);
     this.fingerprint = this.registry.fingerprint();
     this.languages = languages ?? createLanguageRegistry();
+    this.renderSinks = searchIndex !== undefined ? [new SearchRenderSink(searchIndex)] : [];
+  }
+
+  /**
+   * Register another {@link RenderSink} (e.g. the Markdown-disk mirror) to receive the same
+   * per-commit render as the search index. Call BEFORE {@link start}/{@link drain} so the
+   * sink is fed during the initial catch-up; pair with {@link reconcileSinks} at boot for a
+   * sink that may already lag a current read model.
+   */
+  addRenderSink(sink: RenderSink): void {
+    this.renderSinks.push(sink);
   }
 
   /**
@@ -133,28 +153,12 @@ export class ProjectionService {
         this.languages,
       );
       this.readModel.notifyApplied(commit.workspaceId, version);
-      // Re-index the rendered content for full-text search. When this commit applied,
-      // reuse the fold applyCommit already did (`state`/`newEvents`) and re-render ONLY
-      // the affected pages; on a read-model no-op, still catch the index up if it lagged
-      // (a dropped best-effort update, or a fresh/rebuilt search DB). Best-effort: the
-      // read model already committed, so a search failure must not halt projection.
-      if (this.searchIndex !== undefined) {
-        try {
-          if (state !== undefined && newEvents !== undefined) {
-            await this.indexSearch(commit.workspaceId, version, state, newEvents);
-          } else {
-            await this.catchUpSearch(commit, version);
-          }
-        } catch (searchErr) {
-          this.logger.warn("search index update failed", {
-            workspace: commit.workspaceId,
-            error: searchErr instanceof Error ? searchErr.message : String(searchErr),
-          });
-          // Best-effort: the read model already committed, so this never halts projection.
-          // But fail-fast any token-gated search waiting on `version` (vs a silent timeout);
-          // the next commit's catch-up reindex clears the failure on success.
-          this.searchIndex.fail(commit.workspaceId, version, searchErr);
-        }
+      // Render the commit's content ONCE and fan it out to every render sink (search index,
+      // and later the Markdown-disk mirror). Reuses the fold applyCommit already did
+      // (`state`/`newEvents`); on a read-model no-op the sinks catch up if they lagged.
+      // Best-effort: the read model already committed, so a sink failure never halts projection.
+      if (this.renderSinks.length > 0) {
+        await this.fanOutRender(commit, version, state, newEvents);
       }
       this.logger.info("projection applied", { workspace: commit.workspaceId, appliedVersion: version });
       return version;
@@ -176,61 +180,133 @@ export class ProjectionService {
   }
 
   /**
-   * Feed the search index the delta a commit produced, reusing the fold from
-   * {@link applyCommit}. When the index is already current up to the prior applied
-   * version, re-render ONLY the affected pages ({@link affectedPageIds}) — O(affected),
-   * not O(workspace). When it has fallen behind (a dropped best-effort update), the delta
-   * is non-contiguous, so rebuild the workspace to catch up.
+   * Render a commit's content ONCE and fan it out to every {@link RenderSink} (search index,
+   * and later the Markdown-disk mirror). Reuses the fold {@link applyCommit} already did:
+   *
+   *  - **Hot path** (`state`/`newEvents` present): render only the affected pages
+   *    ({@link affectedPageIds}) ONE time — O(affected), not O(workspace) — and hand the same
+   *    docs to each sink that is current up to the prior applied version.
+   *  - **Lagged / no-op path**: a sink behind the commit (a dropped best-effort update, a
+   *    fresh/rebuilt sink) — or a read-model no-op where `applyCommit` folded nothing — rebuilds
+   *    from a WHOLE-workspace render, computed at most once and only if some sink needs it.
+   *
+   * Every sink is best-effort and independent: a sink failure is caught, logged, and surfaced
+   * via `sink.fail` (so token-gated waiters fast-fail vs a silent timeout — cleared by the next
+   * successful apply), and NEVER halts projection, since the durable write already committed.
    */
-  private async indexSearch(
-    workspace: WorkspaceId,
+  private async fanOutRender(
+    commit: Commit,
     version: number,
-    state: IWorkspaceState,
-    newEvents: readonly IEventEnvelope[],
+    state: IWorkspaceState | undefined,
+    newEvents: readonly IEventEnvelope[] | undefined,
   ): Promise<void> {
-    const index = this.searchIndex;
-    if (index === undefined) return;
-    const indexApplied = decodeToken(await index.appliedToken(workspace)).version;
-    const priorApplied = version - newEvents.length; // contiguous: each event bumps version by 1
-    if (indexApplied < priorApplied) {
-      await index.reconcile(workspace, version, renderSearchDocs(state, this.registry, this.renderOpts(workspace)));
-      return;
+    const opts = this.renderOpts(commit.workspaceId);
+
+    // The single shared render of the affected pages (the hot path: every sink is current).
+    let delta: { docs: SearchDoc[]; removed: PageId[]; priorApplied: number } | undefined;
+    if (state !== undefined && newEvents !== undefined) {
+      const affected = affectedPageIds(newEvents, state);
+      delta = {
+        docs: renderAffectedDocs(state, affected, this.registry, opts),
+        removed: [...affected].filter((id) => !state.pages.has(id)),
+        priorApplied: version - newEvents.length, // contiguous: each event bumps version by 1
+      };
     }
-    const affected = affectedPageIds(newEvents, state);
-    const upserts = renderAffectedDocs(state, affected, this.registry, this.renderOpts(workspace));
-    const removed = [...affected].filter((id) => !state.pages.has(id));
-    await index.update(workspace, version, upserts, removed);
+    // A structural commit can move a whole subtree's render PATHS — so a path-mapping sink
+    // (`rebuildOnStructural`) takes a whole rebuild even when it is current (a doc-only sink
+    // like search keeps the cheaper delta, since `affectedPageIds` already covers its ripple).
+    const structural = newEvents !== undefined && isStructuralCommit(newEvents);
+
+    // The whole-workspace render — built at most once, lazily, only if some sink needs it.
+    let whole: { docs: SearchDoc[]; state: IWorkspaceState } | undefined;
+    const renderWhole = (): { docs: SearchDoc[]; state: IWorkspaceState } => {
+      if (whole === undefined) {
+        const full = state ?? foldWorkspace(commit.events, this.registry);
+        whole = { docs: renderSearchDocs(full, this.registry, opts), state: full };
+      }
+      return whole;
+    };
+
+    for (const sink of this.renderSinks) {
+      try {
+        const applied = await sink.appliedVersion(commit.workspaceId);
+        if (delta !== undefined && state !== undefined && applied >= delta.priorApplied) {
+          if (structural && sink.rebuildOnStructural === true) {
+            const w = renderWhole();
+            await sink.rebuild(commit.workspaceId, version, w.docs, w.state);
+          } else {
+            await sink.applyDelta(commit.workspaceId, version, delta.docs, delta.removed, state);
+          }
+        } else if (applied < version) {
+          const w = renderWhole();
+          await sink.rebuild(commit.workspaceId, version, w.docs, w.state);
+        }
+        // applied >= version with no contiguous delta: the sink is already current — no-op.
+      } catch (err) {
+        this.logger.warn(`${sink.name} index update failed`, {
+          workspace: commit.workspaceId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        sink.fail(commit.workspaceId, version, err);
+      }
+    }
   }
 
   /**
-   * Catch the search index up on a read-model NO-OP (applyCommit folded nothing). The
-   * index can still be behind — a dropped best-effort update, or a fresh/rebuilt search
-   * DB against an already-projected read model. Only then do we re-fold (the history
-   * applyCommit didn't need) and rebuild; if the index is current this is a cheap
-   * in-memory check.
+   * Bring every {@link RenderSink} up to each workspace's head — the boot reconcile (self-heal).
+   * Independent of the SQL read model: a sink (the Markdown-disk mirror) can lag even when SQL is
+   * already current — a fresh sink, a wiped output directory, a dropped best-effort update — so
+   * the normal {@link project} path (gated on SQL's applied version) never fires for it. This
+   * folds each workspace head ONCE and rebuilds only the sinks behind it; sinks already current
+   * are skipped (the fold is cheap to skip but still read to learn the head). Best-effort per sink.
    */
-  private async catchUpSearch(commit: Commit, version: number): Promise<void> {
-    const index = this.searchIndex;
-    if (index === undefined) return;
-    const indexApplied = decodeToken(await index.appliedToken(commit.workspaceId)).version;
-    if (indexApplied >= version) return;
-    const state = foldWorkspace(commit.events, this.registry);
-    await index.reconcile(
-      commit.workspaceId,
-      version,
-      renderSearchDocs(state, this.registry, this.renderOpts(commit.workspaceId)),
-    );
+  async reconcileSinks(source: EventSource): Promise<void> {
+    if (this.renderSinks.length === 0) return;
+    for (const workspace of await source.listWorkspaces()) {
+      const events = await source.readHistory(workspace, 0); // full history → head + fold
+      if (events.length === 0) continue;
+      const head = events[events.length - 1].version + 1;
+      const lagging: RenderSink[] = [];
+      for (const sink of this.renderSinks) {
+        if ((await sink.appliedVersion(workspace)) < head) lagging.push(sink);
+      }
+      if (lagging.length === 0) continue;
+      let docs: SearchDoc[];
+      let state: IWorkspaceState;
+      try {
+        state = foldWorkspace(events, this.registry);
+        docs = renderSearchDocs(state, this.registry, this.renderOpts(workspace));
+      } catch (err) {
+        this.logger.error("render-sink reconcile fold failed", {
+          workspace,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        continue;
+      }
+      for (const sink of lagging) {
+        try {
+          await sink.rebuild(workspace, state.version, docs, state);
+        } catch (err) {
+          this.logger.warn(`${sink.name} index update failed`, {
+            workspace,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          sink.fail(workspace, state.version, err);
+        }
+      }
+    }
   }
 
   /**
-   * Build the render-error hook for a workspace: a page that fails to render is still
-   * indexed (empty body) but logged per page, so an otherwise-silent search-vs-fold drift
-   * surfaces in the tailer's logs (the durable feed path, where this Logger is the signal).
+   * Build the render-error hook for a workspace's per-commit render (shared by every
+   * {@link RenderSink}): a page that fails to render yields an empty body but is logged per
+   * page, so an otherwise-silent render-vs-fold drift surfaces in the tailer's logs (the
+   * durable feed path, where this Logger is the signal).
    */
   private renderOpts(workspace: WorkspaceId): { onRenderError: (pageId: string, err: unknown) => void } {
     return {
       onRenderError: (pageId: string, err: unknown): void => {
-        this.logger.warn("search: page failed to render (indexed with empty body)", {
+        this.logger.warn("render: page failed to render (projected with empty body)", {
           workspace,
           pageId,
           error: err instanceof Error ? err.message : String(err),

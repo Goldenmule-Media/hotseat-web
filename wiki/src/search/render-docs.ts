@@ -151,3 +151,42 @@ export function affectedPageIds(
   }
   return result;
 }
+
+/**
+ * Does a commit's `newEvents` change any page's TITLE, EXISTENCE, archived flag, or place in
+ * the tree — i.e. can it move a page's position in the rendered tree? Mirrors the `structural`
+ * classification inside {@link affectedPageIds} (same exhaustive `StructuralEventType` switch,
+ * so a new structural event type fails the `never` check until it is classified here too).
+ *
+ * Doc-only consumers (the search index) don't need this — `affectedPageIds` already ripples a
+ * title/structure change to its render-dependents. But a consumer that maps the tree onto a
+ * filesystem PATH (the Markdown-disk mirror) does: a structural commit can move a whole
+ * subtree's paths, far beyond the directly-touched pages, so such a sink rebuilds wholesale.
+ */
+export function isStructuralCommit(newEvents: readonly IEventEnvelope[]): boolean {
+  for (const ev of newEvents) {
+    if (ev.type === SECTION_OPS_EVENT) continue; // the lone content event — never structural
+    const t = ev.type as StructuralEventType;
+    switch (t) {
+      case "PageReparented":
+      case "ChildrenReordered":
+      case "PageCreated":
+      case "PageTitleSet":
+      case "PageArchived":
+      case "PageUnarchived":
+        return true;
+      case "LinkAdded":
+      case "LinkRemoved":
+      case "WorkspaceCreated":
+      case "WorkspaceArchived":
+      case "WorkspaceUnarchived":
+        break; // no effect on a page's title / existence / tree position
+      default: {
+        const _exhaustive: never = t; // a new structural type lands here → TS2322
+        void _exhaustive;
+        break;
+      }
+    }
+  }
+  return false;
+}
