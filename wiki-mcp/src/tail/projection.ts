@@ -259,40 +259,44 @@ export class ProjectionService {
    * the normal {@link project} path (gated on SQL's applied version) never fires for it. This
    * folds each workspace head ONCE and rebuilds only the sinks behind it; sinks already current
    * are skipped (the fold is cheap to skip but still read to learn the head). Best-effort per sink.
+   *
+   * Resilient per workspace: reading/folding a workspace whose page types aren't registered yet
+   * (an {@link UnknownPageTypeError} — `wiki-server` loads its `--models-dir` bundles AFTER
+   * `createWikiMcp`, and the subsequent model-load reproject feeds the sinks then) — or any other
+   * per-workspace failure — is logged and skipped, never aborting boot.
    */
   async reconcileSinks(source: EventSource): Promise<void> {
     if (this.renderSinks.length === 0) return;
     for (const workspace of await source.listWorkspaces()) {
-      const events = await source.readHistory(workspace, 0); // full history → head + fold
-      if (events.length === 0) continue;
-      const head = events[events.length - 1].version + 1;
-      const lagging: RenderSink[] = [];
-      for (const sink of this.renderSinks) {
-        if ((await sink.appliedVersion(workspace)) < head) lagging.push(sink);
-      }
-      if (lagging.length === 0) continue;
-      let docs: SearchDoc[];
-      let state: IWorkspaceState;
       try {
-        state = foldWorkspace(events, this.registry);
-        docs = renderSearchDocs(state, this.registry, this.renderOpts(workspace));
+        const events = await source.readHistory(workspace, 0); // full history → head + fold
+        if (events.length === 0) continue;
+        const head = events[events.length - 1].version + 1;
+        const lagging: RenderSink[] = [];
+        for (const sink of this.renderSinks) {
+          if ((await sink.appliedVersion(workspace)) < head) lagging.push(sink);
+        }
+        if (lagging.length === 0) continue;
+        const state = foldWorkspace(events, this.registry);
+        const docs = renderSearchDocs(state, this.registry, this.renderOpts(workspace));
+        for (const sink of lagging) {
+          try {
+            await sink.rebuild(workspace, state.version, docs, state);
+          } catch (err) {
+            this.logger.warn(`${sink.name} index update failed`, {
+              workspace,
+              error: err instanceof Error ? err.message : String(err),
+            });
+            sink.fail(workspace, state.version, err);
+          }
+        }
       } catch (err) {
-        this.logger.error("render-sink reconcile fold failed", {
+        // Unregistered page types (models not loaded yet) or any read/fold failure for ONE
+        // workspace must not abort boot — the model-load reproject reconciles the sinks later.
+        this.logger.warn("render-sink reconcile skipped a workspace", {
           workspace,
           error: err instanceof Error ? err.message : String(err),
         });
-        continue;
-      }
-      for (const sink of lagging) {
-        try {
-          await sink.rebuild(workspace, state.version, docs, state);
-        } catch (err) {
-          this.logger.warn(`${sink.name} index update failed`, {
-            workspace,
-            error: err instanceof Error ? err.message : String(err),
-          });
-          sink.fail(workspace, state.version, err);
-        }
       }
     }
   }

@@ -202,6 +202,13 @@ export class MarkdownDiskProjector implements RenderSink {
   ): Promise<void> {
     if (!this.mirrors(workspace)) return;
     const m = this.wsManifest(workspace);
+    // An archived WORKSPACE is hidden from the wiki's default views, so it has no place in the
+    // on-disk mirror — drop any files it previously had. (Workspace-archive is not a structural
+    // commit, so it arrives here with empty docs; wipe explicitly.)
+    if (state.status === "archived") {
+      await this.wipeWorkspace(workspace, version, m);
+      return;
+    }
     const wsDir = workspaceDir(state);
     let written = 0;
     const removedPaths: string[] = [];
@@ -257,6 +264,12 @@ export class MarkdownDiskProjector implements RenderSink {
   ): Promise<void> {
     if (!this.mirrors(workspace)) return;
     const m = this.wsManifest(workspace);
+    // An archived workspace is hidden from the wiki, so it mirrors NOTHING — leave `expected`
+    // empty and let the orphan sweep below drop any files it previously had.
+    if (state.status === "archived") {
+      await this.wipeWorkspace(workspace, version, m);
+      return;
+    }
     const wsDir = workspaceDir(state);
     const bodyByPage = new Map<string, string>(docs.map((d) => [d.pageId, d.body]));
 
@@ -298,6 +311,19 @@ export class MarkdownDiskProjector implements RenderSink {
   }
 
   // ── internals ──────────────────────────────────────────────────────────────────
+
+  /** Remove every file this workspace had on disk and reset its manifest to `version` (empty). */
+  private async wipeWorkspace(workspace: WorkspaceId, version: number, m: WorkspaceManifest): Promise<void> {
+    const removed = Object.keys(m.files);
+    await this.removeFiles(removed);
+    m.files = {};
+    m.pages = {};
+    m.version = version;
+    await this.persist();
+    if (removed.length > 0) {
+      this.logger.info("markdown-disk dropped archived workspace", { workspace, version, removed: removed.length });
+    }
+  }
 
   private wsManifest(workspace: WorkspaceId): WorkspaceManifest {
     const existing = this.manifest[workspace];

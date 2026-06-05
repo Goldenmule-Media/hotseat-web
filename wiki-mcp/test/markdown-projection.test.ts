@@ -225,6 +225,18 @@ describe("markdown-disk projection — live filesystem mirror", () => {
     expect(await exists("docs/_archive/temp.md")).toBe(true); // mirrored aside
   });
 
+  it("drops an archived workspace's whole mirror", async () => {
+    await enableMirror();
+    const ws = await engine.createWorkspace({ name: "Docs" });
+    await ws.createPage("note", { title: "Guide", parentId: null });
+    await drain();
+    expect(await exists("docs/guide.md")).toBe(true);
+
+    await ws.archive(); // archive the whole workspace
+    await drain();
+    expect(await exists("docs/guide.md")).toBe(false); // hidden workspace → not mirrored
+  });
+
   it("self-heals on restart — reconciles a wiped output directory against head", async () => {
     await enableMirror();
     const ws = await engine.createWorkspace({ name: "Docs" });
