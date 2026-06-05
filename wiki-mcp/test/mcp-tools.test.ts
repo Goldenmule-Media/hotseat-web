@@ -167,6 +167,26 @@ describe("MCP tools + token manager + resources", () => {
     expect((fresh.data as unknown[]).length).toBeGreaterThan(0);
   });
 
+  it("archiveWorkspace / unarchiveWorkspace are reachable from MCP and flip the listed status", async () => {
+    const session = "ws-arch";
+    const created = await tools.get("createWorkspace")!.handle({ name: "Disposable" }, ctx(session));
+    const wsId = (created.data as { workspaceId: string }).workspaceId;
+    await drain();
+    const statusNow = async (): Promise<string | undefined> => {
+      const list = (await tools.get("listWorkspaces")!.handle({}, ctx(session))).data as { id: string; status: string }[];
+      return list.find((w) => w.id === wsId)?.status;
+    };
+    expect(await statusNow()).toBe("active");
+
+    await tools.get("archiveWorkspace")!.handle({ workspaceId: wsId }, ctx(session));
+    await drain();
+    expect(await statusNow()).toBe("archived");
+
+    await tools.get("unarchiveWorkspace")!.handle({ workspaceId: wsId }, ctx(session));
+    await drain();
+    expect(await statusNow()).toBe("active");
+  });
+
   it("mutate then describeMutations reflects status; render shows the body", async () => {
     const session = "s2";
     const created = await tools.get("createWorkspace")!.handle({ name: "W" }, ctx(session));
