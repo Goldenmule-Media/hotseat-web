@@ -9,9 +9,11 @@ through named, typed, FSM-gated mutations (never free text); a workspace is a gr
 to one append-only Durable Stream and is the unit of atomic consistency; everything renders
 deterministically to Markdown. It's a 4-package npm-workspaces monorepo (ESM, TypeScript, Node ≥20).
 
-Each package has a long-form `DESIGN.md` with Architecture Decision Records (ADRs) in an appendix — **the
-authoritative source of truth for intent.** `wiki/BUILD_NOTES.md` is the engine's implementation guide
-(OCC, command bus, event model). Read the relevant `DESIGN.md` before changing a package's behavior.
+Each package has a long-form `DESIGN.md` — **the authoritative source of truth for intent.** Architecture
+Decision Records (ADRs) used to live in each `DESIGN.md`'s appendix; they are now first-class wiki pages,
+rendered to [`docs/wiki/decision-records/`](docs/wiki/decision-records/) (each `DESIGN.md` appendix is now a
+pointer + legacy-ID map). `wiki/BUILD_NOTES.md` is the engine's implementation guide (OCC, command bus, event
+model). Read the relevant `DESIGN.md` before changing a package's behavior.
 
 ## Commands
 

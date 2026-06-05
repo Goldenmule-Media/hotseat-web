@@ -220,7 +220,7 @@ page's commands each with its `available` flag — the FSM's legal-now set (equi
 `availableMutations()`); `--legal` filters to only the available ones. `wiki tools` dumps every
 command's `argsSchema` JSON Schema — ready to paste into an Anthropic/OpenAI tool definition. Generated per-command
 subcommands with typed flags (`wiki page <ws> <page> add-constraint --text …`) are ergonomic sugar
-deferred to a later phase ([ADR-C5](#adr-c5--generic-mutations-in-v1-generated-subcommands-later-2026-06-02)).
+deferred to a later phase ([ADR-C5](../docs/wiki/decision-records/generic-mutations-in-v1-generated-subcommands-later.md)).
 
 `--command-id <id>` threads the engine's idempotency key so a retried tool call collapses to one
 effect ([wiki/DESIGN.md §15](../wiki/DESIGN.md)).
@@ -257,7 +257,7 @@ tier — they need nothing but a reachable streams origin.
 > **A coordinated, not-yet-built `wiki-server` capability — directed by the owner.** The owner has
 > directed that `wiki-server` expose logs (history + tailing) over a small **HTTP control API** that
 > *piggybacks its logging interface* — **not** Durable Streams
-> ([ADR-C3](#adr-c3--logs-via-the-control-api-not-durable-streams-2026-06-02)). This **narrows**
+> ([ADR-C3](../docs/wiki/decision-records/logs-via-the-control-api-not-durable-streams.md)). This **narrows**
 > `wiki-server`'s "no API surface of our own" charter ([wiki-server/DESIGN.md §1/§2](../wiki-server/DESIGN.md))
 > to *no **engine** API; a minimal **operational** control API is allowed*, so `wiki-server/DESIGN.md`
 > must be amended (its own ADR) to own this contract — **it does not describe it yet.** The section
@@ -356,7 +356,7 @@ An authed remote `wiki-server` sits behind a reverse proxy that checks a bearer 
   `EventLog` threads to **all** the client call-sites it uses — `DurableStream.create` (the handle,
   whose `append` inherits its headers), `stream(...)` (reads + live tails), and `DurableStream.head`
   (existence checks) — not just one, or reads/existence-checks `401`
-  ([ADR-C4](#adr-c4--remote-auth-via-an-engine-istreamconfigheaders-hook-2026-06-02)).
+  ([ADR-C4](../docs/wiki/decision-records/remote-auth-via-an-engine-istreamconfig-headers-hook.md)).
 
 ```ts
 // wiki-cli builds the engine from the resolved profile:
@@ -375,7 +375,7 @@ Tokens are read from `token_env` (or `--token`/`WIKI_TOKEN`), **never stored in 
 
 > **v1 scope (owner's call).** Until the `IStreamConfig.headers` hook lands, **authed remote profiles
 > are out of reach** — v1 remote targets must be unauthenticated or network-ACL'd. The engine change is
-> small but real ([ADR-C4](#adr-c4--remote-auth-via-an-engine-istreamconfigheaders-hook-2026-06-02));
+> small but real ([ADR-C4](../docs/wiki/decision-records/remote-auth-via-an-engine-istreamconfig-headers-hook.md));
 > confirm whether it's in v1 or deferred.
 
 ---
@@ -463,7 +463,7 @@ real `wiki-server` binary for the management/control paths.
 ## 13. Future work
 
 - **Generated per-command subcommands** with typed flags from `describeMutations()`
-  ([ADR-C5](#adr-c5--generic-mutations-in-v1-generated-subcommands-later-2026-06-02)).
+  ([ADR-C5](../docs/wiki/decision-records/generic-mutations-in-v1-generated-subcommands-later.md)).
 - **Pluggable page-type packages** loaded by a profile, beyond the bundled `feature` set
   ([§4.3](#43-the-page-type-registry-problem)).
 - **Shell completion** (the command tree + live `availableMutations()` are completion-friendly).
@@ -484,87 +484,15 @@ real `wiki-server` binary for the management/control paths.
 
 ## Appendix A: Decision records
 
-### ADR-C1 — Embed the engine; spawn the server; import neither's internals (2026-06-02)
+These architecture decisions are now first-class, FSM-governed pages in the wiki, rendered to
+[`docs/wiki/decision-records/`](../docs/wiki/decision-records/) (the engine's own Markdown
+projection — see the [index](../docs/wiki/decision-records/index.md)). They are no longer
+maintained inline here; the legacy IDs map to their pages:
 
-**Context.** `wiki-cli` needs the engine's behavior and must reach (and sometimes operate) a
-`wiki-server`.
-
-**Decision.** Depend on **`wiki` as a library** (call `createWiki` and its interfaces). Treat
-**`wiki-server` as a binary to spawn and an HTTP control API to call** — never a code import. The CLI
-holds no domain state and reimplements no rules.
-
-**Consequences.** Two narrow, honest seams; each package versions independently. The CLI is stateless
-per invocation, so concurrent users collaborate through the server's stream with the engine's OCC.
-Mirrors the existing boundaries (`wiki-server` imports neither the engine nor the CLI).
-
-### ADR-C2 — Admin "by degrees" via command locality (2026-06-02)
-
-**Context.** Some admin actions are inherently local (process control); others should work against
-any server (observability).
-
-**Decision.** Tag every command **data** / **global-admin** / **local-admin** and gate it on the
-active profile: `local-admin` requires a `manage` block (co-location); `global-admin` uses the
-control API and works local *or* remote; `data` needs only a reachable streams origin. Out-of-scope
-invocations fail fast with a directing message (exit `8`).
-
-**Consequences.** "Stream logs from anywhere, manage the process only where it runs" becomes a
-first-class, predictable rule rather than per-command surprise.
-
-### ADR-C3 — Logs via the control API, not Durable Streams (2026-06-02)
-
-**Context.** "Streaming logs" must be **global** (local + remote). One option was to publish logs to
-a Durable Stream and tail it like domain events.
-
-**Decision (CLI-side).** `wiki logs` consumes an **HTTP control API** (`GET /_server/logs` history,
-`?follow=1` SSE tail) rather than a Durable Stream, so it works identically local or remote. The
-serving side **piggybacks `wiki-server`'s logging interface** (logger → stdout + bounded history buffer
-+ live subscribers) on a second listener ([§7.1](#71-endpoints)).
-
-**Why.** Logs are **ephemeral operational data**, categorically different from the **event-sourced,
-durable domain data** in the streams. Putting them in a durable stream would conflate the two planes,
-consume retention/disk for transient output, and entangle ops telemetry with the consistency
-substrate. The control API keeps the planes cleanly separate.
-
-**Consequences & ownership.** This is a **directed but not-yet-landed `wiki-server` addition** that
-**narrows** that package's "no API surface" charter to allow a minimal *operational* API; the
-authoritative contract must move into **`wiki-server/DESIGN.md` (its own ADR)** — this doc states only
-the consumed view. Log history is bounded (a ring buffer), not durable — correct for telemetry.
-Health/info ride the same listener, resolving the earlier "no health endpoint" gap
-([wiki-server/DESIGN.md §8.4](../wiki-server/DESIGN.md)).
-
-### ADR-C4 — Remote auth via an engine `IStreamConfig.headers` hook (2026-06-02)
-
-**Context.** Authed remote servers expect `Authorization: Bearer <token>`. The control-API seam can
-send it directly, but the engine's stream traffic can't yet — `IStreamConfig` carries no headers,
-though `@durable-streams/client` accepts `headers`/`fetch`.
-
-**Decision.** Add an optional **`IStreamConfig.headers`** (static map or `() => headers` for refresh)
-that `EventLog` forwards to the client at **every call-site it uses** — `DurableStream.create`,
-`stream(...)`, and `DurableStream.head` (the handle's `append` inherits the create-time headers).
-Threading it to only one site leaves reads or existence-checks unauthenticated → `401`. `wiki-cli`
-populates it from the profile `token` (from `token_env`/`--token`/`WIKI_TOKEN`, never the config file).
-
-**Alternative / fallback.** If touching the engine is undesirable now, **defer remote-auth**: v1
-targets only unauthenticated or network-ACL'd servers, and authed remote profiles land once the hook
-exists. (A CLI-side global `fetch` wrapper was rejected — it can't reliably intercept every engine
-code path.)
-
-**Consequences.** One tiny, well-supported engine change unlocks authed remote profiles for both
-seams; the dynamic-headers form leaves room for SSO/refresh later.
-
-### ADR-C5 — Generic mutations in v1, generated subcommands later (2026-06-02)
-
-**Context.** Page mutations can be exposed generically (`mutate <cmd> --json`) or as generated
-per-command subcommands with typed flags derived from each command's JSON Schema.
-
-**Decision.** v1 ships the **generic** `wiki page <ws> <page> mutate <command> --json '<args>'`, plus
-`wiki page <ws> <page> commands` (legal-now list) and **`wiki tools`** (the full JSON-Schema catalog).
-Generated per-command subcommands are **future sugar**.
-
-**Why.** The generic path is type-set-agnostic, immediately works for every registered page type, and
-is the most agent-friendly (schema in, JSON out) — matching the engine's LLM-first stance
-([wiki/DESIGN.md §12](../wiki/DESIGN.md)). Generated flags are pure ergonomics and can be layered on
-without changing the core.
-
-**Consequences.** Smaller v1 surface; humans type JSON for now (or use `tools` to see the shape);
-the generated layer is additive when it arrives.
+| Legacy ID | Decision |
+|---|---|
+| ADR-C1 | [Embed the engine; spawn the server; import neither's internals](../docs/wiki/decision-records/embed-the-engine-spawn-the-server-import-neither-s-internals.md) |
+| ADR-C2 | [Admin "by degrees" via command locality](../docs/wiki/decision-records/admin-by-degrees-via-command-locality.md) |
+| ADR-C3 | [Logs via the control API, not Durable Streams](../docs/wiki/decision-records/logs-via-the-control-api-not-durable-streams.md) |
+| ADR-C4 | [Remote auth via an engine `IStreamConfig.headers` hook](../docs/wiki/decision-records/remote-auth-via-an-engine-istreamconfig-headers-hook.md) |
+| ADR-C5 | [Generic mutations in v1, generated subcommands later](../docs/wiki/decision-records/generic-mutations-in-v1-generated-subcommands-later.md) |

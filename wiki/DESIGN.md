@@ -177,7 +177,7 @@ Three findings that directly shape this design ([details + sources](#19-referenc
    content in per-file streams** (`/_metadata` + `/_content/{id}`), so `move`/`rename` is atomic
    (structure-only). We instead put the *whole workspace* (structure **and** content) in one
    stream, because we need atomic **cross-page content** moves and a single tail for all
-   updates — see [ADR-002](#adr-002--workspace-as-the-aggregate-one-stream-2026-06-01).
+   updates — see [ADR-002](../docs/wiki/decision-records/workspace-as-the-aggregate-one-stream.md).
 
 **The client (illustrative; the `EventLog` mapping lives in [§9.1](#91-one-stream-per-workspace)):**
 
@@ -296,7 +296,7 @@ CQRS, eventual consistency. A read may carry the returned token to wait for read
 
 In event-sourcing terms there is exactly **one consistency aggregate — the Workspace** —
 because a single stream's append is the only atomic unit Durable Streams offers
-([§3.2](#32-durable-streams-the-persistence-substrate), [ADR-002](#adr-002--workspace-as-the-aggregate-one-stream-2026-06-01)),
+([§3.2](#32-durable-streams-the-persistence-substrate), [ADR-002](../docs/wiki/decision-records/workspace-as-the-aggregate-one-stream.md)),
 and the operations that must be atomic span multiple pages:
 
 - **Structural:** reparent a page, reorder siblings, add/remove a link — must keep the tree
@@ -327,7 +327,7 @@ declares **neither a reducer nor a renderer** — those are engine-owned and uni
 > / "the Question aggregate," read that as *the entity's self-contained declarative spec* (its
 > sections/FSM/commands/contracts) — it shares the workspace's stream and the engine's one reducer
 > rather than owning either. Promoting any of them to its own stream would reopen
-> [ADR-002](#adr-002--workspace-as-the-aggregate-one-stream-2026-06-01) and forfeit atomic
+> [ADR-002](../docs/wiki/decision-records/workspace-as-the-aggregate-one-stream.md) and forfeit atomic
 > cross-page operations.
 
 ### 6.2 Workspace — the aggregate (stream root)
@@ -759,7 +759,7 @@ see below.
 
 ### 8.6 Consistency tokens, read models & CQRS
 
-The engine is **strict CQRS with eventual consistency** ([ADR-003](#adr-003--cqrs-with-consistency-tokens-2026-06-02)): the write side (commands → events) and the read side (queryable projections) are **separate**, and the read side trails the write side. Every write returns a **consistency token**; reads may pass a token to **wait** until the read side has caught up. This is what lets a caller convert "eventually consistent" into "consistent with my last write" on demand.
+The engine is **strict CQRS with eventual consistency** ([ADR-003](../docs/wiki/decision-records/cqrs-with-consistency-tokens.md)): the write side (commands → events) and the read side (queryable projections) are **separate**, and the read side trails the write side. Every write returns a **consistency token**; reads may pass a token to **wait** until the read side has caught up. This is what lets a caller convert "eventually consistent" into "consistent with my last write" on demand.
 
 **The consistency token.** A `ConsistencyToken` is an **opaque, comparable string** encoding `{ workspaceId, version }` — `version` being the per-workspace 0-based sequence (== stream length; drives fold order & OCC, §8.1). Tokens are compared **within a single workspace only**; cross-workspace tokens are independent.
 
@@ -777,7 +777,7 @@ export interface Committed<T> {
 }
 ```
 
-This wraps **every** write, including the eight currently-`Promise<void>` structural commands — `reparent`, `reorder`, `setPageTitle`, `archivePage`, `link`, `unlink`, `moveItem`, and `archive()` (§10.3) — which become `Promise<Committed<void>>`: they mutate graph state a caller reads back, so they carry a token too. (A breaking API change — see [ADR-003](#adr-003--cqrs-with-consistency-tokens-2026-06-02).)
+This wraps **every** write, including the eight currently-`Promise<void>` structural commands — `reparent`, `reorder`, `setPageTitle`, `archivePage`, `link`, `unlink`, `moveItem`, and `archive()` (§10.3) — which become `Promise<Committed<void>>`: they mutate graph state a caller reads back, so they carry a token too. (A breaking API change — see [ADR-003](../docs/wiki/decision-records/cqrs-with-consistency-tokens.md).)
 
 **The read-model interface.** Any projection — the default in-memory one (§8.4) or an external one — implements `IReadModel`:
 
@@ -802,14 +802,14 @@ With a token present, the read calls `waitFor(token)` then serves — giving **r
 
 **The write-side / read-side split.** The command bus folds a **write-side decide-aggregate** purely to validate the FSM, invariants, and OCC and to append (§5, §15). A **separate read model** — fed by the live tail, token-gated — serves reads (§8.4). The default in-memory read model makes the engine CQRS-correct standalone, with no database; external read models implement the same `IReadModel` against this seam.
 
-**A public, pure fold is exported.** External read models apply each commit by folding it with the engine's own reducer (so they can never *semantically* diverge — same upcasting, same unknown-type policy), then serializing the resulting `IWorkspaceState`. `foldWorkspace(events, registry, from?)` and `applyWorkspace(state, event, registry)` are **exported** from the `wiki` barrel for that purpose ([ADR-003](#adr-003--cqrs-with-consistency-tokens-2026-06-02), [§16.1](#161-what-each-file-owns)). Because the fold routes content events through the page-type reducers, the **`Registry`** is exported via the **`wiki/registry`** subpath ([§10.7](#107-package-entry-points)) so a consumer can build one from its `pageTypes`; and the opaque token codec (`encodeToken`/`decodeToken`/`ZERO_VERSION`) is exported too, so an external read model can compare/produce the same `ConsistencyToken` the engine's writes return.
+**A public, pure fold is exported.** External read models apply each commit by folding it with the engine's own reducer (so they can never *semantically* diverge — same upcasting, same unknown-type policy), then serializing the resulting `IWorkspaceState`. `foldWorkspace(events, registry, from?)` and `applyWorkspace(state, event, registry)` are **exported** from the `wiki` barrel for that purpose ([ADR-003](../docs/wiki/decision-records/cqrs-with-consistency-tokens.md), [§16.1](#161-what-each-file-owns)). Because the fold routes content events through the page-type reducers, the **`Registry`** is exported via the **`wiki/registry`** subpath ([§10.7](#107-package-entry-points)) so a consumer can build one from its `pageTypes`; and the opaque token codec (`encodeToken`/`decodeToken`/`ZERO_VERSION`) is exported too, so an external read model can compare/produce the same `ConsistencyToken` the engine's writes return.
 
 ---
 
 ## 9. Persistence with Durable Streams
 
 The wiki uses Durable Streams **directly**, through one thin `EventLog` module — no storage
-abstraction ([ADR-001](#adr-001--use-durable-streams-directly-no-storage-port-2026-06-01)).
+abstraction ([ADR-001](../docs/wiki/decision-records/use-durable-streams-directly-no-storage-port.md)).
 Storage *durability* (in-memory / file / ACID) is chosen on the DS **server** you point at, not
 in the wiki ([§3.2](#32-durable-streams-the-persistence-substrate)).
 
@@ -1371,7 +1371,7 @@ hot-reloads via the `ModelRegistry`.
 
 ## 11. Deterministic Markdown rendering
 
-**Render is a READ MODEL, not a per-type function** ([ADR-007](#adr-007--render-as-a-configurable-read-model-2026-06-03), [structured-content §8](../docs/structured-content.md)).
+**Render is a READ MODEL, not a per-type function** ([ADR-007](../docs/wiki/decision-records/render-as-a-configurable-read-model.md), [structured-content §8](../docs/structured-content.md)).
 The engine ships a configurable **Markdown render read model** — a sibling of the SQL read model and
 the AST/symbol projections (§8.4) — that **walks a page's section tree and dispatches on field-kind**.
 Each field-kind ships a default deterministic render; a page type supplies declarative **render
@@ -1440,7 +1440,7 @@ one workspace. It exercises a page type that **mandates child pages**, a tree of
 holding four list-element types, references-as-links, and **cross-page invariants** that are only
 checkable because the brief and its children share one aggregate (§6, ADR-002). The `feature` bundle
 is authored **directly on sections** — greenfield, no `fields`/`items` migration
-([ADR-010](#adr-010--greenfield-no-backward-compatibility-2026-06-03)).
+([ADR-010](../docs/wiki/decision-records/greenfield-no-backward-compatibility.md)).
 
 ### 13.1 The page types
 
@@ -1726,7 +1726,7 @@ contention, so plain optimistic concurrency suffices — **no single-writer acto
   contiguity and fails fast on a gap.
 - **Escape hatch (not needed now):** if a workspace becomes write-hot, route its writes to a
   single epoch-fenced owner (zero conflicts), split it, or adopt the StreamFS hybrid. See
-  [ADR-002](#adr-002--workspace-as-the-aggregate-one-stream-2026-06-01).
+  [ADR-002](../docs/wiki/decision-records/workspace-as-the-aggregate-one-stream.md).
 
 ---
 
@@ -1807,7 +1807,7 @@ The boundaries that keep the architecture honest:
 - **`api.ts` depends on nothing**, and everything depends on it — interfaces split from
   implementations (§10). Implementations live under `core/` and `stores/`.
 - **`stores/event-log.ts` is the sole importer of `@durable-streams/client`** — upgrading or
-  swapping the storage client touches exactly one file ([ADR-001](#adr-001--use-durable-streams-directly-no-storage-port-2026-06-01)).
+  swapping the storage client touches exactly one file ([ADR-001](../docs/wiki/decision-records/use-durable-streams-directly-no-storage-port.md)).
 - **Page types are declarative plugins.** External schema bundles import only the *public authoring
   API* — the `wiki/authoring` entry point (`definePageType`/`t`/`arg`, the Zod adapter, the `api`
   types) — **never** `core/wiki.ts`, `command-bus.ts`, `event-log.ts`, or any internal module path.
@@ -1863,7 +1863,7 @@ is not a runtime dependency of the engine (the engine is schema-agnostic).
   tests. Key cases: `reparent` cycle rejection, parent-exists, duplicate sibling title, link/`ref`
   integrity, section-set contract, well-formedness, block normal form, `moveItem` atomicity (both the
   `removeElement`+`addElement` ops or neither). Golden render tests are rewritten against the render
-  config (greenfield, [ADR-010](#adr-010--greenfield-no-backward-compatibility-2026-06-03)).
+  config (greenfield, [ADR-010](../docs/wiki/decision-records/greenfield-no-backward-compatibility.md)).
 - **FSM coverage:** for every status, `available()` matches the intended table; property test
   that no command is legal from a status it shouldn't be.
 - **Workspace script tests:** a sequence of structural + content mutations produces an expected
@@ -1894,7 +1894,7 @@ is not a runtime dependency of the engine (the engine is schema-agnostic).
 - **Projections / read models** across workspaces — "all open questions," search, dashboards.
 - **Branching / forking** a workspace (the event log makes "fork at version N" natural).
 - **Soft-delete / trash** flows beyond page-level archival (page archival now ships as a reversible
-  visibility flag — [ADR-011](#adr-011--page-archival-is-an-orthogonal-visibility-flag-not-a-status-2026-06-04));
+  visibility flag — [ADR-011](../docs/wiki/decision-records/page-archival-is-an-orthogonal-visibility-flag-not-a-status.md));
   **access control** (actor-scoped command permissions above the FSM).
 - **More page types** — Decision Record (ADR), Spec, Risk, Experiment, Meeting.
 - **Cross-workspace page move** as an explicit export/import saga.
@@ -1921,274 +1921,21 @@ is not a runtime dependency of the engine (the engine is schema-agnostic).
 
 ## Appendix A: Decision records
 
-### ADR-001 — Use Durable Streams directly; no storage port (2026-06-01)
+These architecture decisions are now first-class, FSM-governed pages in the wiki, rendered to
+[`docs/wiki/decision-records/`](../docs/wiki/decision-records/) (the engine's own Markdown
+projection — see the [index](../docs/wiki/decision-records/index.md)). They are no longer
+maintained inline here; the legacy IDs map to their pages:
 
-**Context.** The first draft wrapped Durable Streams in an `EventStore` port with
-`InMemory`/`DurableStreams`/`File` adapters ("test in-memory, swap later").
-
-**Findings.** Durable Streams *is* the storage layer; durability is a **server** setting
-(in-memory / file / ACID via `DurableStreamTestServer({ dataDir })` or the Rust server's
-`DS_STORAGE__MODE`; production via Caddy / Electric Cloud). `@durable-streams/server` is built
-for dev/test/CI/embedding. The client is fetch-based and portable; only the server needs Node.
-
-**Decision.** Drop the port and custom adapters. Use Durable Streams directly via one thin
-`EventLog` (events↔messages, version↔offset, OCC). Tests use an in-memory `DurableStreamTestServer`.
-
-**Why this isn't the abstraction we rejected.** `EventLog` is an anti-corruption boundary around
-one young (0.2.x) dependency and a real impedance mismatch — not a swappable multi-backend layer.
-No interface until a second backend actually exists.
-
-### ADR-002 — Workspace as the aggregate (one stream) (2026-06-01)
-
-**Context.** First draft used **one stream per page**. Reviewer: that's too granular — we want to
-reparent a page within a "workspace" (a graph of pages), and with multiple streams that isn't
-atomic. Question raised: *can Durable Streams aggregate streams?*
-
-**Findings.** **No cross-stream transactions** — atomicity is per-stream (servers commit producer
-state + append atomically; a writer can append-and-close atomically). A **single POST of a JSON
-array is an atomic multi-event append.** Conditional append is native (`PreconditionFailedError`).
-The StreamFS precedent uses a *hybrid* (structure stream + per-file content streams), which makes
-*structural* ops atomic but **not cross-page content** ops.
-
-**Requirements gathered.** Atomic operations needed: structural (reparent/reorder/link) **and**
-cross-page **content** moves (e.g. move an open question onto a page's implementation plan). Scale: *gentle* multi-writer (~5
-concurrent writers, mostly different pages); a key desired benefit is **one stream everyone tails
-for all updates**.
-
-**Decision.** The **workspace is the aggregate = one Durable Stream**; pages are **entities**
-within it (tree + typed links). A command's events are written as one atomic batch. The hybrid
-was rejected because it can't make cross-page *content* moves atomic and would force readers to
-tail many streams.
-
-**Tradeoff (explicit).** A coarser aggregate trades intra-workspace write *parallelism* for
-cross-page *atomicity* and single-tail reads. At the target scale this is a clear win;
-concurrency is handled by in-process per-workspace serialization + optimistic concurrency with
-rebase-and-retry — **no actor/routing system**.
-
-**Consequences.** Snapshots recommended as the stream grows ([§8.3](#83-snapshots)); `version` is
-per-workspace; cross-*workspace* moves are a non-atomic saga (a non-goal). Escape hatch if a
-workspace gets write-hot: single epoch-fenced owner, split the workspace, or adopt the StreamFS
-hybrid.
-
-### ADR-003 — CQRS with consistency tokens (2026-06-02)
-
-**Context.** A stateless consumer (open → act → close) pays a full rehydrate per call ([§8.3](#83-snapshots)) — a non-starter once a long-lived host (`wiki-mcp`, the embedding read-model + MCP server) wants to serve reads from a durable, queryable projection (SQL) rather than re-fold history. That host must keep its read store **separate** from the write path, yet an agent must still be able to **read its own writes**. Today the engine keeps a *single* in-memory projection ([§8.4](#84-live-projection)) and the handle's reads (`tree`/`page`/`toMarkdown` — [§10.3](#103-the-iworkspacehandle-interface-one-workspace--the-aggregate)) are **synchronous and token-free**, conflating the write-side fold with the read view. The contract is specified in [`wiki-mcp/DESIGN.md`](../wiki-mcp/DESIGN.md) §3; per the owner's directive it must live in the **core engine**, not just the host.
-
-**Findings.** The engine already owns the right quantity to name a position in history: the per-workspace `version` (0-based, monotonic, `== stream length`, drives fold order **and** OCC — [§8.1](#81-the-event-envelope)). So a consistency token is just `{ workspaceId, version }`, surfaced as an opaque, comparable string — compared **within** a workspace only (cross-workspace tokens are independent). Synchronously writing both stores would couple the write path and span two non-atomic stores; waiting on a token after the append converts "eventual" into "after my write" without that coupling. The reducer that validates a command is already a fold; reusing a *public* fold lets an external read model never semantically diverge from the write model.
-
-**Decision.** Adopt **strict CQRS with eventual consistency** as a **core engine property**:
-
-- **Split the single projection ([§8.4](#84-live-projection)) in two.** A write-side **decide-aggregate** — the fold the command bus maintains to validate the FSM / invariants / OCC — and a **separate read model** (a default **in-memory `IReadModel`**, fed by the live tail and token-gated). The engine is CQRS-correct standalone; external read models (e.g. `wiki-mcp`'s SQL projection) implement the same `IReadModel`.
-- **Every write returns `Committed<T>`** — `{ readonly value: T; readonly token: ConsistencyToken }`. The token is the **committed head `version` after the append *and* any OCC rebase-retry** ([§15](#15-concurrency-idempotency--ordering)), so it names where the events *actually* landed; an idempotent / zero-event write returns the **current** head. This includes the **eight currently-`void` structural commands** (`reparent`, `reorder`, `setPageTitle`, `archivePage`, `link`, `unlink`, `moveItem`, `archive()`) ([§10.3](#103-the-iworkspacehandle-interface-one-workspace--the-aggregate)) — they mutate a graph the agent reads back, so they carry a token too (→ `Committed<void>`). Writes **do not** block on the read model; they return as soon as the append commits.
-- **Reads optionally take a token and `waitFor`.** Read methods gain `{ consistentWith?: ConsistencyToken; timeoutMs?: number }` and become **async** (return a `Promise`): a token present → `waitFor(token)` then serve (read-your-writes / monotonic); absent → serve current state (eventually consistent, possibly stale). The `IReadModel` interface is:
-
-```ts
-interface IReadModel {
-  /** How far this read model has applied, for a workspace. */
-  appliedToken(workspace: WorkspaceId): Promise<ConsistencyToken>;
-  /** Resolve once applied ≥ token; reject after timeoutMs (default from config). */
-  waitFor(token: ConsistencyToken, opts?: { timeoutMs?: number }): Promise<void>;
-}
-```
-
-- **Export a public, pure `fold`.** `foldWorkspace(events, registry, from?)` / `applyWorkspace(state, event, registry)` are **exported** (with the `Registry` via the `wiki/registry` subpath, [§10.7](#107-package-entry-points)) so external read models reuse exact write-model semantics (upcasting, unknown-type policy, item/FSM effects) and only own the state→storage mapping.
-- **A new `ConsistencyTimeoutError`** (a `WikiError` subclass, [§14](#14-errors--validation)) when `waitFor` exceeds `timeoutMs`, so a caller can retry or read stale-with-a-flag. `IWikiConfig` gains a default read-consistency timeout (`readConsistencyTimeoutMs`, default 5000).
-
-**Consequences (a real, breaking API change — not small).** Both write *and* read surfaces change. **Writes:** every return becomes `Committed<T>` (including the eight `Promise<void>` structural commands and `archive()`), so every caller unwraps `.value`/`.token`. **Reads:** the handle's synchronous, token-free `tree`/`page`/`toMarkdown` become **token-aware and `async`**, served from the new read model rather than the write-side fold. §8 (event sourcing) and §10 (API) both change; the in-memory `IReadModel` keeps the engine CQRS-correct with no database. The payoff: fast writes, eventually-consistent reads, and a token to demand read-your-writes on demand — and a public fold that lets `wiki-mcp`'s SQL read model stay semantically identical to the engine. (See [`wiki-mcp/DESIGN.md`](../wiki-mcp/DESIGN.md) §3 / ADR-M1.)
-
-### ADR-004 — Sections are the one content container (2026-06-03)
-
-**Context.** The original model split a page's content into a `fields` record (typed scalars/prose)
-and an `items` map of typed sub-entities (`IPageNode.fields` / `IPageNode.items`, §6.2 pre-redesign).
-Two containers, each with bespoke per-type shape, render code, and reducers. There was no addressable,
-contract-bearing structural unit *between* "the whole page" and "one item," and the document's shape
-was implied by each type's hand-written render.
-
-**Decision.** A page's content is a **tree of typed Sections** — the **one** content container
-([structured-content §2](../docs/structured-content.md)). `IPageNode.fields`/`items` are replaced by
-`IPageNode.sections: ISection[]`. A section is the addressable (stable `key` + engine-minted `id`),
-contract-bearing (§6 there), write-gated, meta-bearing unit; it may nest (heading hierarchies). A
-section has typed **fields** (by field-kind, ADR-005) and may carry a typed **meta** bag.
-**Sub-entities ("items") live inside a `list` field as elements** and keep their model FSMs; **blocks
-are the document field-kind** (ADR-005). The tree-vs-block rule: use a (sub-)section when a unit needs
-a stable key, a contract, a write-gate, meta, or to be a command target / outline entry; use a block
-otherwise.
-
-**Consequences.** Engine state, the §6 entity catalog, §6.5 composition, and the worked example are
-reframed on sections. Two tree levels coexist (workspace page tree + intra-page section tree), the
-latter inheriting the workspace's OCC/aggregate guarantees with **no new stream or consistency
-boundary**. The `defineItemType` free-standing registration is retired in favor of inline `elements`
-(ADR-007's declarative authoring). Greenfield — no `fields`/`items` migration (ADR-010).
-
-### ADR-005 — Closed field-kinds, including the `blocks` document model (2026-06-03)
-
-**Context.** Sections need a way to say *how* each field is shaped, validated, and rendered without
-the engine learning each type's *meaning* (the schema-agnostic line). And the standing "no free-form
-rich text" tenet (§2) needed a positive answer for genuinely document-shaped content — prose with
-emphasis, inline code, links, tables — that does not reintroduce an opaque Markdown/HTML blob.
-
-**Decision.** Field values are typed by a **closed, engine-owned field-kind vocabulary**:
-`scalar | prose | code | attachment-ref | ref | blocks | list`
-([structured-content §3](../docs/structured-content.md)). *Which* kinds a type uses is model data;
-the *set* is fixed so the one reducer and the render read model handle any field generically.
-**`blocks` is the document field-kind** (§3.1 there): an ordered, heterogeneous sequence of typed,
-`id`-bearing **block** nodes (paragraph/heading/code/list/table/quote/divider) with **inline runs**
-(text+marks / code-span / ref), marks carried **ProseMirror-style** (a canonical-sorted *set* on a
-text run, not nesting nodes — so `strong(em x)` and `em(strong x)` can't fold differently). A `code`
-block **is** a `code` field with a `blockId` (same payload + machinery, no second code path).
-
-**This is *structured* rich text, not free-form.** Every node has a closed tag and an `id`; the only
-string leaves are `text` runs and `code` source; a `text` run carrying Markdown syntax is **rejected
-at ingestion** (§7 there) and reified as a `code-span`, a mark, or a `ref`. There is **no
-`html`/`raw`/`markdown` block, ever**, and no block/inline zoo — a new kind requires an ADR proving
-closed render, stable-id addressability, and no opaque leaf.
-
-**Consequences.** The §6.2 `IField` union and §10.6 exported types gain the seven kinds; ingestion
-grammar validation (§7 there) lives in `core/contracts.ts`. Blocks reuse the `list` operations and
-every determinism rule (ADR-008). `spliceInline`, nested-block list items, and block `embed` are
-deferred (structured-content §12/§13).
-
-### ADR-006 — Generic section operations + one engine-owned reducer (no per-type events/reducers/renderers) (2026-06-03)
-
-**Context.** Pre-redesign, each page/item type authored its own **events** (`QuestionAnswered`,
-`ConstraintAdded`, …), a per-type **`apply` reducer**, and a per-type **`render`** — three pieces of
-imperative model code the engine folded and dispatched per type (§10.5 pre-redesign). That made the
-fold's surface per-type-unbounded, coupled history to each type's event shapes, and put canonical
-content under model-written reducers the tooling then had to trust.
-
-**Decision.** Content mutates **only** through a **closed, engine-owned section-operation
-vocabulary** — `setField`, `addSection`/`removeSection`/`moveSection`/`renameSection`,
-`addBlock`/`removeBlock`/`moveBlock`/`setBlock`, `addElement`/`removeElement`/`moveElement`/
-`setElementField`, `applyTextEdits`, `setMeta`, `transition`
-([structured-content §9.4](../docs/structured-content.md)) — folded by **one built-in reducer**
-(§8.1.1). **There are no per-type events, no author-written content reducers, and no author-written
-renderers.** Content events are **generic** (they carry the operation); the **originating command
-name lives in event metadata**, so `history()` stays semantic (`answerQuestion`) without per-type
-events. The **only** sanctioned model fold-extension is a bounded, pure, **meta-scoped `reduceMeta`**
-(structured-content §9.5) that may write *only* a section's `meta` bag — never canonical content, the
-section tree, or status.
-
-**Consequences.** §4 vocabulary, §6.1, §7.3, §8.1/§8.1.1/§8.2, and §16 are reframed: `workspace.ts`
-routes, `core/section-reducer.ts` is the one content reducer, and the per-type `apply`/`render`
-disappear from `IPageTypeDef`. Upcasting reshapes **operation payloads** (ADR-008). `moveItem` becomes
-a `removeElement`+`addElement` pair in one append. The canonical content the tooling depends on stays
-**engine-folded and uniformly legible**.
-
-### ADR-007 — Render as a configurable read model (2026-06-03)
-
-*(also covers the move to declarative `definePageType` authoring — sections/field-kinds/elements +
-contracts + render config — and declarative commands with `produces` as the escape hatch.)*
-
-**Context.** Render was a per-type `render(page, ctx) => markdown` function (§11 pre-redesign) — the
-last big piece of imperative model code, and the one that *defined* each document's shape (the
-default renderer even inferred display via `textOf = rec.text ?? rec.name ?? rec.id`). It conflicted
-with "structure is first-class and introspectable": you couldn't derive a page's layout without
-running its code.
-
-**Decision.** **Render is a read model** ([structured-content §8](../docs/structured-content.md)): the
-engine ships a configurable **Markdown render read model** — a sibling of the SQL read model and the
-AST/symbol projections — that walks the section tree and **dispatches on field-kind**, driven by a
-page type's **static, declarative, logic-free render config** (section order, headings/labels,
-per-kind display, groupings, element templates). **The per-type `render` function is retired.**
-Authoring as a whole becomes **declarative**: `definePageType` declares **sections + field-kinds +
-element types (+ their FSMs) + structural contracts + render config**, and commands are **declarative
-by default** (target + args→field `set` + `transition` + `preconditions`), with `produces` as the
-escape hatch returning section operations. **Determinism is preserved** as a property of the read
-model: pure over folded state + static config (no wall-clock/RNG; ids from injected `newId`; explicit
-ordering; any computed value is materialized into a field by a command, never computed at render
-time).
-
-**Consequences.** §10.5 (`IPageTypeDef` loses `apply`/`render`, gains `sections`/`elements`/
-`render: IRenderConfig`), §11 (render-as-read-model), and §16 (`render/read-model.ts`; a `wiki/render`
-subpath) change. The render-config vocabulary must cover today's bespoke layouts (e.g. the
-open/resolved question split) without becoming "config that is secretly code" — an **open item** to
-specify (structured-content §8). Golden render tests are rewritten against the config.
-
-### ADR-008 — `ref` as a field-kind (render-derived cross-reference) (2026-06-03)
-
-**Context.** Cross-references inside content (to a section, another page, a code symbol, or a block)
-were previously either workspace **links** (page→page only, not intra-content) or inline text the
-author hand-typed and had to keep in sync on every reorder/rename/renumber. Neither gives an
-integrity-checked reference *inside a sentence* whose label updates automatically.
-
-**Decision.** **`ref` is a first-class field-kind** (and an inline-run kind) whose value is a **typed
-target** (`section | page | symbol | block`) and whose **displayed label is render-derived** — the
-section number, page title, or symbol name, computed by the render read model
-([structured-content §3, §3.2](../docs/structured-content.md)). Integrity (target exists) is enforced
-like link integrity, and the §7-there integrity walk recurses **into** block/inline trees so an
-inline reference can never dangle undetected. It complements, not replaces, page→page **links** (which
-stay the non-hierarchical graph edge).
-
-**Consequences.** The `IField` union and the inline vocabulary gain `ref`/`RefTarget`; the §6.2
-invariants and the well-formedness check gain `ref`-target resolution. Because the label is a
-projection, reorders/renames/renumbers update every reference deterministically with no stored-label
-drift.
-
-### ADR-009 — The section tree is author-editable, with model-declared constraints (2026-06-03)
-
-**Context.** A fixed per-type layout (the implicit pre-redesign model) can't serve both rigid types
-(a `feature-brief` with an exact set of sections) and open types (a design-doc or notebook the author
-grows freely). We needed one mechanism spanning both.
-
-**Decision.** The section tree is **author-editable by default** via the closed section-tree
-operations (`addSection`/`moveSection`/`removeSection`/`renameSection`); a page type **constrains** it
-declaratively rather than fixing a layout ([structured-content §6](../docs/structured-content.md)):
-`requiredSections` (must exist — auto-materialized empty at `PageCreated`, the intra-page sibling of
-`requiredChildren`, keyed by stable declared keys, no FSM), the **section-set shape** (`open` lets
-authors add ad-hoc sections, `closed` forbids it; plus `prohibit`/cardinality, SHACL-style), per-field
-`required`/schema (the transition-scoped **well-formedness** "must be filled" check, distinct from the
-always-on "must exist"), `mutableIn` **write-gates**, and transition **preconditions**. These are
-**model data**, validated mechanically in the `Registry` at load and hot-reloaded via the
-`ModelRegistry` — *not* a general constraint language (decidable presence/cardinality/type/closed-open
-+ simple pure guard predicates only; richer logic stays in pure `produces`/preconditions; §13
-non-goals).
-
-**Consequences.** §6 entity catalog (Section row), §7.1 (sections gated by write-gates+contracts, not
-an FSM), §9 contracts, and §10.5 (`sectionSet`, `required`, `mutableIn`, `preconditions`) reflect
-this. A `feature-brief` is effectively closed; an open type grows its tree at runtime.
-
-### ADR-010 — Greenfield: no backward compatibility (2026-06-03)
-
-**Context.** ADRs 004–009 change the engine's content model, event model, authoring API, and render
-pipeline at once. Carrying a `fields`/`items` ↔ sections migration, dual-format upcasters, and
-per-type-event compatibility shims would dominate the work and ossify the old model in the engine.
-
-**Decision.** Adopt the new model **greenfield** — **no backward compatibility**. There is no
-`fields`/`items` data migration and no per-type-event compatibility path; the `feature` bundle is
-**authored directly on sections** (ADR-004) with declarative commands + render config (ADR-007), and
-golden render tests are rewritten. Schema *evolution within the new model* still uses the existing
-`schemaVersion` + upcasters seam (now reshaping section-operation payloads / section/field schemas,
-§8.5) — that mechanism is retained; only cross-model back-compat is dropped.
-
-**Consequences.** Existing streams written under the old model are **not** readable by the new engine
-(acceptable: pre-release). The delivery sequence (structured-content §12) is Phase 1 substrate
-(sections, field-kinds incl. `blocks`, contracts, render read model; `feature` rewritten) → Phase 2
-read-only host projections (outline, symbol index behind the `LanguageRegistry`) → Phase 3 semantic
-operations (`renameSymbol`, guarantee-scoped per §5 there).
-
-### ADR-011 — Page archival is an orthogonal visibility flag, not a status (2026-06-04)
-
-**Context.** The first cut of `archivePage` set `node.status = "archived"`, overwriting the page-type
-lifecycle status. That conflated two orthogonal axes — *lifecycle* (a per-type FSM, `draft → … →
-shipped`) and *visibility* (should this page appear in default tree/sidebar views?). It destroyed the
-prior status (a `shipped` page forgot it shipped), was a one-way door (`"archived"` is in no model's
-FSM, so the transition machinery could never leave it), and made the model-inspection FSM graph show a
-"current status" that is not a node in that graph.
-
-**Decision.** Archival is a first-class, schema-agnostic **`archived` boolean** on the page node — a
-sibling of `pinned`, **independent of `status`**. `PageArchived` flips the flag (status is preserved);
-a new `PageUnarchived` event + `unarchivePage` command clears it, making archival a round-trip. While
-`archived`, both structural and content mutations are blocked — the freeze that was previously implicit
-in "no FSM transition leaves `archived`" is now an explicit guard. `archived` is surfaced on `ITreeNode`
-and via `IRenderCtx.archivedOf(id)`; reads **annotate, never filter** — the engine exposes archived
-pages so consumers (the SQL read model's `tree`, the UI sidebar) hide them by policy with an opt-in to
-reveal. Archival does **not** cascade: a page is *effectively hidden* when it **or any ancestor** is
-archived, computed by readers — so archiving a feature hides its pinned plan/checklist/testing subtree
-without mutating those children, and unarchiving restores them exactly.
-
-**Consequences.** `archivePage` is no longer terminal — it is reversible and status-preserving. Models
-that surface archived-ness in render read `ctx.archivedOf` (e.g. the `architecture` bundle's
-"(archived)" dependency marker) instead of comparing `statusOf` to a magic string. Sort/visibility
-*policies* (e.g. "hide finished pages") live in read models / the UI, not the engine — the engine owns
-only the durable visibility fact. Greenfield (ADR-010): no migration for the old `status = "archived"`
-representation.
+| Legacy ID | Decision |
+|---|---|
+| ADR-001 | [Use Durable Streams directly; no storage port](../docs/wiki/decision-records/use-durable-streams-directly-no-storage-port.md) |
+| ADR-002 | [Workspace as the aggregate (one stream)](../docs/wiki/decision-records/workspace-as-the-aggregate-one-stream.md) |
+| ADR-003 | [CQRS with consistency tokens](../docs/wiki/decision-records/cqrs-with-consistency-tokens.md) |
+| ADR-004 | [Sections are the one content container](../docs/wiki/decision-records/sections-are-the-one-content-container.md) |
+| ADR-005 | [Closed field-kinds, including the `blocks` document model](../docs/wiki/decision-records/closed-field-kinds-including-the-blocks-document-model.md) |
+| ADR-006 | [Generic section operations + one engine-owned reducer (no per-type events/reducers/renderers)](../docs/wiki/decision-records/generic-section-operations-one-engine-owned-reducer-no-per-type-events-reducers-renderers.md) |
+| ADR-007 | [Render as a configurable read model](../docs/wiki/decision-records/render-as-a-configurable-read-model.md) |
+| ADR-008 | [`ref` as a field-kind (render-derived cross-reference)](../docs/wiki/decision-records/ref-as-a-field-kind-render-derived-cross-reference.md) |
+| ADR-009 | [The section tree is author-editable, with model-declared constraints](../docs/wiki/decision-records/the-section-tree-is-author-editable-with-model-declared-constraints.md) |
+| ADR-010 | [Greenfield: no backward compatibility](../docs/wiki/decision-records/greenfield-no-backward-compatibility.md) |
+| ADR-011 | [Page archival is an orthogonal visibility flag, not a status](../docs/wiki/decision-records/page-archival-is-an-orthogonal-visibility-flag-not-a-status.md) |

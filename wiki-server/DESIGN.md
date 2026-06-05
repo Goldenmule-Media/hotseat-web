@@ -57,7 +57,7 @@ directly; `wiki-mcp` is just the long-lived consumer hosted alongside.)
   `wiki-mcp` it hosts. It *knows* it has an engine; it does not *own* the engine logic. The
   stream-host layer still speaks only the Durable Streams wire protocol, so **storage stays
   swappable** even though the bundled backend (engine + read model) ships with the host
-  ([ADR-S3](#adr-s3--wiki-server-hosts-wiki-mcp-2026-06-02)).
+  ([ADR-S3](../docs/wiki/decision-records/wiki-server-hosts-wiki-mcp.md)).
 - **G3 — One shared stream, many clients.** Multiple `wiki` instances connect concurrently and
   rely on the server's per-stream ordering and optimistic concurrency ([§5](#5-the-client-contract))
   for correctness — the server is the synchronization point.
@@ -74,7 +74,7 @@ directly; `wiki-mcp` is just the long-lived consumer hosted alongside.)
   commands, or know what a "page" is — that surface (MCP) and the engine live in the **hosted
   `wiki-mcp`**, not in `wiki-server`'s code. (The rejected `wiki-api/` was *`wiki-server` itself*
   becoming an engine wrapper; hosting a separate `wiki-mcp` module is different — see
-  [ADR-S1](#adr-s1--host-streams-do-not-wrap-the-engine-2026-06-01) / [ADR-S3](#adr-s3--wiki-server-hosts-wiki-mcp-2026-06-02).)
+  [ADR-S1](../docs/wiki/decision-records/host-streams-do-not-wrap-the-engine.md) / [ADR-S3](../docs/wiki/decision-records/wiki-server-hosts-wiki-mcp.md).)
 - **No knowledge of the URL layout in the stream host.** The workspace/snapshot/catalog path shapes
   are a **client-side convention** ([§5.2](#52-the-url-layout-is-the-clients-not-ours)); the stream
   host serves whatever URLs clients create.
@@ -165,7 +165,7 @@ and `src/server.ts`), consistent with [wiki/BUILD_NOTES.md §1](../wiki/BUILD_NO
 > prototyping," and points production at the **Caddy plugin / Electric Cloud / Caddy standalone
 > binary**. We knowingly run the file-backed Node server as a simple self-host at the engine's
 > gentle target scale, with that production tier as a drop-in upgrade — see
-> [ADR-S2](#adr-s2--wrap-the-node-server-for-the-self-host-tier-2026-06-01).
+> [ADR-S2](../docs/wiki/decision-records/wrap-the-node-server-for-the-self-host-tier.md).
 
 ---
 
@@ -173,7 +173,7 @@ and `src/server.ts`), consistent with [wiki/BUILD_NOTES.md §1](../wiki/BUILD_NO
 
 The "interface" between `wiki` and `wiki-server` is **not TypeScript** — it is the Durable Streams
 HTTP protocol plus a few conventions the **client** owns. Keeping those on the client is what lets
-the stream host stay a generic, swappable substrate ([ADR-S3](#adr-s3--wiki-server-hosts-wiki-mcp-2026-06-02)).
+the stream host stay a generic, swappable substrate ([ADR-S3](../docs/wiki/decision-records/wiki-server-hosts-wiki-mcp.md)).
 
 ### 5.1 What the host guarantees
 
@@ -361,7 +361,7 @@ engine's gentle target scale (~5 writers, tens–hundreds of pages per workspace
 [wiki/DESIGN.md §6.6](../wiki/DESIGN.md)). When you want ACID storage, vendor support, or scale, the
 swap is **server-side only** — clients keep their `baseUrl`: run the upstream **Caddy plugin** /
 **Caddy standalone binary** (`DS_STORAGE__MODE`) or **Electric Cloud**, and repoint DNS. See
-[ADR-S2](#adr-s2--wrap-the-node-server-for-the-self-host-tier-2026-06-01).
+[ADR-S2](../docs/wiki/decision-records/wrap-the-node-server-for-the-self-host-tier.md).
 
 ### 8.4 Operations
 
@@ -373,7 +373,7 @@ swap is **server-side only** — clients keep their `baseUrl`: run the upstream 
   and live-tail fan-out — both gentle by design. Watch `dataDir` size.
 - **Upgrades:** the **stream-host/storage layer** stays swappable behind the wire protocol
   ([§8.3](#83-production-tiers)), but `wiki-mcp` + the engine now ship **bundled** with `wiki-server`
-  ([ADR-S3](#adr-s3--wiki-server-hosts-wiki-mcp-2026-06-02)) — version them together. Roll by draining
+  ([ADR-S3](../docs/wiki/decision-records/wiki-server-hosts-wiki-mcp.md)) — version them together. Roll by draining
   (`stop()` the stream host **and** `wiki-mcp`, restart on the same `dataDir`); stream clients reconnect
   and resume from their offsets, and `wiki-mcp` resumes its read model from its applied position.
 
@@ -495,7 +495,7 @@ module). It does **not** depend on `wiki` *directly* — it reaches the engine o
 
 - **`wiki-server` never imports `wiki` *directly*** (only via `wiki-mcp`) and **implements no engine
   logic**. If you feel the urge to write a fold, a projection, or a command handler here, it belongs in
-  `wiki-mcp` ([ADR-S3](#adr-s3--wiki-server-hosts-wiki-mcp-2026-06-02)).
+  `wiki-mcp` ([ADR-S3](../docs/wiki/decision-records/wiki-server-hosts-wiki-mcp.md)).
 - **Stream-host knowledge stays minimal:** the URL layout, envelopes, and OCC mapping live in the
   engine's client (`wiki/src/stores/event-log.ts`, [§5](#5-the-client-contract)); the stream host just
   serves arbitrary stream URLs.
@@ -557,69 +557,13 @@ answers.
 
 ## Appendix A: Decision records
 
-### ADR-S1 — Host streams; do not wrap the engine (2026-06-01)
+These architecture decisions are now first-class, FSM-governed pages in the wiki, rendered to
+[`docs/wiki/decision-records/`](../docs/wiki/decision-records/) (the engine's own Markdown
+projection — see the [index](../docs/wiki/decision-records/index.md)). They are no longer
+maintained inline here; the legacy IDs map to their pages:
 
-**Context.** The original plan had a `wiki-api/` sibling exposing the engine's command catalog over
-HTTP/RPC+SSE. Revisiting "where does the durable stream actually run?" reframed the real need.
-
-**Findings.** The engine is *already* a complete application that talks to storage over HTTP via
-`@durable-streams/client`. What's missing for any shared, multi-process setup isn't an API in front
-of the engine — it's a **durable server behind it**. You don't wrap the streams; you **run `wiki`
-wherever you want and point every instance at the same stream host.**
-
-**Decision.** `wiki-server/` is that host: a durable deployment of `@durable-streams/server`. It does
-not *itself* wrap the engine in an HTTP/RPC API. **`wiki-api/` is removed from the plan** (struck from
-`wiki/DESIGN.md` §2/§5/§16/§18). *(Later — [ADR-S3](#adr-s3--wiki-server-hosts-wiki-mcp-2026-06-02) —
-`wiki-server` additionally **hosts** the `wiki-mcp` module, which embeds the engine and exposes MCP;
-hosting a separate module is distinct from `wiki-server` itself becoming the engine wrapper that
-`wiki-api` would have been.)*
-
-**Consequences.** The *stream-host layer* and the engine couple only through the wire protocol — URL
-layout, envelopes, OCC stay in the client. The agent-facing surface is **`wiki-mcp`**, hosted by
-`wiki-server` ([ADR-S3](#adr-s3--wiki-server-hosts-wiki-mcp-2026-06-02)) — superseding the earlier
-sketch of `wiki-cli` as the primary consumer.
-
-### ADR-S2 — Wrap the Node server for the self-host tier (2026-06-01)
-
-**Context.** Which server does `wiki-server` run? `@durable-streams/server`'s own README scopes it to
-"development, testing, and prototyping" and recommends the **Caddy plugin / Electric Cloud / Caddy
-standalone binary** for production; [wiki/DESIGN.md ADR-001](../wiki/DESIGN.md) echoes the dev/test/
-embedding framing. The Node package also offers only **in-memory and file-backed** storage — no
-ACID/redb, no request middleware.
-
-**Decision.** v1 `wiki-server` wraps **`DurableStreamTestServer`** with **file-backed** storage as a
-**simple, durable self-host**, with a `bin`, config, and a container. Default storage is `file`;
-`memory` is the dev switch. **Auth/TLS are delegated to a reverse proxy** ([§9](#9-security)), since
-the server has no middleware. ACID and managed operation are reached by swapping to the production
-tier — a **server-side-only** change (clients keep their `baseUrl`, [§8.3](#83-production-tiers)).
-
-**Why this is acceptable despite the upstream framing.** At the engine's *gentle* target scale, a
-file-backed node that fsyncs every append before ack is genuinely durable and far simpler than
-standing up Caddy. We treat the production tier as a drop-in upgrade rather than a prerequisite, and
-we do **not** overclaim: there is no ACID tier in this package, and durability/ops guarantees are
-those of file-backed LMDB + append-only logs, nothing more.
-
-**Consequences.** Right-sized for this scale, not a ceiling; monotonic disk growth until compaction
-lands ([§7.2](#72-crash-restart--retention)); security depends on the proxy being present whenever the
-host is exposed ([§9](#9-security)).
-
-### ADR-S3 — wiki-server hosts wiki-mcp (2026-06-02)
-
-**Context.** A stateless consumer re-folds history per call (a non-starter); the long-lived **`wiki-mcp`**
-module (engine kept hydrated + SQL read model + MCP server, [wiki-mcp/DESIGN.md](../wiki-mcp/DESIGN.md))
-replaces it. Where does it run?
-
-**Decision.** `wiki-server` **hosts `wiki-mcp` in the same process** — one deployable runs the durable
-stream host *and* `wiki-mcp`. There are **no modes**. `wiki-server` stays a **thin wiring layer**: it
-boots the stream host, then starts `wiki-mcp` (handing it the localhost `baseUrl`/namespace + the
-read-model DB config); the projection tailer reads localhost streams. **All engine/read-model/MCP logic
-lives in `wiki-mcp`**, never in `wiki-server`.
-
-**Consequences — a deliberate charter relaxation.** This **softens G1/G2**: `wiki-server` now
-transitively depends on the engine (via `wiki-mcp`), so it is no longer "imports nothing but
-`@durable-streams/server`," and the **backend** (engine + read model + MCP) no longer versions
-independently of the host — they ship together ([§8.4](#84-operations)). Preserved discipline:
-`wiki-server` imports `wiki-mcp` (not `wiki` directly) and implements **no** engine logic of its own;
-and the **stream-host/storage layer** remains a swappable, content-agnostic substrate (server-side-only
-swap to the production tier, [ADR-S2](#adr-s2--wrap-the-node-server-for-the-self-host-tier-2026-06-01) /
-[§8.3](#83-production-tiers)). The host *knowing* it has an engine is fine; *owning* the logic is not.
+| Legacy ID | Decision |
+|---|---|
+| ADR-S1 | [Host streams; do not wrap the engine](../docs/wiki/decision-records/host-streams-do-not-wrap-the-engine.md) |
+| ADR-S2 | [Wrap the Node server for the self-host tier](../docs/wiki/decision-records/wrap-the-node-server-for-the-self-host-tier.md) |
+| ADR-S3 | [wiki-server hosts wiki-mcp](../docs/wiki/decision-records/wiki-server-hosts-wiki-mcp.md) |

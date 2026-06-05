@@ -203,7 +203,7 @@ no FSM" holds ([docs/structured-content.md §2, §9.3](../docs/structured-conten
 ## 5. Versioning & the `vN/` layout
 
 The contract this rides on already exists in the engine — **upcast-to-latest**
-([ADR-W1](#adr-w1--upcast-to-latest-with-self-contained-version-history-2026-06-02)). Each page type
+([ADR-W1](../docs/wiki/decision-records/upcast-to-latest-with-self-contained-version-history.md)). Each page type
 declares a single **current** `version: number` and a sparse `upcasters: { [v]: (payload) => nextPayload }`
 map. What changed under the declarative model is **what a payload is**: there are no per-type events, so
 upcasters reshape the **content-schema payloads** of the closed section operations — a section's fields,
@@ -563,7 +563,7 @@ globally-identified wiki page instead.
 - **No model signing / trust.** Loading a bundle is arbitrary code execution; first-party bundles are
   trusted. Any future "third-party model" path needs a trust boundary.
 - **Version-routed reducers** were considered and rejected in favor of upcast-to-latest
-  ([ADR-W1](#adr-w1--upcast-to-latest-with-self-contained-version-history-2026-06-02)).
+  ([ADR-W1](../docs/wiki/decision-records/upcast-to-latest-with-self-contained-version-history.md)).
 - **Open authoring questions** tracked upstream ([docs/structured-content.md §9.8](../docs/structured-content.md)):
   the generated-structural-command naming scheme, the `arg()` args-mapping DSL, the render-template
   grammar (`{field}` / `{field?}` / column directives), and how a derived (`mutableIn`-less) section is
@@ -573,72 +573,12 @@ globally-identified wiki page instead.
 
 ## Appendix A: Decision records
 
-### ADR-W1 — Upcast-to-latest with self-contained version history (2026-06-02)
+These architecture decisions are now first-class, FSM-governed pages in the wiki, rendered to
+[`docs/wiki/decision-records/`](../docs/wiki/decision-records/) (the engine's own Markdown
+projection — see the [index](../docs/wiki/decision-records/index.md)). They are no longer
+maintained inline here; the legacy IDs map to their pages:
 
-**Context.** Schema must change at runtime, and an event stream contains events written under older page-type
-versions. Two models handle that: **upcast-to-latest** (transform old payloads forward to the head shape,
-fold with one current reducer) or **version-routed reducers** (keep every version's reducer and fold each
-event with its own). The engine already implements the former: `IPageType.version` + sparse `upcasters`,
-`upcastPayload` on the fold path (`wiki/src/core/workspace.ts:163`), version-stamped writes
-(`command-bus.ts:369`), and a `type@version` fingerprint (`registry.ts:89`).
-
-**Decision.** Adopt **upcast-to-latest**, and express a model's history as per-page-type `vN/` folders that
-compose into the engine's existing `version` + `upcasters` contract. A bundle must retain its **complete
-upcaster chain** (§6) so any historical event can climb to the head.
-
-**Why.** It is the engine's existing contract, so **no engine change** is needed and `wiki` stays
-schema-agnostic and unchanged. It sidesteps version-routed reducers' **state-coherence** problem (a single
-page's state assembled by N different reducers across mixed-version events). One reducer reads one shape;
-all backward-compat is isolated in pure upcasters.
-
-**Consequences.** Shipped versions are immutable; evolving a type means *append a version + an upcaster*,
-never editing a prior `vN/`. A reload that lowers a type's version below live events halts those workspaces
-loudly (desired locally). The runtime that loads/reloads bundles is specified in
-[wiki-mcp ADR-M6](../wiki-mcp/DESIGN.md). (Under ADR-M7 the upcasted payloads are **content-schema**
-shapes — section/field/element/`meta` — not per-type events, but the chain mechanism is unchanged.)
-
-### ADR-M7 — Declarative page types: the engine owns the reducer, render, and events; models declare structure + render config + contracts (2026-06-03)
-
-**Context.** A page type previously carried a hand-written `apply` reducer, a `render` function, and a set
-of bespoke per-type event types (`SummarySet`, `QuestionAnswered`, …): the model was a *program* the
-engine routed events into ([wiki/DESIGN.md §7.3](../wiki/DESIGN.md), and the pre-revision `feature` bundle:
-`feature-brief.ts` `applyBrief`/`renderBrief`, the `items.ts` FSMs). That coupled every page type to the
-fold mechanism and the renderer, made content shapes ad-hoc per type, and put author-written logic on the
-write path. The structured-content redesign ([docs/structured-content.md](../docs/structured-content.md))
-makes a page's content a tree of typed **Sections** mutated through a **closed, engine-owned
-section-operation vocabulary**, folded by **one built-in reducer**, and rendered by a **configurable
-Markdown render read model** — none of which a model should re-implement.
-
-**Decision.** A `wiki-models` page type is **declarative**. `definePageType` declares: a tree of typed
-**sections** (keys, names, field-kinds, `required`, `mutableIn` write-gate); **element** (list-item) types
-with their status FSMs; the **section-set** contract (open/closed, prohibited, cardinality) plus
-`requiredSections` and per-field `required`/schema; **transition preconditions** (the declarative form of
-the `beginImplementation`/`ship` gates); declarative **commands** (target + args→field mapping + FSM event
-+ preconditions); and a static, logic-free **render config**. A model writes **no `apply` reducer, no
-`render` function, and no per-type event types** — the engine supplies the one built-in reducer, the
-closed section-operation vocabulary, command attribution via event metadata, and the render read model.
-`produces` remains an **escape hatch** that returns section operations (never bespoke events) for computed
-effects; the **only** model fold-extension is a bounded, pure, **meta-scoped** `reduceMeta(meta, op) => meta`
-that may write only a section's typed `meta` bag ([docs/structured-content.md §9.4–§9.5](../docs/structured-content.md)).
-The `feature` bundle is re-authored greenfield on this model — sections with field-kinds, items as `list`
-elements with FSMs, the cross-page gates as declarative preconditions, the bespoke renderers as render
-config — with no `fields`/`items` migration ([docs/structured-content.md §12](../docs/structured-content.md)).
-
-**Why.** It completes the schema-agnostic boundary: the engine owns the **grammar of structure and how it
-renders** and zero **meaning** ([docs/structured-content.md §1](../docs/structured-content.md)). Removing
-author-written reducers/renderers/events makes every page's content **uniform and introspectable** —
-deterministic tooling (outline, indexing, render, the SQL read model) operates on one structure instead of
-N bespoke shapes; history stays semantic via command attribution; and determinism is enforced engine-side
-(the model has no write-path code in which to call a clock or RNG). It also shrinks what hot-reload must
-trust: a declaration is mechanically validated at load (keys resolve, field-kinds known, predicates
-callable) rather than executed as a reducer.
-
-**Consequences.** `wiki-models` ships **declaration**, not logic: the `vN/` layout now versions
-**content-schema** shapes (section/field/element/`meta`), not per-type event payloads (§5), and a pure
-render-config change needs no version bump. Golden render tests are rewritten against the render read model
-(§8.3). The render-config vocabulary must cover today's bespoke layouts — e.g. the feature-brief
-open/resolved split — without becoming "config that is secretly code"; that vocabulary, the `arg()`
-args-mapping DSL, and the generated-command naming scheme are open and tracked upstream
-([docs/structured-content.md §8, §9.7, §9.8](../docs/structured-content.md)). The engine-side metaschema
-(`definePageType` declarative fields, the section reducer, the render read model, the well-formedness
-check) is owned by `wiki`; this ADR records only the **authoring contract** `wiki-models` writes to.
+| Legacy ID | Decision |
+|---|---|
+| ADR-W1 | [Upcast-to-latest with self-contained version history](../docs/wiki/decision-records/upcast-to-latest-with-self-contained-version-history.md) |
+| ADR-M7 | [Declarative page types: the engine owns the reducer, render, and events; models declare structure + render config + contracts](../docs/wiki/decision-records/declarative-page-types-the-engine-owns-the-reducer-render-and-events-models-declare-structure-render-config-contracts.md) |

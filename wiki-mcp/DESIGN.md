@@ -68,7 +68,7 @@ and **manages the tokens** so MCP reads always reflect the caller's own prior MC
 - **No new domain model or rules.** The engine owns mutations, the FSM, invariants, rendering. The
   read model is *derived*; it never validates a command.
 - **Not synchronous read/write.** Read-after-write is achieved by **waiting on a token**, not by
-  writing both stores in one transaction ([§3.3](#33-reads-wait-on-a-token), [ADR-M1](#adr-m1--cqrs-with-consistency-tokens-in-the-engine-core-2026-06-02)).
+  writing both stores in one transaction ([§3.3](#33-reads-wait-on-a-token), [ADR-M1](../docs/wiki/decision-records/cqrs-with-consistency-tokens-in-the-engine-core.md)).
 - **Not a general SQL/query API.** The read model is internal; access is the defined MCP tools/resources
   and a small typed query layer — not arbitrary SQL to clients.
 - **Not multi-tenant beyond namespaces.** One configured namespace per server instance (v1).
@@ -115,7 +115,7 @@ interface Committed<T> { readonly value: T; readonly token: ConsistencyToken; }
 
 Writes **do not wait** on the read model — they return as soon as the append commits. The token is the
 caller's handle to *later* demand read-side consistency. Wrapping every write — including the void
-structural ones — in `Committed<T>` is a breaking engine change ([ADR-M1](#adr-m1--cqrs-with-consistency-tokens-in-the-engine-core-2026-06-02)).
+structural ones — in `Committed<T>` is a breaking engine change ([ADR-M1](../docs/wiki/decision-records/cqrs-with-consistency-tokens-in-the-engine-core.md)).
 
 ### 3.3 Reads wait on a token
 
@@ -211,7 +211,7 @@ A **projection service** owns the SQL read model and implements `IReadModel` ([�
 - **Discover & tail.** Tail the namespace **catalog** ([wiki/DESIGN.md §9.3](../wiki/DESIGN.md)) to learn
   workspaces; for each, hold a live tail of its stream ([wiki/DESIGN.md §8.4](../wiki/DESIGN.md)).
 - **Apply = fold then serialize.** For each commit (an ordered event batch), fold it with the engine's
-  **reducer** to the resulting `IWorkspaceState`, then **serialize that state into SQL** ([ADR-M3](#adr-m3--projection--engine-fold--serialize-to-sql-2026-06-02)).
+  **reducer** to the resulting `IWorkspaceState`, then **serialize that state into SQL** ([ADR-M3](../docs/wiki/decision-records/projection-engine-fold-serialize-to-sql.md)).
   In the section model a commit is an array of **section operations** ([structured-content §9.4](../docs/structured-content.md))
   — `setField` / `addSection` / `addBlock` / `setBlock` / `addElement` / `applyTextEdits` / `setMeta` /
   `transition` — folded by the engine's **one built-in section reducer**; there are no per-type events or
@@ -239,7 +239,7 @@ section tree is materialized one row per section, each section's ordered **typed
 keyed by `fieldKey`, with the field-kind tag preserved so a query can discriminate `scalar` / `prose` /
 `code` / `attachment-ref` / `ref` / `blocks` / `list` ([structured-content §3](../docs/structured-content.md)).
 Type-specific shape stays in **JSONB**, queryable with Postgres JSON operators
-([ADR-M2](#adr-m2--sql-read-model-via-kysely-pglite-local-pg-prod-2026-06-02)):
+([ADR-M2](../docs/wiki/decision-records/sql-read-model-via-kysely-pglite-local-pg-prod.md)):
 
 ```sql
 workspaces(id PK, name, status, updated_at)                       -- applied position lives in projection_offsets (one source of truth)
@@ -375,7 +375,7 @@ language work is host-side ([structured-content §5](../docs/structured-content.
 Parsers (tree-sitter / Roslyn / LSP) are **heavy and version-sensitive**, so they live **in the host, never
 in `wiki`** ([structured-content §4/§11/§13](../docs/structured-content.md)). They load through a runtime
 **`LanguageRegistry`** that **mirrors the `ModelRegistry` dynamic-import pattern**
-([ADR-M6](#adr-m6--live-modelregistry-with-cache-busted-hot-reload-2026-06-02)): per-language analyzers are
+([ADR-M6](../docs/wiki/decision-records/live-modelregistry-with-cache-busted-hot-reload.md)): per-language analyzers are
 loaded **by module specifier** via cache-busted `import()`, registered/loaded/reloaded/unregistered behind a
 generation counter, and selected per `lang` tag at projection time.
 
@@ -500,7 +500,7 @@ separate MCP client ([§8.1](#81-tools--resources)). `wiki-server` logs `mcpUrl`
 [`wiki-server/DESIGN.md` §8.5](../wiki-server/DESIGN.md)).
 
 The split is about *where logic lives*, not deployment shape: **the engine, read model, projection, token
-management, and MCP surface all live in `wiki-mcp`** ([ADR-M5](#adr-m5--wiki-mcp-holds-the-logic-wiki-server-hosts-it-2026-06-02)).
+management, and MCP surface all live in `wiki-mcp`** ([ADR-M5](../docs/wiki/decision-records/wiki-mcp-holds-the-logic-wiki-server-hosts-it.md)).
 `wiki-server` may *know* it has an engine (transitively, via `wiki-mcp`) — that's fine — it just must not
 *implement* engine logic itself. `wiki-mcp` imports the **engine** as a library and reaches streams over
 `@durable-streams/client`; it never imports `wiki-server` code. (`wiki-server/DESIGN.md` is amended to record
@@ -654,7 +654,7 @@ Tests target the **CQRS seam** and the **projection**, using an in-memory `Durab
 - Engine (embedded; the CQRS contract must land here): [`wiki/DESIGN.md`](../wiki/DESIGN.md) — §8 (event sourcing), §8.4 (live projection), §10 (API), §12 (LLM), §14 (errors).
 - **Content model (authoritative)**: [`docs/structured-content.md`](../docs/structured-content.md) — §2 (section tree), §3 (field-kinds + blocks/inline), §4 (write model vs read models), §5 (code edits), §9.4 (section operations), §11 (host projections + `LanguageRegistry`).
 - Stream host (hosts wiki-mcp): [`wiki-server/DESIGN.md`](../wiki-server/DESIGN.md).
-- Schema layer (runtime-loaded page-type bundles): [`wiki-models/DESIGN.md`](../wiki-models/DESIGN.md) — the `ModelRegistry` loads these ([ADR-M6](#adr-m6--live-modelregistry-with-cache-busted-hot-reload-2026-06-02)); the `LanguageRegistry` (§7) mirrors it for analyzers.
+- Schema layer (runtime-loaded page-type bundles): [`wiki-models/DESIGN.md`](../wiki-models/DESIGN.md) — the `ModelRegistry` loads these ([ADR-M6](../docs/wiki/decision-records/live-modelregistry-with-cache-busted-hot-reload.md)); the `LanguageRegistry` (§7) mirrors it for analyzers.
 - Parsers (load behind the `LanguageRegistry`, §7): tree-sitter <https://tree-sitter.github.io> · LSP <https://microsoft.github.io/language-server-protocol/> · Roslyn.
 - Kysely: <https://kysely.dev> · PGlite: <https://pglite.dev> · node-postgres: <https://node-postgres.com>
 - Model Context Protocol: <https://modelcontextprotocol.io> · TS SDK: `@modelcontextprotocol/sdk`.
@@ -664,189 +664,17 @@ Tests target the **CQRS seam** and the **projection**, using an in-memory `Durab
 
 ## Appendix A: Decision records
 
-### ADR-M1 — CQRS with consistency tokens in the engine core (2026-06-02)
+These architecture decisions are now first-class, FSM-governed pages in the wiki, rendered to
+[`docs/wiki/decision-records/`](../docs/wiki/decision-records/) (the engine's own Markdown
+projection — see the [index](../docs/wiki/decision-records/index.md)). They are no longer
+maintained inline here; the legacy IDs map to their pages:
 
-**Context.** Reads must be fast and durable without re-folding, yet an agent must be able to read its own
-writes. Synchronously writing both stores couples the write path and spans two non-atomic stores.
-
-**Decision.** Adopt **strict CQRS with eventual consistency** as a **core engine** contract: the write
-model (commands → events) and read model (projections) are separate; **writes return a `ConsistencyToken`**
-(the per-workspace `version`), and **reads optionally take a token and `waitFor` read-side catch-up**
-before serving. The engine ships a default in-memory read model so it is CQRS-correct standalone; external
-read models implement the same `IReadModel`.
-
-**Consequences (a real, breaking engine change — not small).** `wiki/DESIGN.md` §8/§10 change on *both*
-sides: **every** write return becomes `Committed<T>` (including the eight `Promise<void>` structural
-commands, §3.2); and the engine's **single in-memory projection** ([wiki/DESIGN.md §8.4](../wiki/DESIGN.md))
-splits into a write-side decide-aggregate **plus** a separate `IReadModel`, with the handle's currently
-**synchronous, token-free** reads (`tree`/`page`/`toMarkdown` — [wiki/DESIGN.md §10.3](../wiki/DESIGN.md))
-becoming token-aware (and likely `async`). A public pure `fold` must also be exported
-([ADR-M3](#adr-m3--projection--engine-fold--serialize-to-sql-2026-06-02)). Writes never block on projection;
-reads convert "eventual" to "after my write" on demand. This doc states the contract; the engine doc must
-own it.
-
-### ADR-M2 — SQL read model via Kysely; PGlite local, pg prod (2026-06-02)
-
-**Decision.** Materialize the read model in **Postgres via Kysely**, on **PGlite** locally and **pg** in
-production — identical Postgres SQL both places. Schema is **core relational tables + JSONB** for the
-engine's pluggable type-specific data, so one schema serves all page types with no per-type code. With the
-section model ([structured-content §2/§3](../docs/structured-content.md)) the core tables are the **section
-tree** (`sections(page_id, parent_id, key, ord, fields JSONB, meta JSONB)`), with `list` elements and
-`blocks`/inline trees living **inside** field JSONB — not a separate flat `fields`/`items` pair (§5.2).
-
-**Why.** Type-safe queries, dev/prod parity with zero local infra (embedded PGlite), and it completes the
-**ElectricSQL** stack (Durable Streams + PGlite). JSONB keeps the schema type-agnostic while staying
-queryable; typed per-type tables remain an opt-in optimization ([§5.2](#52-schema-the-section-tree--typed-fields--jsonb)).
-
-**Consequences.** The read model is a rebuildable cache (drop + re-fold from the stream); a `fingerprint`
-guards schema/page-type drift; Kysely migrations manage the schema.
-
-### ADR-M3 — Projection = engine-fold + serialize-to-SQL (2026-06-02)
-
-**Decision.** The projection applies each commit by **folding it with the engine's reducer** to an
-`IWorkspaceState`, then **serializing that state into SQL** — rather than writing bespoke per-event SQL
-handlers. The applied `version` advances in the **same transaction** as the rows. This requires the engine
-to **export a public, pure `fold`** (today `foldWorkspace`/`applyWorkspace` are internal —
-[wiki/DESIGN.md §16.1](../wiki/DESIGN.md)); that export is part of the coordinated engine changes.
-
-**Why.** Reusing the fold guarantees the read model matches write-model semantics exactly (upcasting,
-unknown-type policy, item/FSM effects) — the only thing we own is the state→rows mapping, which is
-mechanical. Atomic apply keeps `appliedToken` honest. The cost (holding a fold to serialize) coincides with
-keeping workspaces hydratable anyway ([§9](#9-staying-hydrated-the-runtime)).
-
-**Consequences.** Per-type *rich query* tables, when wanted, are derived from the same serialized state by
-opt-in projectors; the base layer needs no per-type code. The **derived projections** (outline · symbol
-index · cross-reference index, §6) are derived from the *same* folded state in the *same* per-commit
-transaction — engine-defined and language-defined respectively, but all read-side, none folded by `wiki`.
-
-### ADR-M4 — The MCP server manages tokens for automatic read-your-writes (2026-06-02)
-
-**Decision.** The MCP server keeps a **per-session high-water token per workspace**: write tools record the
-token the engine returns; read tools/resources pass it as `consistentWith` automatically. Agents get
-session read-your-writes + monotonic reads without handling tokens; the token is also returned in write
-results for clients that want to thread it.
-
-**Why.** It places the token bookkeeping at exactly the layer that has session context, keeping the engine
-contract minimal and the agent experience "just works." Distinct sessions stay independent; the model stays
-eventually consistent underneath.
-
-**Consequences.** `waitFor` timeouts become retryable MCP errors (or a `stale: true` result); sessions are
-the unit of consistency.
-
-### ADR-M5 — wiki-mcp holds the logic; wiki-server hosts it (2026-06-02)
-
-**Context.** Where does the engine live, and how thin should `wiki-server` stay?
-
-**Decision.** `wiki-mcp` is the **module that holds the `wiki` engine** and all read-side logic (projection,
-SQL read model, token management, MCP surface). `wiki-server` **hosts streams and hosts `wiki-mcp`** — a thin
-wiring layer that delegates and does not implement engine logic itself. There are no deployment "modes": one
-process hosts both.
-
-**Why.** A single home for the engine + read model + MCP behavior (testable, replaceable) while `wiki-server`
-stays small and comprehensible. The host *knowing* it has an engine is fine; *owning* the logic is not.
-
-**Consequences.** `wiki-server` now transitively depends on the engine — a deliberate, accepted relaxation of
-its original "imports neither `wiki` nor anything" stance ([wiki-server/DESIGN.md §1/§2](../wiki-server/DESIGN.md)),
-which must be amended to record that it hosts `wiki-mcp`. `wiki-mcp` still imports only the engine (library)
-+ the stream client — never `wiki-server` code.
-
-### ADR-M6 — Live ModelRegistry with cache-busted hot-reload (2026-06-02)
-
-**Context.** Page-type schema must be **swappable at runtime** so a model can be edited, rebuilt, and
-reloaded into a running server (the local *edit → build → reload* loop, driven from a build pipeline — never
-by an agent). Today `createWikiMcp` takes a fixed `pageTypes` set and builds an **immutable** `Registry`
-once; the projection captures `registry`/`fingerprint` at construction and `EmbeddedEngine` binds the set
-per hot handle. Page types are authored in **`wiki-models`** and loaded **by reference**, and the engine is
-already version-aware (upcast-to-latest, [wiki-models ADR-W1](../wiki-models/DESIGN.md)).
-
-**Decision.** Replace the construct-once `Registry` with a mutable, **generation-counted `ModelRegistry`**
-that wraps the engine's immutable `Registry`. Bundles are loaded by **dynamic `import()` of a module
-specifier**. Operations: `register(id, pageTypes)` (seed the host's page types as an in-memory `default`
-bundle — no specifier, so it can't be reloaded), `load(id, specifier)`, `reload(id)` (a **hard replace**),
-and `unregister(id)`. On any change the generation + `fingerprint` bump, and:
-
-- `reload` re-imports the rebuilt bundle **under a cache-busting URL** — `import(fileURL + '?v=' + buildHash)`.
-  Plain `import()` of the same path returns Node's **cached** module, so the query string is the whole trick
-  that makes a code change actually take effect;
-- the engine `Registry` is rebuilt from the new def set, `EmbeddedEngine.rebind` **rebuilds the engine** from
-  the new page-type set — dropping every hot handle and **closing the old engine** — so new writes bind the
-  new code, and the projection **reprojects** the read model: `ProjectionService.reproject` **resets every
-  projected workspace's offset** (deletes its `projection_offsets` row) and **clears any halt**, then re-folds
-  all from the stream with the new registry ([§5.3](#53-pglite-local-postgres-prod), [ADR-M3](#adr-m3--projection--engine-fold--serialize-to-sql-2026-06-02)).
-  It never throws, so a workspace the new set still can't fold simply re-halts without aborting the rest.
-
-Control is the **`wiki-server` control listener** — `GET/POST/DELETE /_server/models[/<id>]`
-([wiki-server/DESIGN.md §8.5](../wiki-server/DESIGN.md)) — pipeline-driven, **not** an MCP tool. `wiki-server`
-proxies the call into `wiki-mcp`'s `ModelRegistry` and stays schema-agnostic (the request names a specifier;
-`wiki-mcp` does the import).
-
-**Why.** The live part belongs at the layer that owns the engine + projection (`wiki-mcp`), so `wiki` and
-`wiki-server` need **no change** and stay schema-agnostic. Reusing the fingerprint-rebuild path means reload
-correctness rides ADR-M3's fold (upcasting, unknown-type halt) for free. Cache-busting is the minimal
-mechanism that defeats the ESM module cache without a worker/`vm`.
-
-**Consequences.** Cache-busting **leaks** the old module instances until GC — acceptable for a local/dev
-reload loop; a long-running production hot-swap is a non-goal. A reload that drops a live type or lowers a
-version **halts** affected workspaces loudly ([wiki-models §4](../wiki-models/DESIGN.md)). The bundle must
-exist as built ESM **on disk at runtime** — it cannot be pre-bundled into the tsdown server image, so models
-ship **alongside** the server, not inside it. Loading a bundle is arbitrary code execution (first-party
-trusted). Per-namespace model selection + persistence stay reserved ([wiki/DESIGN.md §8](../wiki/DESIGN.md)).
-Implementation note: the reset-all **reproject** IS wired — on a registry change the projection deletes every
-workspace's `projection_offsets` row, clears halts, and re-folds all from the stream with the new registry
-(`ProjectionService.reproject`). What remains a **future optimization** is the finer per-workspace
-**compare-stored-vs-current** fingerprint diff that would re-fold only the workspaces whose `projection_offsets.fingerprint`
-([§5.3](#53-pglite-local-postgres-prod)) actually changed; that column is still stamped on every apply.
-
-### ADR-M7 — AST/analysis as read-side projections + a runtime LanguageRegistry (2026-06-03)
-
-**Context.** The section content model makes structure first-class
-([structured-content §1/§2](../docs/structured-content.md)) and `code` first-class (a `code` field, and a
-`code` *block* with a `blockId`, [structured-content §3.1](../docs/structured-content.md)), so the host can
-offer deterministic, language-aware tooling: an outline, a symbol index, a cross-reference index, and
-eventually semantic refactors (rename, extract). That tooling needs **parsers** (tree-sitter / Roslyn / LSP)
-— heavy, version-sensitive, and language-specific. The engine ([`wiki`](../wiki/DESIGN.md)) is, by tenet,
-**schema-agnostic, dependency-free, and deterministic** (`CLAUDE.md`, [structured-content §13](../docs/structured-content.md)):
-it must own neither a parser nor an AST.
-
-**Decision.** **ASTs and all static analysis are read-side projections in this host, and parsers load at
-runtime through a `LanguageRegistry` — never in `wiki`** ([structured-content §4/§11](../docs/structured-content.md)).
-Concretely:
-
-- The engine stores **canonical text + a content hash** only; the **AST is derived** by parsing that source
-  inside a projection here, exactly as the SQL read model serializes folded state. The canonical text stays
-  the write-model source of truth; a parser upgrade **re-projects** and never rewrites history.
-- The §6 derived projections — **outline** (no parser; straight from the folded section tree),
-  **symbol index** (over `code` fields **and** `code` blocks, keyed including `block_id`), and
-  **cross-reference index** (over `ref` fields **and** inline ref-spans, the walk recursing **into**
-  block/inline trees so an inline reference can never dangle undetected) — are co-maintained by the **same
-  projection tailer** (§5.1), in the **same per-commit transaction**, advancing the same `appliedToken`.
-- Per-language analyzers expose a narrow `ILanguageAnalyzer` (`parse / symbols / references / rename`,
-  [structured-content §11](../docs/structured-content.md)) and load through a **`LanguageRegistry` that
-  mirrors the `ModelRegistry`** ([ADR-M6](#adr-m6--live-modelregistry-with-cache-busted-hot-reload-2026-06-02)):
-  generation-counted, loaded **by module specifier** via cache-busted `import()`, controlled
-  pipeline-side (`/_server/languages`, a sibling of `/_server/models`), never an MCP tool. The two
-  registries are siblings: a `ModelRegistry` swap re-folds the write-model-derived read model; a
-  `LanguageRegistry` swap re-projects only the analyzer-derived indexes (§7).
-- A **semantic operation is still FSM-gated + event-sourced.** The host computes the edits (parse + analyze),
-  then applies them as **one guarded `applyTextEdits` section operation** with a **content-hash precondition**
-  ([structured-content §5/§9.4](../docs/structured-content.md)): the pure command rejects edits computed
-  against source made stale by an OCC rebase. Even a refactor is one attributed event in `history()`. The
-  analyzer **returns** edits; it has no write authority, and `produces` never parses.
-
-**Why.** It keeps `wiki` dep-free and deterministic (no parser, no AST in the fold or log —
-[structured-content §10/§13](../docs/structured-content.md)) while putting language machinery exactly where
-versioned, replaceable, language-specific code belongs. Reusing the projection tailer means the indexes
-inherit token-gating, resume, and atomicity for free; reusing ADR-M6's loader pattern means analyzers
-hot-reload with the same proven mechanism. Routing every refactor through `applyTextEdits` means even
-content-rewriting tools are audited, OCC-safe, and rebuildable — not a side channel around the event log.
-
-**Consequences.** A new package boundary inside the host: `src/lang/` (registry + loader + analyzer
-contract) and `src/readmodel/derive.ts` (the §6 projections), both read-side. Analyzer plugins are loaded
-arbitrary code (first-party trusted), and cache-busting **leaks** old analyzer modules until GC — acceptable
-for a local/dev loop, same caveat as ADR-M6. The guarantee for semantic ops is **scoped** (sound for
-in-scope lexical references in supported languages within one workspace; dynamic/reflective/cross-workspace
-sites are reported, not guessed — [structured-content §5](../docs/structured-content.md)). Phasing follows
-[structured-content §12](../docs/structured-content.md): read-only outline+symbols first (Phase 2), semantic
-operations one language at a time (Phase 3). Until an analyzer for a `lang` loads, a `code` field/block is an
-opaque canonical blob served verbatim, and the parser-free outline + structural cross-reference index still
-work.
+| Legacy ID | Decision |
+|---|---|
+| ADR-M1 | [CQRS with consistency tokens in the engine core](../docs/wiki/decision-records/cqrs-with-consistency-tokens-in-the-engine-core.md) |
+| ADR-M2 | [SQL read model via Kysely; PGlite local, pg prod](../docs/wiki/decision-records/sql-read-model-via-kysely-pglite-local-pg-prod.md) |
+| ADR-M3 | [Projection = engine-fold + serialize-to-SQL](../docs/wiki/decision-records/projection-engine-fold-serialize-to-sql.md) |
+| ADR-M4 | [The MCP server manages tokens for automatic read-your-writes](../docs/wiki/decision-records/the-mcp-server-manages-tokens-for-automatic-read-your-writes.md) |
+| ADR-M5 | [wiki-mcp holds the logic; wiki-server hosts it](../docs/wiki/decision-records/wiki-mcp-holds-the-logic-wiki-server-hosts-it.md) |
+| ADR-M6 | [Live ModelRegistry with cache-busted hot-reload](../docs/wiki/decision-records/live-modelregistry-with-cache-busted-hot-reload.md) |
+| ADR-M7 | [AST/analysis as read-side projections + a runtime LanguageRegistry](../docs/wiki/decision-records/ast-analysis-as-read-side-projections-a-runtime-languageregistry.md) |
