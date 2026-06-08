@@ -427,6 +427,10 @@ export class CommandBus {
       // content-hash precondition on any code edit (re-runs on rebase, §5).
       this.assertEditPreconditions(view, ops);
 
+      // id-addressed ops (remove/move/set element|block) must hit a real target — a stale id
+      // fails loudly rather than silently no-opping.
+      this.assertOpTargetsExist(view, ops);
+
       // preconditions.
       this.runPreconditions(declared, view, ctx.related);
 
@@ -447,6 +451,7 @@ export class CommandBus {
     const parsed = (req.args ?? {}) as Record<string, unknown>;
     const ops = this.buildGeneratedOps(gen, parsed, ctx);
     this.assertEditPreconditions(view, ops);
+    this.assertOpTargetsExist(view, ops);
     this.dryRunAndValidate(state, node.type, view, ops);
     const result = this.generatedResult(gen, ops);
     if (ops.length === 0) return { events: [], result };
@@ -756,6 +761,60 @@ export class CommandBus {
       }
       if (actualHash !== op.expectedHash) {
         throw new StaleEditError(op.section, op.field, op.block, op.expectedHash, actualHash);
+      }
+    }
+  }
+
+  /**
+   * Reject an id-addressed op whose target element/block does not exist in the page as it
+   * stands now — so a stale or mistyped id fails LOUDLY (ITEM_NOT_FOUND) instead of silently
+   * no-opping (the reducer's `if (idx !== -1)` tolerance). This lives on the WRITE/decide path
+   * only; the reducer stays tolerant so it can replay historical events that may reference
+   * since-removed ids. Ids materialized earlier in this same op sequence count as present, so
+   * an add-then-edit within one command is not flagged.
+   */
+  private assertOpTargetsExist(view: PageState, ops: readonly SectionOp[]): void {
+    const addedEl = new Set<string>();
+    const addedBl = new Set<string>();
+    const key = (section: string, field: string, id: string): string => `${section} ${field} ${id}`;
+    const fieldOf = (section: string, field: string) =>
+      view.sections.find((s) => s.key === section)?.fields[field];
+    for (const op of ops) {
+      switch (op.op) {
+        case "addElement":
+          addedEl.add(key(op.section, op.field, op.id));
+          break;
+        case "addBlock":
+          addedBl.add(key(op.section, op.field, op.block.id));
+          break;
+        case "removeElement":
+        case "moveElement":
+        case "setElementField": {
+          // Only assert when the field really is a list; a wrong section/field kind is caught
+          // by the well-formedness dry run, which gives a more precise error.
+          const f = fieldOf(op.section, op.field);
+          if (f?.kind === "list" && !f.elements.some((e) => e.id === op.id) && !addedEl.has(key(op.section, op.field, op.id))) {
+            throw new ItemNotFoundError("element", op.id);
+          }
+          break;
+        }
+        case "removeBlock":
+        case "moveBlock": {
+          const f = fieldOf(op.section, op.field);
+          if (f?.kind === "blocks" && !f.blocks.some((b) => b.id === op.block) && !addedBl.has(key(op.section, op.field, op.block))) {
+            throw new ItemNotFoundError("block", op.block);
+          }
+          break;
+        }
+        case "setBlock": {
+          const f = fieldOf(op.section, op.field);
+          if (f?.kind === "blocks" && !f.blocks.some((b) => b.id === op.block.id) && !addedBl.has(key(op.section, op.field, op.block.id))) {
+            throw new ItemNotFoundError("block", op.block.id);
+          }
+          break;
+        }
+        default:
+          break;
       }
     }
   }
