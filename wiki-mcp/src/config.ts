@@ -7,7 +7,6 @@
  * rather than the CLI path.
  */
 import { consoleLogger, type Logger } from "./logger.js";
-import type { IMarkdownProjectionConfig } from "./tail/markdown-projection.js";
 
 /**
  * The read-model database tier. `pglite` is embedded Postgres-in-process —
@@ -30,14 +29,6 @@ export interface WikiMcpConfig {
   readonly readConsistencyTimeoutMs: number;
   /** Backstop poll interval (ms) for `waitFor` when no in-process notify fires. @default 50 */
   readonly waitForPollMs: number;
-  /**
-   * The Markdown-disk mirror (off by default). Present when enabled via `--md`/`WIKI_MCP_MD=true`
-   * (or an explicit `--md-root`); the projection tailer then renders each mirrored workspace's
-   * Markdown to the root (defaulting to `docs/`) and keeps it current (feature: "Markdown
-   * projection to disk"). `wiki-server` inherits this (it resolves the embedded `wiki-mcp`'s
-   * config from the same flags/env).
-   */
-  readonly markdown?: IMarkdownProjectionConfig;
 }
 
 /** Resolved config plus the injected runtime {@link Logger} (kept off the plain config). */
@@ -119,43 +110,7 @@ export function resolveConfig(
   );
   const waitForPollMs = toInt(pick("wait-poll-ms", "WIKI_MCP_WAIT_POLL_MS", "50"), "--wait-poll-ms");
 
-  const markdown = resolveMarkdown(flags, env);
-
-  return { namespace, streamBaseUrl, db, readConsistencyTimeoutMs, waitForPollMs, ...(markdown !== undefined ? { markdown } : {}) };
-}
-
-/**
- * Resolve the Markdown-disk mirror config (OFF by default). Enable it with `--md` /
- * `WIKI_MCP_MD=true` (or implicitly by giving an explicit `--md-root`); an explicit
- * `--md false` / `WIKI_MCP_MD=false` forces it off. When enabled the output root
- * defaults to `docs/` (relative to the process working directory) unless `--md-root` /
- * `WIKI_MCP_MD_ROOT` overrides it. `--md-workspaces` (`WIKI_MCP_MD_WORKSPACES`) is a
- * comma-separated allowlist of workspace ids or `all` (default); `--md-archive`
- * (`WIKI_MCP_MD_ARCHIVE`) is `drop` (default) or `mirror`.
- */
-function resolveMarkdown(
-  flags: Record<string, string>,
-  env: Record<string, string | undefined>,
-): IMarkdownProjectionConfig | undefined {
-  const toggle = flags["md"] ?? env.WIKI_MCP_MD; // explicit enable/disable
-  if (toggle === "false") return undefined; // explicit off wins
-  const rootOverride = flags["md-root"] ?? env.WIKI_MCP_MD_ROOT;
-  // Enabled by the toggle, or implicitly by giving an explicit root.
-  const enabled = toggle === "true" || (rootOverride !== undefined && rootOverride.length > 0);
-  if (!enabled) return undefined;
-
-  const root = rootOverride !== undefined && rootOverride.length > 0 ? rootOverride : "docs";
-
-  const wsRaw = flags["md-workspaces"] ?? env.WIKI_MCP_MD_WORKSPACES ?? "all";
-  const workspaces =
-    wsRaw === "all" ? "all" : wsRaw.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
-
-  const archive = flags["md-archive"] ?? env.WIKI_MCP_MD_ARCHIVE ?? "drop";
-  if (archive !== "drop" && archive !== "mirror") {
-    throw new Error(`invalid --md-archive "${archive}" (expected "drop" or "mirror")`);
-  }
-
-  return { enabled: true, root, workspaces, layout: "tree", archive };
+  return { namespace, streamBaseUrl, db, readConsistencyTimeoutMs, waitForPollMs };
 }
 
 /**

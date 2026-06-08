@@ -137,6 +137,17 @@ export class ProjectionService {
   }
 
   /**
+   * Detach a previously-{@link addRenderSink}ed sink by IDENTITY — used when an emitter is
+   * removed at runtime (feature: runtime-configurable Markdown emitters), so its
+   * {@link MarkdownDiskProjector} stops receiving the per-commit fan-out. A no-op if the sink
+   * isn't registered (already removed). Leaves any files the sink already wrote on disk.
+   */
+  removeRenderSink(sink: RenderSink): void {
+    const i = this.renderSinks.indexOf(sink);
+    if (i >= 0) this.renderSinks.splice(i, 1);
+  }
+
+  /**
    * Project a single {@link Commit} into SQL (fold → serialize → advance offset),
    * then notify the read model so parked `waitFor`s wake. On an unfoldable event
    * (`UnknownPageTypeError`) the workspace's projection **halts**: the read
@@ -267,28 +278,36 @@ export class ProjectionService {
    */
   async reconcileSinks(source: EventSource): Promise<void> {
     if (this.renderSinks.length === 0) return;
+    // Snapshot the sink list: reconcileSink may run concurrently with a runtime add/remove.
+    for (const sink of [...this.renderSinks]) await this.reconcileSink(sink, source);
+  }
+
+  /**
+   * Bring ONE {@link RenderSink} up to each workspace's stream head — the single-sink unit of
+   * {@link reconcileSinks}, and the back-fill a freshly-registered emitter runs on its own (so a
+   * runtime-added Markdown mirror catches up to head WITHOUT a full boot reconcile of every
+   * sink). Folds each workspace once and rebuilds the sink only when it lags head; a sink already
+   * current is skipped. Best-effort and resilient per workspace: a workspace whose page types
+   * aren't registered yet (an {@link UnknownPageTypeError}) — or any read/fold failure — is logged
+   * and skipped, never aborting the caller.
+   */
+  async reconcileSink(sink: RenderSink, source: EventSource): Promise<void> {
     for (const workspace of await source.listWorkspaces()) {
       try {
         const events = await source.readHistory(workspace, 0); // full history → head + fold
         if (events.length === 0) continue;
         const head = events[events.length - 1].version + 1;
-        const lagging: RenderSink[] = [];
-        for (const sink of this.renderSinks) {
-          if ((await sink.appliedVersion(workspace)) < head) lagging.push(sink);
-        }
-        if (lagging.length === 0) continue;
+        if ((await sink.appliedVersion(workspace)) >= head) continue; // already current
         const state = foldWorkspace(events, this.registry);
         const docs = renderSearchDocs(state, this.registry, this.renderOpts(workspace));
-        for (const sink of lagging) {
-          try {
-            await sink.rebuild(workspace, state.version, docs, state);
-          } catch (err) {
-            this.logger.warn(`${sink.name} index update failed`, {
-              workspace,
-              error: err instanceof Error ? err.message : String(err),
-            });
-            sink.fail(workspace, state.version, err);
-          }
+        try {
+          await sink.rebuild(workspace, state.version, docs, state);
+        } catch (err) {
+          this.logger.warn(`${sink.name} index update failed`, {
+            workspace,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          sink.fail(workspace, state.version, err);
         }
       } catch (err) {
         // Unregistered page types (models not loaded yet) or any read/fold failure for ONE

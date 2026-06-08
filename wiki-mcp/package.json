@@ -27,13 +27,13 @@
   "dependencies": {
     "wiki": "*",
     "kysely": "^0.27.5",
+    "@durable-streams/client": "^0.2.6",
     "@electric-sql/pglite": "^0.2.17",
     "pg": "^8.13.1",
     "@modelcontextprotocol/sdk": "^1.12.0",
     "typescript": "^5.9.3"
   },
   "devDependencies": {
-    "@durable-streams/client": "^0.2.6",
     "@types/pg": "^8.11.10"
   }
 }

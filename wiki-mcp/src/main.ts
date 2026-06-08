@@ -21,8 +21,9 @@ import { EmbeddedEngine, type EngineConfig } from "./engine.js";
 import { openStore, type ReadModelStore } from "./readmodel/store.js";
 import { SqlReadModel } from "./readmodel/readmodel.js";
 import { ProjectionService } from "./tail/projection.js";
-import { MarkdownDiskProjector } from "./tail/markdown-projection.js";
 import { engineEventSource } from "./tail/engine-source.js";
+import { EmitterConfigStore } from "./emitters/config-store.js";
+import { EmitterRegistry } from "./emitters/registry.js";
 import { ModelRegistry } from "./models/registry.js";
 import { WikiMcpServer, type McpTransport } from "./mcp/server.js";
 import { SqlSearchIndex, migrateSearchToLatest, type ISearchIndex, type WikiSearchDatabase } from "wiki";
@@ -33,9 +34,8 @@ export { consoleLogger, silentLogger } from "./logger.js";
 export type { WikiMcpConfig, DbConfig } from "./config.js";
 export { resolveConfig, resolveRuntime } from "./config.js";
 export type { McpTransport } from "./mcp/server.js";
-export { MarkdownDiskProjector } from "./tail/markdown-projection.js";
-export type { IMarkdownProjectionConfig } from "./tail/markdown-projection.js";
 export type { RenderSink } from "./tail/render-sink.js";
+export type { LiveEmitter, EmitterArchive } from "./emitters/config-store.js";
 export { ModelRegistry } from "./models/registry.js";
 export type { ModelRegistryEvent, BundleInfo } from "./models/registry.js";
 
@@ -142,23 +142,21 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
   );
   const source = engineEventSource(engine);
 
-  // ── Markdown-disk mirror (optional second render sink, off by default) ──
-  // Registered BEFORE the tail starts so the initial catch-up feeds it; the boot reconcile
-  // below then covers the case where the SQL read model is already at head (so project()
-  // never fires) but the on-disk mirror is fresh/stale.
-  if (config.markdown?.enabled === true) {
-    const mdProjector = new MarkdownDiskProjector(
-      config.markdown,
-      logger.child?.({ subsystem: "markdown-disk" }) ?? logger,
-    );
-    await mdProjector.init();
-    projection.addRenderSink(mdProjector);
-    logger.info("markdown-disk mirror enabled", {
-      root: config.markdown.root,
-      workspaces: config.markdown.workspaces,
-      archive: config.markdown.archive,
-    });
-  }
+  // ── runtime Markdown emitters (per-project disk mirrors) ──
+  // The emitter set is event-sourced on its own `_emitter-config` durable stream (replayed on
+  // boot, tailed live). The store opens its own @durable-streams/client to the same host; the
+  // registry turns each live emitter into a MarkdownDiskProjector render sink at runtime. The
+  // store is shared with the MCP server (the configure/list/removeEmitter tools append to it).
+  const emitters = new EmitterConfigStore(
+    { baseUrl: config.streamBaseUrl, namespace: config.namespace },
+    options.clock,
+  );
+  const emitterRegistry = new EmitterRegistry(
+    emitters,
+    projection,
+    source,
+    logger.child?.({ subsystem: "emitters" }) ?? logger,
+  );
 
   const drainOnce = async (): Promise<void> => {
     try {
@@ -177,11 +175,11 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
   const discoverOpts = options.discoverPollMs !== undefined ? { discoverPollMs: options.discoverPollMs } : {};
   const stopTail = await projection.start(source, discoverOpts);
 
-  // Boot reconcile for render sinks that can lag a current read model (the Markdown-disk
-  // mirror): self-heal the output directory against the stream head.
-  if (config.markdown?.enabled === true) {
-    await projection.reconcileSinks(source);
-  }
+  // Start the emitter registry AFTER the live tail: replay + fold the `_emitter-config` stream,
+  // register a render sink per live emitter and back-fill each one's root from the workspace
+  // stream head (self-healing a wiped output dir), then tail the config stream for runtime
+  // add/remove. This is the on-disk-mirror boot reconcile, now per-emitter rather than global.
+  await emitterRegistry.start();
 
   // ── model hot-reload (ADR-M6) ──
   // On a registry change, rebind the engine + the projection's registry, reproject the
@@ -206,6 +204,7 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
     engine,
     readModel,
     searchIndex,
+    emitters,
     namespace: config.namespace,
     logger: logger.child?.({ subsystem: "mcp" }) ?? logger,
     // A local commit doesn't fan out to its own handle's subscribers, so push each
@@ -223,6 +222,8 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
     server,
     drainOnce,
     async close(): Promise<void> {
+      await emitterRegistry.stop();
+      await emitters.close();
       stopTail();
       await server.stop();
       await engine.close();

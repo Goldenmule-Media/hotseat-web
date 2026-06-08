@@ -1,56 +1,44 @@
 /**
- * Config resolution (`flags → env → defaults`). Focuses on the Markdown-disk mirror knobs,
- * which `wiki-server` inherits verbatim (it resolves the embedded `wiki-mcp`'s config from the
- * same flags/env), so this is the passthrough contract for the on-disk-mirror feature.
+ * Config resolution (`flags → env → defaults`). The static Markdown-disk mirror surface
+ * (`--md*` / `WIKI_MCP_MD*`) was REMOVED in favor of the runtime emitter registry
+ * (feature: "Runtime-configurable Markdown emitters"); these tests pin that the old surface
+ * is gone — passing the dead flags/env neither errors nor enables anything.
  */
 import { describe, expect, it } from "vitest";
 
 import { resolveConfig } from "../src/config.js";
 
-describe("resolveConfig — Markdown-disk mirror knobs", () => {
-  it("is off by default (no flag → no markdown config)", () => {
-    expect(resolveConfig([], {}).markdown).toBeUndefined();
+describe("resolveConfig — static Markdown surface removed", () => {
+  it("has no `markdown` field on the resolved config", () => {
+    const cfg = resolveConfig([], {});
+    expect("markdown" in cfg).toBe(false);
   });
 
-  it("enables with --md and defaults the root to docs/", () => {
-    expect(resolveConfig(["--md"], {}).markdown).toEqual({
-      enabled: true,
-      root: "docs",
-      workspaces: "all",
-      layout: "tree",
-      archive: "drop",
-    });
-    // env form
-    expect(resolveConfig([], { WIKI_MCP_MD: "true" }).markdown?.root).toBe("docs");
+  it("ignores the dead --md* flags (no error, nothing enabled)", () => {
+    const cfg = resolveConfig(
+      ["--md", "--md-root", "/out", "--md-workspaces", "ws:a", "--md-archive", "mirror"],
+      {},
+    );
+    expect("markdown" in cfg).toBe(false);
+    // The live knobs still resolve normally alongside the ignored flags.
+    expect(cfg.namespace).toBe("default");
   });
 
-  it("an explicit --md false forces it off even with a root set", () => {
-    expect(resolveConfig(["--md", "false", "--md-root", "/out"], {}).markdown).toBeUndefined();
-    expect(resolveConfig([], { WIKI_MCP_MD: "false" }).markdown).toBeUndefined();
-  });
-
-  it("an explicit root implicitly enables it (and overrides the docs/ default)", () => {
+  it("ignores the dead WIKI_MCP_MD* env (no error, nothing enabled)", () => {
     const cfg = resolveConfig([], {
+      WIKI_MCP_MD: "true",
       WIKI_MCP_MD_ROOT: "/out",
-      WIKI_MCP_MD_WORKSPACES: "ws:a, ws:b",
-      WIKI_MCP_MD_ARCHIVE: "mirror",
+      WIKI_MCP_MD_ARCHIVE: "bogus", // previously threw — now just ignored
     });
-    expect(cfg.markdown).toEqual({
-      enabled: true,
-      root: "/out",
-      workspaces: ["ws:a", "ws:b"],
-      layout: "tree",
-      archive: "mirror",
-    });
+    expect("markdown" in cfg).toBe(false);
   });
 
-  it("flags win over env (flags → env → defaults)", () => {
-    const cfg = resolveConfig(["--md-root", "/flag"], { WIKI_MCP_MD_ROOT: "/env", WIKI_MCP_MD_ARCHIVE: "mirror" });
-    expect(cfg.markdown?.root).toBe("/flag");
-    expect(cfg.markdown?.archive).toBe("mirror"); // archive still picked up from env
-  });
-
-  it("rejects an invalid archive policy", () => {
-    expect(() => resolveConfig(["--md"], { WIKI_MCP_MD_ARCHIVE: "bogus" })).toThrow(/md-archive/);
+  it("still resolves the live config (namespace / streamBaseUrl / db / timeouts)", () => {
+    const cfg = resolveConfig(["--namespace", "proj", "--stream-url", "http://h:1/"], {});
+    expect(cfg.namespace).toBe("proj");
+    expect(cfg.streamBaseUrl).toBe("http://h:1/");
+    expect(cfg.db).toEqual({ kind: "pglite" });
+    expect(cfg.readConsistencyTimeoutMs).toBe(5000);
+    expect(cfg.waitForPollMs).toBe(50);
   });
 });

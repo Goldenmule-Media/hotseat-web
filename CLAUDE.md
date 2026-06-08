@@ -129,17 +129,23 @@ and the embedded **wiki-mcp** streamable-HTTP MCP endpoint (`:4439/mcp`). File s
 - **Config** is `flags → env → defaults`. `wiki-server` reads `WIKI_SERVER_*` (host/port/storage/data-dir/
   control-port/mcp-port/models/models-dir) **and** resolves the embedded `wiki-mcp`'s `WIKI_MCP_*` (namespace,
   `WIKI_MCP_DB` = `pglite`|`pg`, `WIKI_MCP_PG_URL`, data-dir), overriding the MCP's stream URL to its own.
-- **Markdown-disk mirror (off by default).** Enable with `--md` / `WIKI_MCP_MD=true` (or implicitly by giving an
-  explicit `--md-root`); `--md false` forces it off. It runs a second read-side projection in `wiki-mcp` that
-  renders each mirrored workspace's deterministic Markdown to a root — **defaulting to `docs/`** (relative to the
-  process cwd), overridable with `WIKI_MCP_MD_ROOT` / `--md-root` — and keeps it current off the **same projection
-  tail** as the SQL read model + search index (one render per commit, fanned out to all sinks — never a second
-  render). Tree layout (`<root>/<workspace>/<page tree>`, a folder + `index.md` per page-with-children),
-  content-hashed so unchanged pages don't churn the git diff, atomic temp+rename writes, and a boot reconcile that
-  self-heals a wiped output dir. Knobs: `WIKI_MCP_MD_WORKSPACES` (`all` | comma-separated workspace ids),
-  `WIKI_MCP_MD_ARCHIVE` (`drop` default | `mirror` under `_archive/`). `wiki-server` inherits these (it resolves
-  the embedded MCP's config from the same flags/env). **Single-writer:** one hosting process owns the output dir
-  (documented, not enforced in v1).
+- **Markdown disk mirrors — the runtime emitter registry (per-project disk mirrors).** A project mirrors its
+  workspace's deterministic Markdown to its own checkout's `docs/` by registering an **emitter** over MCP at
+  runtime — there is no boot-time `--md` flag (the old static `--md` / `WIKI_MCP_MD*` surface was removed). Tools:
+  `configureEmitter({ emitterId, workspaceId, root, archive? })` registers (or, re-using an id, reconfigures) a
+  mirror of one workspace to one **absolute** on-disk root; `listEmitters()` returns the live set; `removeEmitter({
+  emitterId })` detaches it (already-mirrored files are **left on disk** — the checkout owns them). Each emitter is
+  one workspace → one root, keyed by a caller-supplied `emitterId`. The config is **event-sourced on its own
+  per-namespace durable stream** (`{baseUrl}/{namespace}/_emitter-config`, owned by `wiki-mcp` — separate from the
+  workspace event streams), replayed + folded on boot (last-writer-wins per `emitterId`) so mirrors survive
+  restarts, and tailed live so configure/remove take effect with **no restart** (a freshly-registered emitter
+  back-fills its root from the workspace stream head). Each emitter is a `MarkdownDiskProjector` registered as a
+  render sink on the **same projection tail** as the SQL read model + search index (one render per commit, fanned
+  out — never a second render). Per-root behavior is unchanged: tree layout (`<root>/<workspace>/<page tree>`, a
+  folder + `index.md` per page-with-children), content-hashed so unchanged pages don't churn the git diff, atomic
+  temp+rename writes, archived-page policy `archive` (`drop` default | `mirror` under `_archive/`), and a boot
+  back-fill that self-heals a wiped output dir. **Local-only trust (v1):** roots are written verbatim, no
+  sandboxing; **single-writer:** one hosting process owns each root (documented, not enforced).
 - `.mcp.json` wires this Claude Code session's `wiki` MCP server to `http://127.0.0.1:4439/mcp` — i.e. a
   locally-running `wiki-server`. The `wiki` MCP tools won't work unless that server is up (with a model loaded).
 - **Self-direction (don't ask "what next?").** The wiki is self-directing via two model-declared classifiers
