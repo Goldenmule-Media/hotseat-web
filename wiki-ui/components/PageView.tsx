@@ -12,7 +12,7 @@
  *  live, precondition-aware mutation overlay. */
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import type { PageId, WorkspaceId } from "wiki";
 import { getWiki } from "../lib/engine";
 import { useLiveWorkspace, usePage, usePageMutations, useStructuralMutator } from "../lib/live";
@@ -32,6 +32,8 @@ export function PageView({
   pageId: PageId;
 }): React.JSX.Element {
   const router = useRouter();
+  // Brief "copied" feedback for the page-id link button.
+  const [copied, setCopied] = useState(false);
   const ws = useLiveWorkspace(workspaceId);
   const { markdown, loading, error, unknownType } = usePage(workspaceId, pageId);
   const { descriptors } = usePageMutations(workspaceId, pageId);
@@ -125,6 +127,25 @@ export function PageView({
       <header className="page-header">
         <div className="page-header-main">
           {headerTitle !== null && <h1 className="page-title">{headerTitle}</h1>}
+          <button
+            type="button"
+            className="page-id-copy"
+            aria-label="Copy page id"
+            title={copied ? "Copied!" : `Copy page id: ${pageId}`}
+            onClick={() => {
+              const cb = navigator.clipboard;
+              if (cb === undefined) return; // needs a secure context (https/localhost)
+              void cb
+                .writeText(pageId)
+                .then(() => {
+                  setCopied(true);
+                  window.setTimeout(() => setCopied(false), 1200);
+                })
+                .catch(() => {});
+            }}
+          >
+            {copied ? "✓" : "🔗"}
+          </button>
           {currentStatus !== "" && (
             <span
               className={`page-status-badge${isTerminal ? " page-terminal-badge" : ""}`}

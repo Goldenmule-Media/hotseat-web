@@ -364,6 +364,20 @@ code {
   margin: 0;
   line-height: 1.2;
 }
+.page-id-copy {
+  background: transparent;
+  border: none;
+  padding: 0 2px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  align-self: center;
+}
+.page-id-copy:hover {
+  color: #fff;
+}
 .view-toggle {
   display: flex;
   gap: 18px;
