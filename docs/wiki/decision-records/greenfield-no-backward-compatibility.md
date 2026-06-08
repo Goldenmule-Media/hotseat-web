@@ -1,11 +1,10 @@
-# ADR: Greenfield: no backward compatibility
+# ADR-11: Greenfield: no backward compatibility
 
 **Status:** accepted
 
 ## Metadata
 - **Date:** 2026-06-03
 - **Scope:** wiki
-- **Legacy ID:** wiki/ADR-010
 
 ## Context
 ADRs 004–009 change the engine's content model, event model, authoring API, and render

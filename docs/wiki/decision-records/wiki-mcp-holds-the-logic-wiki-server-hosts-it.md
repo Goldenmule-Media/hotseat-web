@@ -1,11 +1,10 @@
-# ADR: wiki-mcp holds the logic; wiki-server hosts it
+# ADR-17: wiki-mcp holds the logic; wiki-server hosts it
 
 **Status:** accepted
 
 ## Metadata
 - **Date:** 2026-06-02
 - **Scope:** wiki-mcp
-- **Legacy ID:** wiki-mcp/ADR-M5
 
 ## Context
 Where does the engine live, and how thin should `wiki-server` stay?

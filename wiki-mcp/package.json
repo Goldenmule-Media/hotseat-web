@@ -20,6 +20,7 @@
     "build": "tsdown",
     "start": "tsx src/bin.ts",
     "backfill-titles": "tsx src/backfill-titles.ts",
+    "backfill-serials": "tsx src/backfill-serials.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

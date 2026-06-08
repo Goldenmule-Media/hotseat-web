@@ -1,11 +1,10 @@
-# ADR: Use Durable Streams directly; no storage port
+# ADR-2: Use Durable Streams directly; no storage port
 
 **Status:** accepted
 
 ## Metadata
 - **Date:** 2026-06-01
 - **Scope:** wiki
-- **Legacy ID:** wiki/ADR-001
 
 ## Context
 The first draft wrapped Durable Streams in an `EventStore` port with

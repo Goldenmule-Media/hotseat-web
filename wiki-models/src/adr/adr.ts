@@ -4,12 +4,13 @@
  * at the bottom of each package's DESIGN.md: those carried no status, no lifecycle, no link
  * from a decision to the one that revises it, and only a PER-FILE id (so `wiki-mcp` and
  * `wiki-models` could both ship an "ADR-M7"). Here every decision is one page in one global
- * "ADRs" workspace, with a stable global id; the legacy per-file label survives as a field
- * (`legacyId`) for traceability, not as identity.
+ * "ADRs" workspace, and IDENTITY is the stable global page id. A human-friendly `ADR-N` label
+ * is an engine-assigned `serial` field (`meta.number`) surfaced in the rendered title — a
+ * display handle, never identity, so it can't collide or be hand-edited out of sequence.
  *
- * Shape (Michael Nygard's template + the metadata a lossless migration needs):
- *  - meta — `date` (stored ISO string; never `new Date()`), `scope` (the package/area, for
- *    filtering), `legacyId` (the original label), and `deciders` (a list).
+ * Shape (Michael Nygard's template + a little metadata):
+ *  - meta — `number` (the engine-assigned `ADR-N` sequence; immutable), `date` (stored ISO
+ *    string; never `new Date()`), `scope` (the package/area, for filtering), and `deciders`.
  *  - context — the forces and the problem, as prose.
  *  - decision — the call, as blocks (so a decision can carry a code / interface snippet).
  *  - consequences — what becomes easier or harder, as blocks.
@@ -151,12 +152,10 @@ const metaRows: DerivedList = (page) => {
   const rows: DerivedItem[] = [];
   const date = scalarOf(meta, "date");
   const scope = scalarOf(meta, "scope");
-  const legacyId = scalarOf(meta, "legacyId");
   const deciders = deciderNames(page);
   if (date.length > 0) rows.push({ id: "date", text: `**Date:** ${date}` });
   if (scope.length > 0) rows.push({ id: "scope", text: `**Scope:** ${scope}` });
   if (deciders.length > 0) rows.push({ id: "deciders", text: `**Deciders:** ${deciders.join(", ")}` });
-  if (legacyId.length > 0) rows.push({ id: "legacy", text: `**Legacy ID:** ${legacyId}` });
   return rows;
 };
 
@@ -212,9 +211,9 @@ export const DecisionRecord = definePageType({
       required: true,
       mutableIn: editable,
       fields: {
+        number: { kind: "serial" }, // ADR-N — engine-assigned at create, immutable; shown via render.title
         date: { kind: "scalar", required: true }, // ISO date string — STORED, never new Date()
         scope: { kind: "scalar" }, // e.g. "wiki-mcp" — for filtering/grouping
-        legacyId: { kind: "scalar" }, // e.g. "wiki-mcp/ADR-M7" — traceability only
         deciders: { kind: "list", element: "decider", ordered: true },
       },
     },
@@ -243,11 +242,6 @@ export const DecisionRecord = definePageType({
       args: zodSchema(z.object({ scope: z.string() })),
       target: { section: "meta", field: "scope" },
       set: { scope: arg("scope") },
-    },
-    setLegacyId: {
-      args: zodSchema(z.object({ legacyId: z.string() })),
-      target: { section: "meta", field: "legacyId" },
-      set: { legacyId: arg("legacyId") },
     },
     addDecider: {
       args: zodSchema(z.object({ name: z.string() })),
@@ -333,7 +327,7 @@ export const DecisionRecord = definePageType({
     },
   },
   render: {
-    title: "ADR: {title}",
+    title: "ADR-{meta.number}: {title}",
     graphSections: false, // refs ARE the relations; the engine's link-based References section would be empty
     sections: [
       { derived: "meta-rows", heading: "Metadata", placeholder: "_No metadata._" },

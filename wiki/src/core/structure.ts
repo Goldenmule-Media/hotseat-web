@@ -17,9 +17,11 @@ import {
   type IField,
   type IItem,
   type IPageNode,
+  type IPageTypeDef,
   type IWorkspaceState,
   type PageId,
   type RootId,
+  type SectionOp,
 } from "../api";
 import {
   CycleError,
@@ -76,6 +78,56 @@ function assertPageActive(node: IPageNode): void {
   if (node.archived === true) {
     throw new InvariantViolationError(`Page "${node.id}" is archived; structural mutation is blocked.`);
   }
+}
+
+/** The `(section, field)` pairs declared `kind: "serial"` on a page type (top-level sections). */
+function serialFieldsOf(def: IPageTypeDef): { section: string; field: string }[] {
+  const out: { section: string; field: string }[] = [];
+  for (const [section, sd] of Object.entries(def.sections)) {
+    for (const [field, fd] of Object.entries(sd.fields)) {
+      if (fd.kind === "serial") out.push({ section, field });
+    }
+  }
+  return out;
+}
+
+/** A page's current `(section, field)` serial value, or 0 when unset/absent (the placeholder). */
+function serialValueOf(node: IPageNode, section: string, field: string): number {
+  const f = node.sections.find((s) => s.key === section)?.fields[field];
+  return f !== undefined && f.kind === "scalar" && typeof f.value === "number" ? f.value : 0;
+}
+
+/** The highest assigned value of `(type, section, field)` across the workspace (0 if none). */
+function maxSerial(state: IWorkspaceState, type: string, section: string, field: string): number {
+  let max = 0;
+  for (const node of state.pages.values()) {
+    if (node.type !== type) continue;
+    const v = serialValueOf(node, section, field);
+    if (v > max) max = v;
+  }
+  return max;
+}
+
+/**
+ * Mint the `serial` field values for a newly created page of `type`: for each field
+ * declared `kind: "serial"`, the next number is `max(existing) + 1`, scoped to pages of the
+ * SAME TYPE in this workspace (archived pages included, so numbers are never reused), starting
+ * at 1. Reads only committed state, so it is deterministic at decide time; the OCC rebase
+ * re-runs the create decision against fresh state, so concurrent creates can't collide. Returns
+ * a `section → field → value` map, or `undefined` when the type declares no serial fields.
+ */
+function mintSerials(
+  state: IWorkspaceState,
+  type: string,
+  registry: Registry,
+): Record<string, Record<string, number>> | undefined {
+  const fields = serialFieldsOf(registry.page(type));
+  if (fields.length === 0) return undefined;
+  const serials: Record<string, Record<string, number>> = {};
+  for (const { section, field } of fields) {
+    (serials[section] ??= {})[field] = maxSerial(state, type, section, field) + 1;
+  }
+  return serials;
 }
 
 /**
@@ -162,6 +214,7 @@ export const createPage: StructureHandler = (state, args, services, registry) =>
     // Resolve the def (throws UnknownPageTypeError on an unregistered required child).
     const def = registry.page(pageType);
     const id = `${pageType}:${services.newId()}` as PageId;
+    const serials = mintSerials(state, pageType, registry);
 
     events.push({
       type: "PageCreated",
@@ -171,6 +224,7 @@ export const createPage: StructureHandler = (state, args, services, registry) =>
         parentId: parent,
         title: pageTitle,
         ...(pinned ? { pinned: true } : {}),
+        ...(serials !== undefined ? { serials } : {}),
       },
     });
 
@@ -450,6 +504,40 @@ export const unarchiveWorkspace: StructureHandler = () => {
 };
 
 // ────────────────────────────────────────────────────────────────────────────
+// assignSerials
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Backfill engine-assigned `serial` fields onto pages that predate the field — the
+ * schema-evolution path for adding a serial to a type that ALREADY has pages (their
+ * `PageCreated` carried no minted value, so the field materialized to the placeholder 0).
+ * For each type with serial field(s), assigns the unset pages — in CREATION order (ids are
+ * time-sortable) — the next value after the current max, as one `setField` per page in ONE
+ * atomic commit. IMMUTABLE: a page whose serial is already set is never touched. Idempotent:
+ * emits nothing once every serial is assigned, so it is safe to re-run.
+ */
+export const assignSerials: StructureHandler = (state, _args, _services, registry) => {
+  const events: DomainEvent[] = [];
+  for (const type of registry.types()) {
+    const fields = serialFieldsOf(registry.page(type));
+    if (fields.length === 0) continue;
+    const pages = [...state.pages.values()]
+      .filter((n) => n.type === type)
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    for (const { section, field } of fields) {
+      let next = maxSerial(state, type, section, field);
+      for (const node of pages) {
+        if (serialValueOf(node, section, field) !== 0) continue; // already assigned — immutable
+        next += 1;
+        const op: SectionOp = { op: "setField", section, field, value: { kind: "scalar", value: next } as IField };
+        events.push({ type: SECTION_OPS_EVENT, pageId: node.id, payload: { ops: [op] } });
+      }
+    }
+  }
+  return { events };
+};
+
+// ────────────────────────────────────────────────────────────────────────────
 // Handler map (keyed by command name)
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -470,6 +558,7 @@ export const STRUCTURAL_HANDLERS: Readonly<Record<string, StructureHandler>> = {
   moveItem,
   archiveWorkspace,
   unarchiveWorkspace,
+  assignSerials,
   // The IWorkspaceHandle exposes `archive()` / `unarchive()` for workspace archival.
   archive: archiveWorkspace,
   unarchive: unarchiveWorkspace,

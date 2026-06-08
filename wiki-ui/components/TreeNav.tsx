@@ -168,7 +168,7 @@ function TreeItem({
           title={node.type !== undefined ? `${node.type} · ${node.status ?? ""}` : undefined}
           draggable={false}
         >
-          <span className="tree-title">{node.title}</span>
+          <span className="tree-title">{node.displayTitle ?? node.title}</span>
           <StatusChip node={node} />
         </Link>
       </div>
@@ -207,7 +207,7 @@ function ArchivedSection({
           {archived.map((n) => (
             <li key={n.id} className="tree-archived-item">
               <Link href={pageHref(workspaceId, n.id)} className="tree-link">
-                <span className="tree-title">{n.title}</span>
+                <span className="tree-title">{n.displayTitle ?? n.title}</span>
                 <StatusChip node={n} />
               </Link>
               <button

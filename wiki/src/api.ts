@@ -391,6 +391,12 @@ export type CreateArgs<K extends PageTypeName = PageTypeName> = Record<string, u
 export interface ITreeNode {
   readonly id: PageId | RootId;
   readonly title: string;
+  /** The page's `render.title` template filled with its own title + field values (e.g.
+   *  `"ADR-7: …"`). Present ONLY when it differs from `title` — i.e. the type declares a
+   *  title template that resolves to something other than the raw title. Display surfaces
+   *  (sidebar/outline) should prefer `displayTitle ?? title`; the raw editable `title` is
+   *  unchanged. */
+  readonly displayTitle?: string;
   readonly type?: PageTypeName;
   readonly status?: string;
   /** Hidden from default views (orthogonal to `status`); present and true only when archived. */
@@ -431,6 +437,13 @@ export interface IWorkspaceHandle {
   archive(): Promise<Committed<void>>;
   /** Unarchive the whole workspace — the inverse of {@link archive}, runnable while archived. */
   unarchive(): Promise<Committed<void>>;
+  /**
+   * Backfill engine-assigned `serial` fields onto pages that predate the field (their number
+   * materialized to the placeholder 0) — the one-time path for adding a serial to a type that
+   * already has pages. Assigns unset pages, per type, in creation order, as one atomic commit;
+   * pages whose serial is already set are left untouched. Idempotent — safe to re-run.
+   */
+  assignSerials(): Promise<Committed<void>>;
 
   // ── page-scoped content/status command ──
   mutate<K extends PageTypeName, C extends CommandName<K>>(
@@ -753,7 +766,17 @@ export type FieldDecl =
   | { readonly kind: "attachment-ref"; required?: boolean }
   | { readonly kind: "ref"; required?: boolean; targetKinds?: RefTarget["kind"][] }
   | { readonly kind: "blocks"; required?: boolean }
-  | { readonly kind: "list"; element: string; ordered?: boolean; required?: boolean };
+  | { readonly kind: "list"; element: string; ordered?: boolean; required?: boolean }
+  /**
+   * An ENGINE-ASSIGNED, IMMUTABLE sequence number. At `createPage` the engine mints the
+   * next value — `max(existing) + 1`, scoped to pages of the SAME TYPE in the workspace,
+   * starting at 1 — bakes it into the creation event (a minted constant like the page id),
+   * and stores it as a `scalar` number. No setter command is generated and no op may write
+   * it, so it is stable for the life of the page. A `render.title` token (`{section.field}`)
+   * can surface it as a human-friendly label (e.g. `"ADR-{meta.number}: {title}"`) without
+   * it ever becoming the page's identity — that remains the page id.
+   */
+  | { readonly kind: "serial"; required?: boolean };
 
 export interface SectionDecl {
   readonly name: string;

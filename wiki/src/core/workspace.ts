@@ -73,6 +73,10 @@ interface PageCreatedPayload {
   readonly pinned?: boolean;
   /** Pre-minted ids for the required sections so the reducer stays id-free (§2.4). */
   readonly requiredSectionIds?: Record<string, SectionId>;
+  /** Engine-minted `serial` field values, keyed `section → field → value`. Computed at
+   *  decide time from committed state (so the fold stays a pure replay), applied over the
+   *  freshly materialized sections below. */
+  readonly serials?: Record<string, Record<string, number>>;
 }
 interface PageReparentedPayload {
   readonly pageId: PageId;
@@ -270,6 +274,17 @@ function applyStructural(
         materializeSectionFields(section, req.decl);
         sections.push(section);
       });
+
+      // Overwrite engine-assigned `serial` placeholders with their minted values.
+      if (p.serials !== undefined) {
+        for (const sec of sections) {
+          const fieldVals = p.serials[sec.key];
+          if (fieldVals === undefined) continue;
+          for (const [fk, val] of Object.entries(fieldVals)) {
+            sec.fields[fk] = { kind: "scalar", value: val };
+          }
+        }
+      }
 
       const node: IPageNode = {
         id,

@@ -1,11 +1,10 @@
-# ADR: Upcast-to-latest with self-contained version history
+# ADR-23: Upcast-to-latest with self-contained version history
 
 **Status:** accepted
 
 ## Metadata
 - **Date:** 2026-06-02
 - **Scope:** wiki-models
-- **Legacy ID:** wiki-models/ADR-W1
 
 ## Context
 Schema must change at runtime, and an event stream contains events written under older page-type

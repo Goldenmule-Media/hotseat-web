@@ -1,4 +1,4 @@
-# ADR: Design decisions live in the wiki
+# ADR-1: Design decisions live in the wiki
 
 **Status:** accepted
 

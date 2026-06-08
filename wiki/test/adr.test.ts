@@ -11,7 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { adrPageTypes } from "wiki-models/adr";
 import { Toc } from "wiki-models/toc";
-import type { IWiki, IWorkspaceHandle, PageId } from "../src/api";
+import type { ITreeNode, IWiki, IWorkspaceHandle, PageId } from "../src/api";
 import { createTestWiki, type ITestWiki } from "../src/testing";
 
 /** Extract the "## <heading>" block body (trailing trimmed) from a rendered page. */
@@ -30,12 +30,11 @@ async function makeAdr(
   ws: IWorkspaceHandle,
   parent: PageId,
   title: string,
-  opts: { date?: string; scope?: string; legacyId?: string; accept?: boolean } = {},
+  opts: { date?: string; scope?: string; accept?: boolean } = {},
 ): Promise<PageId> {
   const id = (await ws.createPage("decision-record", { title, parentId: parent })).value;
   await ws.mutate(id, "setDate", { date: opts.date ?? "2026-06-05" });
   if (opts.scope !== undefined) await ws.mutate(id, "setScope", { scope: opts.scope });
-  if (opts.legacyId !== undefined) await ws.mutate(id, "setLegacyId", { legacyId: opts.legacyId });
   await ws.mutate(id, "setContext", { text: `Why ${title}.` });
   await ws.mutate(id, "addDecisionBlock", { text: `We will ${title}.` });
   await ws.mutate(id, "addConsequence", { text: `${title} has consequences.` });
@@ -60,19 +59,19 @@ describe("decision-record: lifecycle, render, and metadata", () => {
     await harness.stop();
   });
 
-  it("renders Nygard sections + a metadata block deterministically; title prefixed 'ADR:'", async () => {
+  it("renders Nygard sections + a metadata block deterministically; title prefixed 'ADR-N:'", async () => {
     const adr = await makeAdr(ws, container, "use event sourcing", {
       scope: "wiki",
-      legacyId: "wiki/ADR-001",
     });
     await ws.mutate(adr, "addDecider", { name: "Ben" });
     await ws.mutate(adr, "addDecider", { name: "Ada" });
     const md = await ws.toMarkdown(adr);
     expect(await ws.toMarkdown(adr)).toBe(md); // byte-identical re-render (determinism)
-    expect(md.startsWith("# ADR: use event sourcing\n")).toBe(true);
+    // The H1 is the render.title template: an engine-assigned ADR number + the raw title.
+    expect(md).toMatch(/^# ADR-\d+: use event sourcing\n/);
     expect(statusOf(md)).toBe("proposed");
     expect(block(md, "Metadata")).toBe(
-      "- **Date:** 2026-06-05\n- **Scope:** wiki\n- **Deciders:** Ben, Ada\n- **Legacy ID:** wiki/ADR-001",
+      "- **Date:** 2026-06-05\n- **Scope:** wiki\n- **Deciders:** Ben, Ada",
     );
     expect(block(md, "Context")).toBe("Why use event sourcing.");
     expect(block(md, "Decision")).toBe("We will use event sourcing.");
@@ -155,15 +154,17 @@ describe("decision-record: lifecycle, render, and metadata", () => {
     expect(block(md, "Relations")).toBe("_None._"); // the ref-set rolled back with the batch
   });
 
-  it("dissolves the historical 'ADR-M7' collision: two records, distinct ids + distinct legacyId", async () => {
-    const mcp = await makeAdr(ws, container, "MCP authoring loop", { scope: "wiki-mcp", legacyId: "wiki-mcp/ADR-M7" });
-    const models = await makeAdr(ws, container, "page-type bundles", {
-      scope: "wiki-models",
-      legacyId: "wiki-models/ADR-M7",
-    });
+  it("dissolves the historical 'ADR-M7' collision: two records, distinct ids + distinct ADR numbers", async () => {
+    const mcp = await makeAdr(ws, container, "MCP authoring loop", { scope: "wiki-mcp" });
+    const models = await makeAdr(ws, container, "page-type bundles", { scope: "wiki-models" });
     expect(String(mcp)).not.toBe(String(models));
-    expect(block(await ws.toMarkdown(mcp), "Metadata")).toContain("**Legacy ID:** wiki-mcp/ADR-M7");
-    expect(block(await ws.toMarkdown(models), "Metadata")).toContain("**Legacy ID:** wiki-models/ADR-M7");
+    // Identity is the page id; the ADR number is a per-workspace sequence, so the two records
+    // carry DISTINCT, monotonically-increasing numbers — the old per-file "ADR-M7" clash is gone.
+    const numOf = (md: string): number => Number(/^# ADR-(\d+):/.exec(md)?.[1]);
+    const nMcp = numOf(await ws.toMarkdown(mcp));
+    const nModels = numOf(await ws.toMarkdown(models));
+    expect(Number.isInteger(nMcp)).toBe(true);
+    expect(nModels).toBe(nMcp + 1);
   });
 });
 
@@ -198,11 +199,74 @@ describe("decision-record: the bundle loads schema-agnostically and exposes its 
   it("describeType reports the full curated command set", () => {
     const names = wiki.describeType("decision-record").commands.map((c) => c.name);
     for (const cmd of [
-      "setDate", "setScope", "setLegacyId", "addDecider", "removeDecider",
+      "setDate", "setScope", "addDecider", "removeDecider",
       "setContext", "addDecisionBlock", "addDecisionCode", "addConsequence",
       "accept", "reject", "deprecate", "setSupersededBy", "supersede",
     ]) {
       expect(names).toContain(cmd);
     }
+    // `number` is an engine-assigned serial — it gets NO setter command on the surface.
+    expect(names).not.toContain("setMetaNumber");
+    expect(names).not.toContain("setLegacyId");
+  });
+});
+
+describe("decision-record: the engine-assigned ADR `serial` number", () => {
+  let harness: ITestWiki;
+  let ws: IWorkspaceHandle;
+  let container: PageId;
+
+  beforeAll(async () => {
+    harness = await createTestWiki([...adrPageTypes, Toc]);
+    ws = await (harness.wiki).createWorkspace({ name: "Numbered ADRs" });
+    container = (await ws.createPage("toc", { title: "Decision Records", parentId: null })).value;
+  });
+
+  afterAll(async () => {
+    await harness.stop();
+  });
+
+  /** Find a node by id anywhere in a tree. */
+  const find = (node: ITreeNode, id: PageId): ITreeNode | undefined => {
+    if (node.id === id) return node;
+    for (const c of node.children) {
+      const hit = find(c, id);
+      if (hit !== undefined) return hit;
+    }
+    return undefined;
+  };
+  const titleH1 = (md: string): string => md.slice(2, md.indexOf("\n"));
+
+  it("mints 1, 2, 3 in creation order, scoped per-type-per-workspace, and surfaces it in the title + tree", async () => {
+    const a = (await ws.createPage("decision-record", { title: "first", parentId: container })).value;
+    const b = (await ws.createPage("decision-record", { title: "second", parentId: container })).value;
+    const c = (await ws.createPage("decision-record", { title: "third", parentId: container })).value;
+
+    expect(titleH1(await ws.toMarkdown(a))).toBe("ADR-1: first");
+    expect(titleH1(await ws.toMarkdown(b))).toBe("ADR-2: second");
+    expect(titleH1(await ws.toMarkdown(c))).toBe("ADR-3: third");
+
+    // The tree carries the templated displayTitle (what the sidebar renders); the raw title is
+    // the un-numbered, editable value.
+    const tree = await ws.tree();
+    expect(find(tree, b)?.displayTitle).toBe("ADR-2: second");
+    expect(find(tree, b)?.title).toBe("second");
+  });
+
+  it("is immutable across rename — the number is independent of the (editable) title", async () => {
+    const a = (await ws.createPage("decision-record", { title: "rename me", parentId: container })).value;
+    const before = titleH1(await ws.toMarkdown(a));
+    await ws.setPageTitle(a, "renamed");
+    // Same ADR number, new description — the serial is not part of, or recomputed from, the title.
+    expect(titleH1(await ws.toMarkdown(a))).toBe(before.replace(": rename me", ": renamed"));
+  });
+
+  it("never reuses a number — an archived ADR keeps its slot, so the next mint skips past it", async () => {
+    const x = (await ws.createPage("decision-record", { title: "to archive", parentId: container })).value;
+    const archivedNum = Number(/^ADR-(\d+):/.exec(titleH1(await ws.toMarkdown(x)))?.[1]);
+    await ws.archivePage(x);
+    const y = (await ws.createPage("decision-record", { title: "after archive", parentId: container })).value;
+    const nextNum = Number(/^ADR-(\d+):/.exec(titleH1(await ws.toMarkdown(y)))?.[1]);
+    expect(nextNum).toBeGreaterThan(archivedNum); // the archived record still occupies its number
   });
 });

@@ -119,6 +119,33 @@ function fieldInlineValue(f: IField, label: LabelResolver): string {
   }
 }
 
+/**
+ * A page's DISPLAY title: its `render.title` template filled with `{title}` and
+ * `{section.field}` tokens (e.g. `"ADR-{meta.number}: {title}"` → `"ADR-7: …"`). Falls back to
+ * the raw `title` when the type is unregistered or declares no template. Pure over folded
+ * state; used for the rendered H1 and surfaced on `ITreeNode.displayTitle` for sidebars.
+ */
+export function displayTitle(node: IPageNode, registry: Registry): string {
+  if (!registry.has(node.type)) return node.title;
+  const template = registry.page(node.type).render.title;
+  if (template === undefined) return node.title;
+  return fillTitleTemplate(template, node);
+}
+
+/** Resolve `{title}` and `{section.field}` tokens in a title template against a page node. */
+function fillTitleTemplate(template: string, node: IPageNode): string {
+  return template.replace(/\{([\w.]+)\}/g, (_m, token: string) => {
+    if (token === "title") return node.title;
+    const dot = token.indexOf(".");
+    if (dot <= 0) return "";
+    const f = node.sections.find((s) => s.key === token.slice(0, dot))?.fields[token.slice(dot + 1)];
+    if (f === undefined) return "";
+    if (f.kind === "scalar") return String(f.value);
+    if (f.kind === "prose") return f.value;
+    return "";
+  });
+}
+
 /** Context for COMPUTED checkboxes (feature-review Item 3): the page being rendered, the
  *  render ctx (cross-page reads), and the page type's named {@link ComputedFlag}s. */
 interface ComputedCtx {
@@ -203,8 +230,7 @@ export function renderPage(state: IWorkspaceState, pageId: PageId, registry: Reg
   const computed: ComputedCtx = { page: pageStateView(node) as DeepReadonly<PageState>, ctx, flags: def.computed };
 
   const blocks: string[] = [];
-  const title = config.title !== undefined ? config.title.replace("{title}", node.title) : node.title;
-  blocks.push(heading(1, title));
+  blocks.push(heading(1, displayTitle(node, registry)));
   blocks.push(statusBadge(node.status));
 
   for (const sr of config.sections) {

@@ -1,11 +1,10 @@
-# ADR: Render as a configurable read model
+# ADR-8: Render as a configurable read model
 
 **Status:** accepted
 
 ## Metadata
 - **Date:** 2026-06-03
 - **Scope:** wiki
-- **Legacy ID:** wiki/ADR-007
 
 ## Context
 *(also covers the move to declarative `definePageType` authoring — sections/field-kinds/elements +

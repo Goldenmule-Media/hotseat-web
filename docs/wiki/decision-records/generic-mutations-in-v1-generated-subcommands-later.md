@@ -1,11 +1,10 @@
-# ADR: Generic mutations in v1, generated subcommands later
+# ADR-29: Generic mutations in v1, generated subcommands later
 
 **Status:** accepted
 
 ## Metadata
 - **Date:** 2026-06-02
 - **Scope:** wiki-cli
-- **Legacy ID:** wiki-cli/ADR-C5
 
 ## Context
 Page mutations can be exposed generically (`mutate <cmd> --json`) or as generated

@@ -16,7 +16,7 @@ import type {
 import { UnknownPageTypeError, ValidationError } from "./errors";
 import { makeGuard, type Guard } from "./guard";
 
-const KNOWN_KINDS = new Set(["scalar", "prose", "code", "attachment-ref", "ref", "blocks", "list"]);
+const KNOWN_KINDS = new Set(["scalar", "prose", "code", "attachment-ref", "ref", "blocks", "list", "serial"]);
 
 /** A generated structural command derived from a section/field declaration. */
 export interface GeneratedCommand {
@@ -175,6 +175,9 @@ export class Registry {
     const out = new Map<string, GeneratedCommand>();
     const walk = (key: string, sd: SectionDecl): void => {
       for (const [fk, fd] of Object.entries(sd.fields)) {
+        // `serial` is engine-assigned and immutable — generate no setter for it, so it has
+        // no write path on the command surface (the value is minted once at createPage).
+        if (fd.kind === "serial") continue;
         if (fd.kind === "list") {
           const elType = (fd as { element: string }).element;
           const elDecl = (def.elements ?? {})[elType];

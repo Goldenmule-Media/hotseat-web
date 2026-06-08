@@ -1,11 +1,10 @@
-# ADR: The section tree is author-editable, with model-declared constraints
+# ADR-10: The section tree is author-editable, with model-declared constraints
 
 **Status:** accepted
 
 ## Metadata
 - **Date:** 2026-06-03
 - **Scope:** wiki
-- **Legacy ID:** wiki/ADR-009
 
 ## Context
 A fixed per-type layout (the implicit pre-redesign model) can't serve both rigid types

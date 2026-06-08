@@ -345,6 +345,24 @@ const unarchiveWorkspaceTool: WikiTool = {
   },
 };
 
+const assignSerialsTool: WikiTool = {
+  name: "assignSerials",
+  description:
+    "Backfill engine-assigned `serial` fields (e.g. an ADR's number) onto pages that predate the " +
+    "field — assigning the unset pages, per type, in creation order, as one atomic commit. Pages " +
+    "whose serial is already set are left untouched. Idempotent: safe to re-run. Use once after " +
+    "adding a serial field to a page type that already has pages.",
+  inputSchema: obj({ workspaceId: STR }, ["workspaceId"]),
+  write: true,
+  async handle(args, ctx) {
+    const ws = asWorkspaceId(reqStr(args, "workspaceId"));
+    const handle = await ctx.engine.open(ws);
+    const { token } = await handle.assignSerials();
+    ctx.tokens.recordWrite(ctx.sessionId, token);
+    return { text: `Assigned serial numbers in ${ws}.`, data: { token } };
+  },
+};
+
 // ────────────────────────────────────────────────────────────────────────────
 // Page-scoped mutation (engine-validated args) + describeMutations
 // ────────────────────────────────────────────────────────────────────────────
@@ -1109,6 +1127,7 @@ export function wikiTools(): readonly WikiTool[] {
     createWorkspaceTool,
     archiveWorkspaceTool,
     unarchiveWorkspaceTool,
+    assignSerialsTool,
     createPageTool,
     reparentTool,
     setPageTitleTool,

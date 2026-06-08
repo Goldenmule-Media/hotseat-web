@@ -1,11 +1,10 @@
-# ADR: Logs via the control API, not Durable Streams
+# ADR-27: Logs via the control API, not Durable Streams
 
 **Status:** accepted
 
 ## Metadata
 - **Date:** 2026-06-02
 - **Scope:** wiki-cli
-- **Legacy ID:** wiki-cli/ADR-C3
 
 ## Context
 "Streaming logs" must be **global** (local + remote). One option was to publish logs to

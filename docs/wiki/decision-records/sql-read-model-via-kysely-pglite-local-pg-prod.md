@@ -1,11 +1,10 @@
-# ADR: SQL read model via Kysely; PGlite local, pg prod
+# ADR-14: SQL read model via Kysely; PGlite local, pg prod
 
 **Status:** accepted
 
 ## Metadata
 - **Date:** 2026-06-02
 - **Scope:** wiki-mcp
-- **Legacy ID:** wiki-mcp/ADR-M2
 
 ## Context
 _None._

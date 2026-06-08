@@ -1,11 +1,10 @@
-# ADR: Live ModelRegistry with cache-busted hot-reload
+# ADR-18: Live ModelRegistry with cache-busted hot-reload
 
 **Status:** accepted
 
 ## Metadata
 - **Date:** 2026-06-02
 - **Scope:** wiki-mcp
-- **Legacy ID:** wiki-mcp/ADR-M6
 
 ## Context
 Page-type schema must be **swappable at runtime** so a model can be edited, rebuilt, and

@@ -326,6 +326,10 @@ function emptyFieldFor(fd: { kind: string; element?: string }): IField {
     case "attachment-ref":
       // attachment-ref has no canonical "empty"; defer materialization until set.
       return { kind: "scalar", value: "" };
+    case "serial":
+      // Engine-assigned at create: a placeholder 0 that PageCreated.serials overwrites in
+      // the same fold. Stored as a scalar number (like ref/attachment-ref start as scalars).
+      return { kind: "scalar", value: 0 };
     default:
       return { kind: "scalar", value: "" };
   }

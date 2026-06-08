@@ -1,11 +1,10 @@
-# ADR: Host streams; do not wrap the engine
+# ADR-20: Host streams; do not wrap the engine
 
 **Status:** superseded
 
 ## Metadata
 - **Date:** 2026-06-01
 - **Scope:** wiki-server
-- **Legacy ID:** wiki-server/ADR-S1
 
 ## Context
 The original plan had a `wiki-api/` sibling exposing the engine's command catalog over

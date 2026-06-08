@@ -1,11 +1,10 @@
-# ADR: Declarative page types: the engine owns the reducer, render, and events; models declare structure + render config + contracts
+# ADR-24: Declarative page types: the engine owns the reducer, render, and events; models declare structure + render config + contracts
 
 **Status:** accepted
 
 ## Metadata
 - **Date:** 2026-06-03
 - **Scope:** wiki-models
-- **Legacy ID:** wiki-models/ADR-M7
 
 ## Context
 A page type previously carried a hand-written `apply` reducer, a `render` function, and a set

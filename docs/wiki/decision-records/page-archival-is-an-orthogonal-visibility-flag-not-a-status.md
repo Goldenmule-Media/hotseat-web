@@ -1,11 +1,10 @@
-# ADR: Page archival is an orthogonal visibility flag, not a status
+# ADR-12: Page archival is an orthogonal visibility flag, not a status
 
 **Status:** accepted
 
 ## Metadata
 - **Date:** 2026-06-04
 - **Scope:** wiki
-- **Legacy ID:** wiki/ADR-011
 
 ## Context
 The first cut of `archivePage` set `node.status = "archived"`, overwriting the page-type

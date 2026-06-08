@@ -1,11 +1,10 @@
-# ADR: Projection = engine-fold + serialize-to-SQL
+# ADR-15: Projection = engine-fold + serialize-to-SQL
 
 **Status:** accepted
 
 ## Metadata
 - **Date:** 2026-06-02
 - **Scope:** wiki-mcp
-- **Legacy ID:** wiki-mcp/ADR-M3
 
 ## Context
 _None._

@@ -1,11 +1,10 @@
-# ADR: Closed field-kinds, including the `blocks` document model
+# ADR-6: Closed field-kinds, including the `blocks` document model
 
 **Status:** accepted
 
 ## Metadata
 - **Date:** 2026-06-03
 - **Scope:** wiki
-- **Legacy ID:** wiki/ADR-005
 
 ## Context
 Sections need a way to say *how* each field is shaped, validated, and rendered without

@@ -1,11 +1,10 @@
-# ADR: Admin "by degrees" via command locality
+# ADR-26: Admin "by degrees" via command locality
 
 **Status:** accepted
 
 ## Metadata
 - **Date:** 2026-06-02
 - **Scope:** wiki-cli
-- **Legacy ID:** wiki-cli/ADR-C2
 
 ## Context
 Some admin actions are inherently local (process control); others should work against

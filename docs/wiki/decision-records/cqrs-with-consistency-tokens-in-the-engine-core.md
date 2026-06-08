@@ -1,11 +1,10 @@
-# ADR: CQRS with consistency tokens in the engine core
+# ADR-13: CQRS with consistency tokens in the engine core
 
 **Status:** accepted
 
 ## Metadata
 - **Date:** 2026-06-02
 - **Scope:** wiki-mcp
-- **Legacy ID:** wiki-mcp/ADR-M1
 
 ## Context
 Reads must be fast and durable without re-folding, yet an agent must be able to read its own

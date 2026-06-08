@@ -1,11 +1,10 @@
-# ADR: Generic section operations + one engine-owned reducer (no per-type events/reducers/renderers)
+# ADR-7: Generic section operations + one engine-owned reducer (no per-type events/reducers/renderers)
 
 **Status:** accepted
 
 ## Metadata
 - **Date:** 2026-06-03
 - **Scope:** wiki
-- **Legacy ID:** wiki/ADR-006
 
 ## Context
 Pre-redesign, each page/item type authored its own **events** (`QuestionAnswered`,

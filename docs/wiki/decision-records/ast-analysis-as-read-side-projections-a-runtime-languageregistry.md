@@ -1,11 +1,10 @@
-# ADR: AST/analysis as read-side projections + a runtime LanguageRegistry
+# ADR-19: AST/analysis as read-side projections + a runtime LanguageRegistry
 
 **Status:** accepted
 
 ## Metadata
 - **Date:** 2026-06-03
 - **Scope:** wiki-mcp
-- **Legacy ID:** wiki-mcp/ADR-M7
 
 ## Context
 The section content model makes structure first-class

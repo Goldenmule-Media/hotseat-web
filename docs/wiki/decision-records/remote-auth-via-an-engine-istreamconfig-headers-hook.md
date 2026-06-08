@@ -1,11 +1,10 @@
-# ADR: Remote auth via an engine `IStreamConfig.headers` hook
+# ADR-28: Remote auth via an engine `IStreamConfig.headers` hook
 
 **Status:** accepted
 
 ## Metadata
 - **Date:** 2026-06-02
 - **Scope:** wiki-cli
-- **Legacy ID:** wiki-cli/ADR-C4
 
 ## Context
 Authed remote servers expect `Authorization: Bearer <token>`. The control-API seam can

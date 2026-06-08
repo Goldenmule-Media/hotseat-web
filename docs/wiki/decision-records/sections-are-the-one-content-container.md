@@ -1,11 +1,10 @@
-# ADR: Sections are the one content container
+# ADR-5: Sections are the one content container
 
 **Status:** accepted
 
 ## Metadata
 - **Date:** 2026-06-03
 - **Scope:** wiki
-- **Legacy ID:** wiki/ADR-004
 
 ## Context
 The original model split a page's content into a `fields` record (typed scalars/prose)

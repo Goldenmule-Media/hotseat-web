@@ -1,11 +1,10 @@
-# ADR: The MCP server manages tokens for automatic read-your-writes
+# ADR-16: The MCP server manages tokens for automatic read-your-writes
 
 **Status:** accepted
 
 ## Metadata
 - **Date:** 2026-06-02
 - **Scope:** wiki-mcp
-- **Legacy ID:** wiki-mcp/ADR-M4
 
 ## Context
 _None._

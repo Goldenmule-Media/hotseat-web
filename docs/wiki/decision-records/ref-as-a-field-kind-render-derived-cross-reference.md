@@ -1,11 +1,10 @@
-# ADR: `ref` as a field-kind (render-derived cross-reference)
+# ADR-9: `ref` as a field-kind (render-derived cross-reference)
 
 **Status:** accepted
 
 ## Metadata
 - **Date:** 2026-06-03
 - **Scope:** wiki
-- **Legacy ID:** wiki/ADR-008
 
 ## Context
 Cross-references inside content (to a section, another page, a code symbol, or a block)

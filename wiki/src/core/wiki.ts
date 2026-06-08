@@ -41,7 +41,7 @@ import type {
   WorkspaceStatus,
 } from "../api";
 import { ROOT } from "../api";
-import { renderPage, renderWorkspace } from "../render/read-model";
+import { displayTitle, renderPage, renderWorkspace } from "../render/read-model";
 import { EventLog } from "../stores/event-log";
 import { CommandBus, type BusProjection, type CommandBusConfig, type CommitOutcome } from "./command-bus";
 import { PageNotFoundError, WorkspaceNotFoundError } from "./errors";
@@ -552,6 +552,10 @@ class WorkspaceHandle implements IWorkspaceHandle {
     return committed;
   }
 
+  assignSerials(): Promise<Committed<void>> {
+    return this.structural("assignSerials", {}) as Promise<Committed<void>>;
+  }
+
   /** Mirror an archive/unarchive into the namespace catalog (the secondary index `listWorkspaces`
    *  folds) so the workspace's status is consistent there too — best-effort, like registration:
    *  the workspace stream stays the source of truth. */
@@ -684,7 +688,7 @@ class WorkspaceHandle implements IWorkspaceHandle {
 
   async tree(opts?: IReadOpts): Promise<ITreeNode> {
     await this.awaitConsistency(opts);
-    return buildTree(this.projection.state);
+    return buildTree(this.projection.state, this.registry);
   }
 
   async page(pageId: PageId, opts?: IReadOpts): Promise<IPageView> {
@@ -949,13 +953,17 @@ function applyAndFanOut(
 }
 
 /** Build the ordered page tree rooted at the ROOT sentinel. */
-function buildTree(state: IWorkspaceState): ITreeNode {
+function buildTree(state: IWorkspaceState, registry: Registry): ITreeNode {
   const visit = (id: PageId): ITreeNode => {
     const node = state.pages.get(id);
     const childIds = state.children.get(id) ?? [];
+    // The display title is the type's `render.title` template filled with the node's own
+    // title + field values; surface it only when it differs from the raw title.
+    const display = node !== undefined ? displayTitle(node, registry) : undefined;
     return {
       id,
       title: node?.title ?? id,
+      ...(display !== undefined && display !== node?.title ? { displayTitle: display } : {}),
       ...(node !== undefined ? { type: node.type, status: node.status } : {}),
       ...(node?.archived === true ? { archived: true } : {}),
       ...(node?.updatedAt !== undefined ? { updatedAt: node.updatedAt } : {}),

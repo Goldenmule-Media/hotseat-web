@@ -1,11 +1,10 @@
-# ADR: Workspace as the aggregate (one stream)
+# ADR-3: Workspace as the aggregate (one stream)
 
 **Status:** accepted
 
 ## Metadata
 - **Date:** 2026-06-01
 - **Scope:** wiki
-- **Legacy ID:** wiki/ADR-002
 
 ## Context
 First draft used **one stream per page**. Reviewer: that's too granular — we want to

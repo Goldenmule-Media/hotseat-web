@@ -1,11 +1,10 @@
-# ADR: Wrap the Node server for the self-host tier
+# ADR-21: Wrap the Node server for the self-host tier
 
 **Status:** accepted
 
 ## Metadata
 - **Date:** 2026-06-01
 - **Scope:** wiki-server
-- **Legacy ID:** wiki-server/ADR-S2
 
 ## Context
 Which server does `wiki-server` run? `@durable-streams/server`'s own README scopes it to

@@ -1,11 +1,10 @@
-# ADR: wiki-server hosts wiki-mcp
+# ADR-22: wiki-server hosts wiki-mcp
 
 **Status:** accepted
 
 ## Metadata
 - **Date:** 2026-06-02
 - **Scope:** wiki-server
-- **Legacy ID:** wiki-server/ADR-S3
 
 ## Context
 A stateless consumer re-folds history per call (a non-starter); the long-lived **`wiki-mcp`**
