@@ -11,6 +11,9 @@ An event-driven service that discovers workspaces and projects each commit into 
 ## Purpose
 Keeps the SQL read model and its derived indexes current off the engine's live tail without re-folding from zero on restart, and advances `appliedToken` atomically so a `waitFor` that sees base rows also sees the derived indexes.
 
+## Design notes
+_None._
+
 ## Components
 _No components._
 

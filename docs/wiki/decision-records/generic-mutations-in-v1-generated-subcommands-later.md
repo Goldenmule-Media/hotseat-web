@@ -16,8 +16,7 @@ wiki page <ws> <page> commands (legal-now list) and wiki tools (the full JSON-Sc
 Generated per-command subcommands are future sugar.
 
 Why. The generic path is type-set-agnostic, immediately works for every registered page type, and
-is the most agent-friendly (schema in, JSON out) — matching the engine's LLM-first stance
-(wiki/DESIGN.md §12). Generated flags are pure ergonomics and can be layered on
+is the most agent-friendly (schema in, JSON out) — matching the engine's LLM-first stance. Generated flags are pure ergonomics and can be layered on
 without changing the core.
 
 ## Consequences

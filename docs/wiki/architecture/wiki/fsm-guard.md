@@ -11,6 +11,9 @@ The engine's FSM mechanism — a tiny, zero-dependency pure guard over a declara
 ## Purpose
 Enforces lifecycle legality ("a mutation is legal iff the FSM declares the transition") without hard-coding any lifecycle and without a stateful FSM dependency — the event log, not any `_current` field, is the source of truth for status.
 
+## Design notes
+_None._
+
 ## Components
 _No components._
 

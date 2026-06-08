@@ -11,6 +11,9 @@ A durable Kysely-over-Postgres read model (PGlite in-process locally, node-postg
 ## Purpose
 Serves the bulk of agent traffic (reads) from a queryable, restart-survivable cache instead of re-folding event history per call, and provides the `appliedToken` / `waitFor` contract that converts eventual consistency into read-your-writes.
 
+## Design notes
+_None._
+
 ## Components
 _No components._
 

@@ -11,6 +11,9 @@ The agent-facing MCP server built on the SDK's low-level `Server`, exposing the 
 ## Purpose
 Turns the engine into agent-callable tools / resources and threads consistency tokens automatically, so an agent always reads its own prior writes without managing tokens, while distinct sessions stay independent.
 
+## Design notes
+_None._
+
 ## Components
 _No components._
 

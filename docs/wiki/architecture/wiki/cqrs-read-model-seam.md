@@ -11,6 +11,9 @@ The consistency-token codec plus the default `InMemoryReadModel` implementing `I
 ## Purpose
 Makes the engine strict-CQRS-correct standalone: the write side appends and the read side trails, and a caller converts "eventually consistent" into read-your-writes on demand by threading a write's token into a read's `consistentWith`.
 
+## Design notes
+_None._
+
 ## Components
 _No components._
 

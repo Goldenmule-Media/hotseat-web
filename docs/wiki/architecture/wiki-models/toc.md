@@ -11,6 +11,9 @@ A generated, curatable Table Of Contents of a page's own children — a derived 
 ## Purpose
 Gives a never-drifting index over the live child set, letting an author add named buckets and per-child ordering without ever hand-duplicating the child list or touching the page tree.
 
+## Design notes
+_None._
+
 ## Components
 _No components._
 

@@ -12,3 +12,4 @@ Home for product/feature documents authored with the `feature` page-type bundle:
 - [Markdown projection to disk — live filesystem mirror](feature-brief:mpzzmwwy-003x-e2o28)
 - [Full-text search — an engine-bundled search index for client and server](feature-brief:mq0z8mvy-008f-nhjuow)
 - [Runtime-configurable Markdown emitters (per-project disk mirrors)](feature-brief:mq5e9i2q-0001-w31t6m)
+- [Shared engine in a SharedWorker (one engine + PGlite across all tabs)](feature-brief:mq5mpdpu-0001-7z2iva)

@@ -12,3 +12,5 @@ Architecture map of the **hotseat-web** monorepo — an event-sourced, CQRS, LLM
 - **Host & process** — The long-lived MCP + read-model host and the process that wires it to durable storage.
   - [wiki-mcp](architecture:mpznj4z6-000d-dzkr85)
   - [wiki-server](architecture:mpznj67y-000f-mrah2o)
+- **Ungrouped**
+  - [Content model](architecture:mq5nej50-0026-edazv6)

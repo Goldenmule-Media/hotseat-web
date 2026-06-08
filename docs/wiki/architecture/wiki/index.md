@@ -11,6 +11,9 @@ The transport-free, event-sourced **engine**. Exposes ONLY a TypeScript API (`cr
 ## Purpose
 Make every page a typed document that changes only through **named, FSM-gated, Zod-validated commands** — never free text — so an LLM agent (and a few humans) can author safely and reproducibly. A page type (`definePageType`) declares typed sections/fields, an item/element vocabulary, a status **FSM**, declarative commands, and a deterministic render config; the engine supplies the single closed section-operation reducer and the deterministic Markdown renderer. Realizes goals G1–G8: transport-free API, statically- + runtime-typed mutations, FSM-gated lifecycle, workspace-as-aggregate, atomic structural/cross-page ops, single-tail subscription, deterministic render, and LLM-native ergonomics (discoverable command catalog, JSON-Schema export, only-legal-actions-offered, structured errors).
 
+## Design notes
+_None._
+
 ## Components
 - [Command bus](architecture:mpzoincb-004h-c5129i)
 - [Event log & storage adapter](architecture:mpzoioif-004j-c1rzal)

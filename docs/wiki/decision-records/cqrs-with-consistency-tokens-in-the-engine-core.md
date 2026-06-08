@@ -18,15 +18,7 @@ before serving. The engine ships a default in-memory read model so it is CQRS-co
 read models implement the same IReadModel.
 
 ## Consequences
-wiki/DESIGN.md §8/§10 change on both
-sides: every write return becomes Committed<T> (including the eight Promise<void> structural
-commands, §3.2); and the engine's single in-memory projection (wiki/DESIGN.md §8.4)
-splits into a write-side decide-aggregate plus a separate IReadModel, with the handle's currently
-synchronous, token-free reads (tree/page/toMarkdown — wiki/DESIGN.md §10.3)
-becoming token-aware (and likely async). A public pure fold must also be exported
-(ADR-M3). Writes never block on projection;
-reads convert "eventual" to "after my write" on demand. This doc states the contract; the engine doc must
-own it.
+The engine's read and write surfaces change on both sides: every write return becomes Committed<T> (including the eight structural commands that previously returned Promise<void>); and the engine's single in-memory projection splits into a write-side decide-aggregate plus a separate IReadModel, with the handle's currently synchronous, token-free reads (tree/page/toMarkdown) becoming token-aware (and likely async). A public pure fold must also be exported. Writes never block on projection; reads convert "eventual" to "after my write" on demand.
 
 ## Relations
 _None._

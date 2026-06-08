@@ -118,6 +118,27 @@ describe("architecture: a typed graph node describing the codebase", () => {
     expect(block(md, "Invariants & constraints")).toBe("_None._");
   });
 
+  it("authors Design notes (prose + code blocks) and renders them deterministically", async () => {
+    const node = (await ws.createPage("architecture", { title: "Noted", parentId: null })).value;
+    await ws.mutate(node, "addNote", { text: "The fold is the single source of truth." });
+    await ws.mutate(node, "addNoteCode", { language: "ts", source: "type PageId = string;" });
+    const md = await ws.toMarkdown(node);
+    expect(await ws.toMarkdown(node)).toBe(md); // deterministic
+    expect(block(md, "Design notes")).toBe(
+      "The fold is the single source of truth.\n\n```ts\ntype PageId = string;\n```",
+    );
+  });
+
+  it("materializes Design notes empty on a fresh page (no backfill); add returns an id, remove clears it", async () => {
+    const node = (await ws.createPage("architecture", { title: "NoteLifecycle", parentId: null })).value;
+    // The required blocks section auto-materializes empty at fold time → engine default placeholder.
+    expect(block(await ws.toMarkdown(node), "Design notes")).toBe("_None._");
+    const n = (await ws.mutate(node, "addNote", { text: "x" })).value as { blockId: string };
+    expect(n.blockId).toBeTruthy();
+    await ws.mutate(node, "removeNote", { blockId: n.blockId });
+    expect(block(await ws.toMarkdown(node), "Design notes")).toBe("_None._");
+  });
+
   it("drives the current⇄stale freshness lifecycle and rejects off-FSM events", async () => {
     // markCurrent is illegal while already current.
     await expect(ws.mutate(engine, "markCurrent", {})).rejects.toThrow();

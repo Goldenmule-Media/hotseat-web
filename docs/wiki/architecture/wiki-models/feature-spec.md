@@ -11,6 +11,9 @@ The question-free, DECIDED source of truth authored *from* the brief's resolved 
 ## Purpose
 Separates the clean current design (the spec) from the deliberation trail (the brief's Q&A), and structurally guarantees no resolved decision was silently dropped.
 
+## Design notes
+_None._
+
 ## Components
 _No components._
 

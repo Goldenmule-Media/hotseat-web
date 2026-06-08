@@ -21,8 +21,10 @@
  * children of a `toc` "Architecture Overview" page, which renders the grouped index.
  */
 import type {
+  BlockId,
   DeepReadonly,
   DerivedList,
+  IBlock,
   IField,
   IItem,
   IRenderCtx,
@@ -96,12 +98,17 @@ const componentRows: DerivedList = (page, ctx: IRenderCtx) => {
   return ctx.childrenOf(self).map((id) => ({ id: String(id), text: `[${ctx.titleOf(id) ?? String(id)}](${id})` }));
 };
 
+/** A prose paragraph block carrying `text` (id minted from the injected `newId`). Mirrors adr.ts. */
+function paragraph(text: string, newId: () => string): IBlock {
+  return { kind: "paragraph", id: newId() as BlockId, inlines: [{ kind: "text", value: text, marks: [] }] };
+}
+
 const editable = ["current", "stale"];
 
 export const Architecture = definePageType({
   type: "architecture",
   label: "Architecture node",
-  version: 1,
+  version: 2,
   // No draft: a node is documented after the code exists, so it is born `current`; an agent
   // flips it `stale` when it detects drift and back to `current` once re-verified.
   initialStatus: "current",
@@ -118,6 +125,11 @@ export const Architecture = definePageType({
     purpose: { name: "Purpose", required: true, mutableIn: editable, fields: { body: { kind: "prose" } } },
     usage: { name: "Usage", required: true, mutableIn: editable, fields: { body: { kind: "prose" } } },
     dataModel: { name: "Data model", required: true, mutableIn: editable, fields: { body: { kind: "prose" } } },
+    // Free-form design narrative: prose paragraphs + code blocks (type defs, pseudo-code) — the
+    // high-value mechanics that don't fit the structured prose fields. Required so it materializes
+    // empty on every page (incl. pre-existing) at fold time (no backfill), and so the addBlock-based
+    // commands have a section to target (a non-required section would never materialize → SectionNotFound).
+    details: { name: "Design notes", required: true, mutableIn: editable, fields: { body: { kind: "blocks" } } },
     codeReferences: {
       name: "Code references",
       required: true,
@@ -190,6 +202,35 @@ export const Architecture = definePageType({
       args: zodSchema(z.object({ text: z.string() })),
       target: { section: "dataModel", field: "body" },
       set: { body: arg("text") },
+    },
+    // ── design notes (blocks: prose + code) — mirrors adr's addDecisionBlock/addDecisionCode ──
+    /** Append a prose paragraph to the Design notes. */
+    addNote: {
+      args: zodSchema(z.object({ text: z.string() })),
+      result: zodSchema(z.object({ blockId: z.string() })),
+      target: { section: "details", field: "body" },
+      produces: (_page, args, ctx) => {
+        const a = args as { text: string };
+        return [{ op: "addBlock", section: "details", field: "body", block: paragraph(a.text, ctx.newId) }];
+      },
+    },
+    /** Append a fenced code block to the Design notes (hash "" → recomputed at ingestion). */
+    addNoteCode: {
+      args: zodSchema(z.object({ language: z.string(), source: z.string() })),
+      result: zodSchema(z.object({ blockId: z.string() })),
+      target: { section: "details", field: "body" },
+      produces: (_page, args, ctx) => {
+        const a = args as { language: string; source: string };
+        const block: IBlock = { kind: "code", id: ctx.newId() as BlockId, lang: a.language, source: a.source, hash: "" };
+        return [{ op: "addBlock", section: "details", field: "body", block }];
+      },
+    },
+    removeNote: {
+      args: zodSchema(z.object({ blockId: z.string() })),
+      target: { section: "details", field: "body" },
+      produces: (_page, args) => [
+        { op: "removeBlock", section: "details", field: "body", block: (args as { blockId: string }).blockId as BlockId },
+      ],
     },
     /** Add a code reference (file + optional symbol/kind; never a line number). */
     addCodeRef: {
@@ -291,6 +332,7 @@ export const Architecture = definePageType({
       { section: "summary", field: "kind", heading: "Kind", as: "inline" },
       { section: "summary", field: "body", heading: "Summary", as: "block" },
       { section: "purpose", field: "body", heading: "Purpose", as: "block" },
+      { section: "details", field: "body", heading: "Design notes", as: "blocks", placeholder: "_No design notes._" },
       // Contained sub-nodes = this node's page-tree children, rendered as links (page-id href).
       // Surfaces the package→component hierarchy ON the node page (the way a toc surfaces its
       // children); a leaf node shows the placeholder.

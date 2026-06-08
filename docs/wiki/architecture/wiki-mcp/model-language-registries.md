@@ -11,6 +11,9 @@ Two sibling, generation-counted registries that load plugins by module specifier
 ## Purpose
 Make page-type schema swappable at runtime (the local edit → build → reload loop) without changing `wiki` / `wiki-server`, and load heavy / version-sensitive parsers in the host (never in the engine) so analysis stays a read-side projection.
 
+## Design notes
+_None._
+
 ## Components
 _No components._
 

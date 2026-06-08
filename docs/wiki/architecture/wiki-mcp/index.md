@@ -11,6 +11,9 @@ The **long-lived host**: embeds the `wiki` engine (write side — a hot LRU of w
 ## Purpose
 Turn the embeddable engine into a durable, queryable, agent-facing service. It supplies the external `IReadModel` over the engine's read seam (so token-gated read-your-writes works against SQL, not just the in-memory projection), projects the event log into relational tables for rich reads (tree, outline, symbol / reference / xref indexes), and surfaces an LLM tool + resource API: `createWorkspace`, `createPage`, `mutatePage`, `describeMutations`, `getPage`, `tree`, `renderPage`, `search`, `link`, …
 
+## Design notes
+_None._
+
 ## Components
 - [SQL read model](architecture:mpzoix0f-004x-dlxbrw)
 - [Projection tailer](architecture:mpzoiy4k-004z-xrbx5a)

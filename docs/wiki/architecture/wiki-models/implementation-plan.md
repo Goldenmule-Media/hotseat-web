@@ -11,6 +11,9 @@ The ordered plan of attack for a feature — a reorderable list of steps (each w
 ## Purpose
 The canonical work breakdown the checklist projects from, and a precondition source for the brief's `beginImplementation` gate.
 
+## Design notes
+_None._
+
 ## Components
 _No components._
 

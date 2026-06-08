@@ -11,6 +11,9 @@ A tracked-work checklist for the building phase: a DERIVED view of the plan's st
 ## Purpose
 Surfaces build progress without storing duplicate step state, and lets gate-tasks expose structural facts (e.g. all test cases passed) as un-toggleable computed checkboxes.
 
+## Design notes
+_None._
+
 ## Components
 _No components._
 

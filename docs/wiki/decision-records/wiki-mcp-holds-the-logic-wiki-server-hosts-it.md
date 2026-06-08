@@ -19,10 +19,7 @@ Why. A single home for the engine + read model + MCP behavior (testable, replace
 stays small and comprehensible. The host knowing it has an engine is fine; owning the logic is not.
 
 ## Consequences
-wiki-server now transitively depends on the engine — a deliberate, accepted relaxation of
-its original "imports neither wiki nor anything" stance (wiki-server/DESIGN.md §1/§2),
-which must be amended to record that it hosts wiki-mcp. wiki-mcp still imports only the engine (library)
-+ the stream client — never wiki-server code.
+wiki-server now transitively depends on the engine — a deliberate, accepted relaxation of its original "imports neither wiki nor anything" stance, which the design record for wiki-server must now reflect: that it hosts wiki-mcp. wiki-mcp still imports only the engine (library) + the stream client — never wiki-server code.
 
 ## Relations
 _None._
