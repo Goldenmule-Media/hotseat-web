@@ -11,3 +11,4 @@ Home for product/feature documents authored with the `feature` page-type bundle:
 - [ADR page type — decisions as first-class wiki pages](feature-brief:mpzzfn7e-0006-i76ro4)
 - [Markdown projection to disk — live filesystem mirror](feature-brief:mpzzmwwy-003x-e2o28)
 - [Full-text search — an engine-bundled search index for client and server](feature-brief:mq0z8mvy-008f-nhjuow)
+- [Runtime-configurable Markdown emitters (per-project disk mirrors)](feature-brief:mq5e9i2q-0001-w31t6m)

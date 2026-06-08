@@ -35,3 +35,4 @@ _None._
 - [Logs via the control API, not Durable Streams](decision-record:mq110xdu-008z-utyvhf)
 - [Remote auth via an engine `IStreamConfig.headers` hook](decision-record:mq110xwb-009c-h64sj5)
 - [Generic mutations in v1, generated subcommands later](decision-record:mq110ye5-009p-4evl6w)
+- [Cross-workspace operations are an admin/system affordance, not a content read](decision-record:mq5hnpu9-001m-c9yfrl)

@@ -1,9 +1,9 @@
 {
   "ws:mpzncs2z-0001-2wgv51": {
-    "version": 1100,
+    "version": 1145,
     "files": {
       "wiki/architecture/index.md": "476eded5fd4b137963e1669b72235d17ef6c0c4d105f14db6340bf16ebae99dc",
-      "wiki/feature-specs/index.md": "bc4b60bc55ab88d4728ef599af757b0bd28f652e0a7a04cbf89985a3a65b2c03",
+      "wiki/feature-specs/index.md": "685453c876df8a1fcb99f5c951cbd0ee3619c03ab236ad1c11ca9ad31439aeb3",
       "wiki/architecture/wiki/index.md": "1be40333b094ac6d935a65e31e2e9d2c0cdba6fd7328f6af954464ee725e99f9",
       "wiki/architecture/wiki-models/index.md": "6bed2145b35a838fdae3694a23816bf7f63ad0fd66e2877fbe50eb445938d8fe",
       "wiki/architecture/wiki-mcp/index.md": "8c79c2c4d19834bdc594f1ca639a55b896cdf1f816c3a02126846631daaabe84",
@@ -27,12 +27,7 @@
       "wiki/architecture/wiki-models/testing-plan.md": "97cd679b639c52393414ae1335de7590885e8f3aa4b853c112ebbdf5c115efc1",
       "wiki/architecture/wiki-models/toc.md": "c52b85c8a60a62b0bdb0e617856668971a783601ae246253cbf98ec0bf14068e",
       "wiki/architecture/wiki-models/architecture.md": "8f8e7783508bc8a09d2f360b4e0fa0e3eb36e329cf0720c5ec00a7650d1b46e1",
-      "wiki/feature-specs/markdown-projection-to-disk-live-filesystem-mirror/index.md": "9dcefda8ef0d057e97e44ea8d2d01bf2b85b5f165bb5c93f2c7cd1bea5ef4ff8",
-      "wiki/feature-specs/markdown-projection-to-disk-live-filesystem-mirror/implementation-plan.md": "dea4636ee4ca7f46196483211d16a975606c25ee9359361e3e70181a73bac195",
-      "wiki/feature-specs/markdown-projection-to-disk-live-filesystem-mirror/implementation-checklist.md": "016e434fb091ced205ee9db5672ae39cd4af35a463de1d9086fdfbfd8898eaa2",
-      "wiki/feature-specs/markdown-projection-to-disk-live-filesystem-mirror/testing-plan.md": "471cdfe5e01e55abb1cd96c9dc6a523c8bdaa360191e1456f7e15f33b6618c5f",
-      "wiki/feature-specs/markdown-projection-to-disk-live-filesystem-mirror/spec.md": "85f80db835dd67c06d9b67f736a69c2b3793ab9f734572f07b586c0cace097c8",
-      "wiki/decision-records/index.md": "8db9025daf68d0a766b2042b32981084079c36f2a9d547ca010b70a4ef8f4e81",
+      "wiki/decision-records/index.md": "8d28361b71ec337d4c95607d73986227b6110edf230a284f3b3515deab00ad9a",
       "wiki/decision-records/design-decisions-live-in-the-wiki.md": "a2b09b6711e2a05a337497f55311c57040047b6e0a395a48b97c7e6114ace74d",
       "wiki/decision-records/use-durable-streams-directly-no-storage-port.md": "44029f6a7d78681a461e83a6af0ec1dc2e3e0b5f277a14fdf4451210a680379f",
       "wiki/decision-records/workspace-as-the-aggregate-one-stream.md": "5c7dea8a89a387cd236d13a2d9d2fc6d52d68c2e6311e6efcf6e34d6bb41669f",
@@ -61,7 +56,13 @@
       "wiki/decision-records/admin-by-degrees-via-command-locality.md": "e39c2ef18c02b68f4a352c73ab2d973463d2d7cedac802ae44b3c242485eca98",
       "wiki/decision-records/logs-via-the-control-api-not-durable-streams.md": "efca664b468a2b347741ac78394655e4e709c5fc32ffb57d04a6b1b8190af41d",
       "wiki/decision-records/remote-auth-via-an-engine-istreamconfig-headers-hook.md": "6771a3f74f71447d54e2e3c15752d2cf7ca9188f30c54578385f4496ddaa37e9",
-      "wiki/decision-records/generic-mutations-in-v1-generated-subcommands-later.md": "531221970dad330743eacb33898369d951af706ba027eeabff9bb075eef31f9f"
+      "wiki/decision-records/generic-mutations-in-v1-generated-subcommands-later.md": "531221970dad330743eacb33898369d951af706ba027eeabff9bb075eef31f9f",
+      "wiki/feature-specs/runtime-configurable-markdown-emitters-per-project-disk-mirrors/index.md": "8573f261fdcb9afe42106677b4a9026d16adbdbc3e185a2548921781b80c3362",
+      "wiki/feature-specs/runtime-configurable-markdown-emitters-per-project-disk-mirrors/implementation-plan.md": "7ecc0ff38a8d87cb32e8b2d41053d845fec76d11084b3c9e335c749f8716e545",
+      "wiki/feature-specs/runtime-configurable-markdown-emitters-per-project-disk-mirrors/implementation-checklist.md": "1382f54ad9750c4a990065c61d338b87874810048350247875a0c707575d5159",
+      "wiki/feature-specs/runtime-configurable-markdown-emitters-per-project-disk-mirrors/testing-plan.md": "f319705751ea11ef1765951473e66727fbcf993e42988c3153fead2b8d3f8f4f",
+      "wiki/feature-specs/runtime-configurable-markdown-emitters-per-project-disk-mirrors/spec.md": "4b6df6f5124cf4be4b1df27167efff93d8a167cd4adb687324fa2b6c0ec201b7",
+      "wiki/decision-records/cross-workspace-operations-are-an-admin-system-affordance-not-a-content-read.md": "268e2c8fe220cfa2e81219368fc8485d82f824ccefcbdfe03a66ddb094108229"
     },
     "pages": {
       "toc:mpznedyz-0003-pdtcmh": "wiki/architecture/index.md",
@@ -89,11 +90,6 @@
       "architecture:mpzoj5y7-005d-t14bjq": "wiki/architecture/wiki-models/testing-plan.md",
       "architecture:mpzoj74l-005f-7o0kh9": "wiki/architecture/wiki-models/toc.md",
       "architecture:mpzoj8jj-005h-6e1rml": "wiki/architecture/wiki-models/architecture.md",
-      "feature-brief:mpzzmwwy-003x-e2o28": "wiki/feature-specs/markdown-projection-to-disk-live-filesystem-mirror/index.md",
-      "implementation-plan:mpzzmwwy-003y-oex61a": "wiki/feature-specs/markdown-projection-to-disk-live-filesystem-mirror/implementation-plan.md",
-      "implementation-checklist:mpzzmwwy-003z-n8eia1": "wiki/feature-specs/markdown-projection-to-disk-live-filesystem-mirror/implementation-checklist.md",
-      "testing-plan:mpzzmwwy-0040-o5ee1x": "wiki/feature-specs/markdown-projection-to-disk-live-filesystem-mirror/testing-plan.md",
-      "feature-spec:mpzzmwwy-0041-yfaz8w": "wiki/feature-specs/markdown-projection-to-disk-live-filesystem-mirror/spec.md",
       "toc:mq110m2z-0001-2gw6rf": "wiki/decision-records/index.md",
       "decision-record:mq110m3o-0003-gqol23": "wiki/decision-records/design-decisions-live-in-the-wiki.md",
       "decision-record:mq110mit-000h-uiaeta": "wiki/decision-records/use-durable-streams-directly-no-storage-port.md",
@@ -123,7 +119,13 @@
       "decision-record:mq110wxm-008o-jd7u2c": "wiki/decision-records/admin-by-degrees-via-command-locality.md",
       "decision-record:mq110xdu-008z-utyvhf": "wiki/decision-records/logs-via-the-control-api-not-durable-streams.md",
       "decision-record:mq110xwb-009c-h64sj5": "wiki/decision-records/remote-auth-via-an-engine-istreamconfig-headers-hook.md",
-      "decision-record:mq110ye5-009p-4evl6w": "wiki/decision-records/generic-mutations-in-v1-generated-subcommands-later.md"
+      "decision-record:mq110ye5-009p-4evl6w": "wiki/decision-records/generic-mutations-in-v1-generated-subcommands-later.md",
+      "feature-brief:mq5e9i2q-0001-w31t6m": "wiki/feature-specs/runtime-configurable-markdown-emitters-per-project-disk-mirrors/index.md",
+      "implementation-plan:mq5e9i2q-0002-wxnsf7": "wiki/feature-specs/runtime-configurable-markdown-emitters-per-project-disk-mirrors/implementation-plan.md",
+      "implementation-checklist:mq5e9i2q-0003-fgq92c": "wiki/feature-specs/runtime-configurable-markdown-emitters-per-project-disk-mirrors/implementation-checklist.md",
+      "testing-plan:mq5e9i2q-0004-ea9cro": "wiki/feature-specs/runtime-configurable-markdown-emitters-per-project-disk-mirrors/testing-plan.md",
+      "feature-spec:mq5e9i2q-0005-2in5ln": "wiki/feature-specs/runtime-configurable-markdown-emitters-per-project-disk-mirrors/spec.md",
+      "decision-record:mq5hnpu9-001m-c9yfrl": "wiki/decision-records/cross-workspace-operations-are-an-admin-system-affordance-not-a-content-read.md"
     }
   }
 }
