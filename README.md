@@ -28,8 +28,9 @@ every page renders **deterministically** to Markdown. Agents reach it over **MCP
 | `wiki-mcp` | Long-lived host: embeds the engine, maintains a SQL read model (PGlite/pg), exposes MCP tools + resources. |
 | `wiki-server` | Thin process that runs the durable stream host **and** hosts `wiki-mcp` in one process. |
 
-Architecture, boundaries, and conventions live in [`CLAUDE.md`](./CLAUDE.md); each package has a deep
-`DESIGN.md`.
+Architecture, boundaries, and conventions live in [`CLAUDE.md`](./CLAUDE.md); per-package design intent,
+the content model, ADRs, and feature specs live in the wiki's own rendered mirror under
+[`docs/wiki/`](./docs/wiki/).
 
 ---
 
@@ -91,8 +92,9 @@ checklist is done, cases pass, and no questions are open.
 `wiki` is also a plain TypeScript library — `createWiki({ stream, pageTypes })` returns an `IWiki`; writes
 return `Committed<T>`, reads are async and token-gated. It needs a Durable Streams server to point at (run
 `wiki-server`, or use the in-process server from `wiki/testing` for embedded/test use). Page types come
-from `wiki-models` (e.g. `import { featurePageTypes } from "wiki-models/feature"`). See `wiki/DESIGN.md`
-§10 for the full API.
+from `wiki-models` (e.g. `import { featurePageTypes } from "wiki-models/feature"`). The API surface is
+canonical in the types — start at `wiki/src/index.ts` (and `wiki/src/api.ts`); see
+[`docs/wiki/architecture/wiki/`](./docs/wiki/architecture/wiki/) for the prose walkthrough.
 
 ---
 
@@ -152,5 +154,6 @@ The server re-imports the rebuilt bundle, rebinds the engine, and reprojects the
 ### Where to read more
 
 - [`CLAUDE.md`](./CLAUDE.md) — architecture, package boundaries, and the full conventions list.
-- `wiki/DESIGN.md` (+ `wiki/BUILD_NOTES.md` for engine internals), `wiki-mcp/DESIGN.md`,
-  `wiki-models/DESIGN.md`, `wiki-server/DESIGN.md` — design intent and ADRs per package.
+- [`docs/wiki/architecture/`](./docs/wiki/architecture/) — per-package design intent + the engine's
+  content model. [`docs/wiki/decision-records/`](./docs/wiki/decision-records/) — every ADR.
+  [`docs/wiki/feature-specs/`](./docs/wiki/feature-specs/) — feature/product documents.
