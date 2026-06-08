@@ -371,11 +371,12 @@ describe("wiki-mcp integration: token semantics + read-your-writes + resume", ()
     // The session has high-water marks on BOTH workspaces.
     expect(tokens.allWritten(session).length).toBe(2);
 
-    // Inject lag: a cross-workspace search must park on the fan-out until we drain.
+    // listWorkspaces is the one cross-workspace (catalog/discovery) read — ADR-30 — so it
+    // must park on the fan-out wait over EVERY written workspace's token until we drain.
     let settled = false;
-    const search = tools
-      .get("search")!
-      .handle({ query: "needle" }, ctx(session))
+    const list = tools
+      .get("listWorkspaces")!
+      .handle({}, ctx(session))
       .then((r) => {
         settled = true;
         return r;
@@ -384,10 +385,10 @@ describe("wiki-mcp integration: token semantics + read-your-writes + resume", ()
     expect(settled).toBe(false); // parked on the fan-out waitFor over BOTH tokens
 
     await drain();
-    const result = await search;
+    const result = await list;
     expect(settled).toBe(true);
-    const titles = (result.data as Array<{ title: string }>).map((h) => h.title).sort();
-    expect(titles).toEqual(["needle-one", "needle-two"]);
+    const names = (result.data as Array<{ name: string }>).map((w) => w.name).sort();
+    expect(names).toEqual(["One", "Two"]);
   });
 
   // ──────────────────────────────────────────────────────────────────────────

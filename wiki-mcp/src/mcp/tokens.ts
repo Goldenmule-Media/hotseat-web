@@ -77,7 +77,7 @@ export class SessionTokenManager {
 
   /**
    * Every workspace the session has written, each with its high-water token — a
-   * cross-workspace read (`search`, `listWorkspaces`) fans out and waits on all of
+   * cross-workspace read (`listWorkspaces` — the catalog/discovery affordance) fans out and waits on all of
    * them so the result reflects ALL the session's writes (DESIGN §6.2).
    */
   allWritten(sessionId: string | undefined): readonly ConsistencyToken[] {

@@ -77,9 +77,10 @@ The tools mirror the engine. A typical first flow (tool → key arguments):
    `command: "askQuestion", args: { text: "Which themes?" }`. The engine validates args and the FSM;
    an illegal command comes back as a structured error with the legal set.
 5. Read it back: `renderPage` → `{ workspaceId, pageId }` (Markdown; omit `pageId` for the whole tree),
-   `tree` → `{ workspaceId }`, or `getPage`. Within a workspace: `attention` (items a model flags as awaiting a
-   human) and `nextActions` (rolls a subtree's legal edges into do / blocked / humanGates / attention, so an
-   agent self-directs). Across workspaces (a system/discovery affordance): `search`, `listWorkspaces`.
+   `tree` → `{ workspaceId }`, or `getPage`. Within a workspace: `search` (full-text over content), `attention`
+   (items a model flags as awaiting a human), and `nextActions` (rolls a subtree's legal edges into do / blocked
+   / humanGates / attention, so an agent self-directs). Cross-workspace is a system/discovery affordance only:
+   `listWorkspaces` (ADR-30).
 
 Because the FSM gates everything, the lifecycle is enforced for you — e.g. a feature-brief can't
 `beginImplementation` until its plan has a step and its testing-plan a case, and can't `ship` until the

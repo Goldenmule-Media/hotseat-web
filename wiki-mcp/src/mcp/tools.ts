@@ -155,11 +155,6 @@ async function awaitSearchConsistency(
   if (token !== undefined) await index.waitFor(token);
 }
 
-/** Fan out the search-index wait over every workspace the session wrote. */
-async function awaitAllSearchConsistency(index: ISearchIndex, ctx: WikiToolContext): Promise<void> {
-  await Promise.all(ctx.tokens.allWritten(ctx.sessionId).map((t) => index.waitFor(t)));
-}
-
 // ────────────────────────────────────────────────────────────────────────────
 // Self-direction roll-up (generic over the engine's model-declared classifiers:
 // transition `agency` + element `awaitsHuman`; NO page-type knowledge lives here)
@@ -904,17 +899,18 @@ const searchTool: WikiTool = {
   name: "search",
   description:
     "Full-text search over page CONTENT — the page's rendered Markdown (titles, prose, code, " +
-    "decisions, …) — across one workspace (or all workspaces when workspaceId is omitted). Returns " +
-    "ranked hits, each with a highlighted snippet of the match; archived pages are excluded. " +
-    "Case-insensitive: a plain query matches by word PREFIX (so \"concur\" finds \"concurrency\"); " +
-    "a query using web operators (quoted \"phrases\", OR, -excluded) is matched whole-word.",
+    "decisions, …) — within ONE workspace. Returns ranked hits, each with a highlighted snippet of " +
+    "the match; archived pages are excluded. Case-insensitive: a plain query matches by word PREFIX " +
+    "(so \"concur\" finds \"concurrency\"); a query using web operators (quoted \"phrases\", OR, " +
+    "-excluded) is matched whole-word. Workspace-scoped by design (ADR-30: cross-workspace operations " +
+    "are an admin/system affordance) — pass `workspaceId`.",
   inputSchema: obj(
     {
       query: str("Words to find in page content. Plain words match case-insensitively by prefix; quoted phrases, OR, and -term are honored."),
-      workspaceId: { type: ["string", "null"], description: "Restrict to one workspace, or null for all." },
+      workspaceId: STR,
       limit: { type: ["number", "null"], description: "Max hits to return, a positive integer (default 20)." },
     },
-    ["query"],
+    ["query", "workspaceId"],
   ),
   write: false,
   async handle(args, ctx) {
@@ -922,22 +918,14 @@ const searchTool: WikiTool = {
     if (index === undefined) return { text: "Search is not configured on this server.", data: [] };
 
     const query = reqStr(args, "query");
-    const oneWs = optStrOrNull(args, "workspaceId");
+    const ws = asWorkspaceId(reqStr(args, "workspaceId"));
     // Only a positive number is a meaningful limit; anything else falls back to the
     // index default (the index also clamps defensively before the value reaches SQL).
     const limit = typeof args.limit === "number" && args.limit >= 1 ? Math.floor(args.limit) : undefined;
 
-    let workspaces: WorkspaceId[];
-    if (oneWs !== null) {
-      await awaitSearchConsistency(index, ctx, asWorkspaceId(oneWs));
-      workspaces = [asWorkspaceId(oneWs)];
-    } else {
-      await awaitAllSearchConsistency(index, ctx);
-      workspaces = (await ctx.readModel.listWorkspaces()).map((w) => w.id as WorkspaceId);
-    }
-
-    const hits = await index.query(workspaces, query, limit !== undefined ? { limit } : undefined);
-    const lines = hits.map((h) => `- [${h.workspaceId}] ${h.title} (${h.type}) ${h.pageId}\n    ${h.snippet}`);
+    await awaitSearchConsistency(index, ctx, ws);
+    const hits = await index.query([ws], query, limit !== undefined ? { limit } : undefined);
+    const lines = hits.map((h) => `- ${h.title} (${h.type}) ${h.pageId}\n    ${h.snippet}`);
     return { text: hits.length === 0 ? "No matches." : lines.join("\n"), data: hits };
   },
 };

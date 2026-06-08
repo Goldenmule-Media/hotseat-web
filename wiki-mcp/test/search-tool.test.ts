@@ -160,9 +160,9 @@ describe("search tool — full-text over page content", () => {
     expect(none.text).toBe("No matches.");
     expect(none.data).toEqual([]);
 
-    // Cross-workspace (workspaceId omitted) still finds the body match.
-    const all = await tools.get("search")!.handle({ query: "gamma" }, ctx(s));
-    expect((all.data as Array<{ pageId: string }>).map((h) => h.pageId)).toContain(p1);
+    // BODY word match within the workspace (gamma lives only in p1's body).
+    const gamma = await tools.get("search")!.handle({ query: "gamma", workspaceId: wsId }, ctx(s));
+    expect((gamma.data as Array<{ pageId: string }>).map((h) => h.pageId)).toContain(p1);
 
     // Archiving removes the page from results.
     await tools.get("archivePage")!.handle({ workspaceId: wsId, pageId: p1 }, ctx(s));
