@@ -32,6 +32,12 @@ export interface FsmGraphEdge {
   readonly cls: EdgeClass;
   /** When `cls === "blocked"`, the precondition reason (from the overlay's `unmet`). */
   readonly reason?: string;
+  /**
+   * Model-declared autonomy of the edge ({@link FsmTransition.meta}.agency), independent of
+   * availability: `"agent"` = a forward edge an agent drives autonomously; `"human"` = a
+   * sign-off/decision gate a person owns; absent = an escape/backward edge.
+   */
+  readonly agency?: "agent" | "human";
 }
 
 export interface FsmGraphModel {
@@ -85,6 +91,9 @@ export function buildFsmGraph(
       source: tr.from,
       target: tr.to,
       label: tr.event,
+      // Agency is a static property of the edge — carry it for ALL edges (even inert ones)
+      // so the graph shows the whole agent/human structure at a glance, not just from here.
+      ...(tr.meta?.agency !== undefined ? { agency: tr.meta.agency } : {}),
     };
     if (tr.from !== currentStatus) return { ...base, cls: "inert" };
     const ov = byEvent.get(tr.event);

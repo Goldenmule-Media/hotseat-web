@@ -7,8 +7,8 @@ const fsm: FsmDescriptor = {
   initial: "draft",
   states: ["draft", "planning", "building", "review", "shipped", "abandoned"],
   transitions: [
-    { from: "draft", event: "beginPlanning", to: "planning" },
-    { from: "review", event: "ship", to: "shipped" },
+    { from: "draft", event: "beginPlanning", to: "planning", meta: { agency: "agent" } },
+    { from: "review", event: "ship", to: "shipped", meta: { agency: "human" } },
     { from: "review", event: "requestChanges", to: "building" },
     { from: "review", event: "abandon", to: "abandoned" },
   ],
@@ -66,6 +66,13 @@ describe("buildFsmGraph", () => {
   it("defaults an outgoing edge with no overlay entry to available", () => {
     const model = buildFsmGraph(fsm, "review", []);
     expect(edge(model, "review", "ship").cls).toBe("available");
+  });
+
+  it("carries each edge's model-declared agency — even on inert edges — and omits it when unset", () => {
+    const model = buildFsmGraph(fsm, "review", []);
+    expect(edge(model, "review", "ship").agency).toBe("human"); // current-state edge
+    expect(edge(model, "draft", "beginPlanning").agency).toBe("agent"); // inert edge still carries agency
+    expect(edge(model, "review", "abandon").agency).toBeUndefined(); // escape edge: no agency
   });
 });
 

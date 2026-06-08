@@ -144,23 +144,34 @@ function layout(model: FsmGraphModel): { nodes: Node[]; edges: Edge[] } {
   const edges: Edge[] = model.edges.map((e) => {
     const color = EDGE_COLOR[e.cls];
     const bidirectional = directed.has(`${e.target}->${e.source}`);
+    // Agency is encoded ORTHOGONALLY to the availability colour: an icon on the label
+    // (🤖 agent / 🧑 human) plus a dashed stroke for human gates — so "who drives this
+    // edge" reads at a glance without overloading the green/amber/grey availability colour.
+    const agencyIcon = e.agency === "agent" ? "🤖 " : e.agency === "human" ? "🧑 " : "";
+    const label = `${agencyIcon}${e.cls === "blocked" ? `${e.label} 🔒` : e.label}`;
     return {
       id: e.id,
       source: e.source,
       target: e.target,
       type: "floating",
-      label: e.cls === "blocked" ? `${e.label} 🔒` : e.label,
-      // `event/from/to/cls` let onEdgeClick resolve the transition purely; `curvature`
-      // drives the floating-edge bend.
-      data: { curvature: bidirectional ? BEND : 0, event: e.label, from: e.source, to: e.target, cls: e.cls },
+      label,
+      // `event/from/to/cls` let onEdgeClick resolve the transition purely (`event` is the
+      // RAW command name, never the icon-prefixed label); `curvature` drives the bend.
+      data: { curvature: bidirectional ? BEND : 0, event: e.label, from: e.source, to: e.target, cls: e.cls, agency: e.agency },
       // Interactive edges (those leaving the current state) get a pointer + hover emphasis;
       // inert edges are explicitly marked so they can be shown as non-interactive (and so
       // we can override React Flow's default pointer cursor on them).
       className: e.cls === "inert" ? "fsm-edge-static" : "fsm-edge-interactive",
       animated: e.cls === "available",
       markerEnd: { type: MarkerType.ArrowClosed, color, width: 16, height: 16 },
-      // Clickable edges read bold and full-opacity; inert edges are thin and dimmed.
-      style: { stroke: color, strokeWidth: e.cls === "inert" ? 1.5 : 2.75, opacity: e.cls === "inert" ? 0.4 : 1 },
+      // Clickable edges read bold and full-opacity; inert edges are thin and dimmed. Human
+      // gates are dashed regardless of availability (a static "a person owns this" cue).
+      style: {
+        stroke: color,
+        strokeWidth: e.cls === "inert" ? 1.5 : 2.75,
+        opacity: e.cls === "inert" ? 0.4 : 1,
+        ...(e.agency === "human" ? { strokeDasharray: "6 4" } : {}),
+      },
     };
   });
 
@@ -268,6 +279,12 @@ function FsmGraphInner({
           <li>
             <span className="fsm-key-swatch" style={{ background: EDGE_COLOR.inert }} />
             Not reachable from here
+          </li>
+          <li>
+            <span className="fsm-key-lock" aria-hidden>🤖</span> Agent edge — the agent drives it
+          </li>
+          <li>
+            <span className="fsm-key-lock" aria-hidden>🧑</span> Human gate — a person decides (dashed)
           </li>
         </ul>
       </div>
