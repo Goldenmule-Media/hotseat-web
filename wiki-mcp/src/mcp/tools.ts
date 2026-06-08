@@ -945,56 +945,43 @@ const searchTool: WikiTool = {
 const attentionTool: WikiTool = {
   name: "attention",
   description:
-    "Cross-workspace scan for element instances a model flags as AWAITING A HUMAN — via the " +
+    "Scan ONE workspace for element instances a model flags as AWAITING A HUMAN — via the " +
     "model-declared `awaitsHuman` predicate (e.g. an escalated, still-open question). Generic: the " +
     "host carries no element-type or status vocabulary; each model decides what awaits a person. " +
-    "Fans out over every workspace the session has written so the result reflects all of its writes.",
-  inputSchema: obj(
-    { workspaceId: { type: ["string", "null"], description: "Restrict to one workspace, or null for all." } },
-    [],
-  ),
+    "Workspace-scoped by design (ADR: cross-workspace operations are an admin/system affordance, " +
+    "not a content read) — pass `workspaceId`.",
+  inputSchema: obj({ workspaceId: STR }, ["workspaceId"]),
   write: false,
   async handle(args, ctx) {
-    const oneWs = optStrOrNull(args, "workspaceId");
-    if (oneWs !== null) await awaitConsistency(ctx, asWorkspaceId(oneWs));
-    else await awaitAllConsistency(ctx);
-
-    const workspaces = oneWs !== null ? [asWorkspaceId(oneWs)] : (await ctx.readModel.listWorkspaces()).map((w) => w.id as WorkspaceId);
-    const waiting: Array<{ workspaceId: string; pageId: string; pageTitle: string; itemId: string; sectionKey: string; field: string; status?: string }> = [];
-    // Trade-off: going through the engine's generic `awaitsHuman` keeps the host free of any
-    // element-type vocabulary, but a null-workspace scan opens a hot handle per workspace
-    // (one fold each) — heavier than the old pure-SQL scan, and on a >32-workspace catalog
-    // it can churn the write-handle LRU. Acceptable for v1 (single-writer host); revisit by
-    // evaluating the predicate over the read-model JSONB if it becomes hot.
-    for (const ws of workspaces) {
-      const handle = await ctx.engine.open(ws);
-      const pages = await ctx.readModel.listPages(ws);
-      const token = ctx.tokens.consistentWith(ctx.sessionId, ws);
-      const opts = token !== undefined ? { consistentWith: token } : undefined;
-      for (const p of pages) {
-        if (p.archived === true) continue; // archived pages can't be mutated → can't be acted on
-        let view;
-        try {
-          view = await handle.page(asPageId(p.id), opts);
-        } catch (e) {
-          if (e instanceof PageNotFoundError) continue; // engine not yet caught up to a concurrent write
-          throw e;
-        }
-        for (const it of await view.attentionItems(opts)) {
-          waiting.push({
-            workspaceId: ws,
-            pageId: p.id,
-            pageTitle: p.title,
-            itemId: it.elementId,
-            sectionKey: it.sectionKey,
-            field: it.field,
-            ...(it.status !== undefined ? { status: it.status } : {}),
-          });
-        }
+    const ws = asWorkspaceId(reqStr(args, "workspaceId"));
+    await awaitConsistency(ctx, ws);
+    const handle = await ctx.engine.open(ws);
+    const pages = await ctx.readModel.listPages(ws);
+    const token = ctx.tokens.consistentWith(ctx.sessionId, ws);
+    const opts = token !== undefined ? { consistentWith: token } : undefined;
+    const waiting: Array<{ pageId: string; pageTitle: string; itemId: string; sectionKey: string; field: string; status?: string }> = [];
+    for (const p of pages) {
+      if (p.archived === true) continue; // archived pages can't be mutated → can't be acted on
+      let view;
+      try {
+        view = await handle.page(asPageId(p.id), opts);
+      } catch (e) {
+        if (e instanceof PageNotFoundError) continue; // engine not yet caught up to a concurrent write
+        throw e;
+      }
+      for (const it of await view.attentionItems(opts)) {
+        waiting.push({
+          pageId: p.id,
+          pageTitle: p.title,
+          itemId: it.elementId,
+          sectionKey: it.sectionKey,
+          field: it.field,
+          ...(it.status !== undefined ? { status: it.status } : {}),
+        });
       }
     }
     const lines = waiting.map(
-      (q) => `- [${q.workspaceId}] ${q.pageTitle}: ${q.itemId} (${q.sectionKey}.${q.field})${q.status !== undefined ? ` [${q.status}]` : ""}`,
+      (q) => `- ${q.pageTitle}: ${q.itemId} (${q.sectionKey}.${q.field})${q.status !== undefined ? ` [${q.status}]` : ""}`,
     );
     return { text: waiting.length === 0 ? "Nothing awaiting human attention." : lines.join("\n"), data: waiting };
   },
