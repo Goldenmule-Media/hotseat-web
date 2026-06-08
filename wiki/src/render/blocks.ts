@@ -1,5 +1,5 @@
 /**
- * Block/inline render — the fixed normal-form walk (structured-content §3.1, §10).
+ * Block/inline render — the fixed normal-form walk.
  * Pure identity projection of the block/inline tree; no Markdown formatter runs.
  * Inputs are assumed already in block normal form (validated at ingestion).
  */

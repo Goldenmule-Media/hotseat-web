@@ -1,5 +1,5 @@
 /**
- * Snapshot round-trip integration test (DESIGN §8.3 / §17; BUILD_NOTES §9).
+ * Snapshot round-trip integration test.
  *
  * Builds a real workspace (via `createTestWiki`), captures its authoritative
  * event log, and asserts the two snapshot invariants:
@@ -150,7 +150,7 @@ describe("snapshot round-trip & fold equivalence", () => {
   it("folding only the tail onto the snapshot equals folding the whole log onto it (idempotent skip)", () => {
     // Folding the tail-only slice vs. folding the whole log (with skip) onto the
     // same snapshot must agree — the version-≤ skip is the only thing that makes
-    // the coarse-cursor read safe (DESIGN §8.3).
+    // the coarse-cursor read safe.
     const full = foldWorkspace(events, registry);
 
     const snapshotIndex = Math.floor(events.length / 3);

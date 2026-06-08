@@ -1,5 +1,5 @@
 /**
- * The built-in TS/JS analyzer (structured-content §11, wiki-mcp §6.2). Asserts the
+ * The built-in TS/JS analyzer. Asserts the
  * `ILanguageAnalyzer` contract over a sample TS snippet with nested declarations:
  * symbols carry name/kind/container + a `[defStart, defEnd)` offset range that slices
  * back to the declaration text; references are identifier occurrences keyed by name.

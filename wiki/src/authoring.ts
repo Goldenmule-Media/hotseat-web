@@ -1,7 +1,7 @@
 /**
- * Public **authoring API** for page-type plugins (structured-content §9). External
- * schema packages — `wiki-models` and any third-party model bundle — author page
- * types against THIS surface only, never the engine's internal module paths.
+ * Public **authoring API** for page-type plugins. External schema packages —
+ * `wiki-models` and any third-party model bundle — author page types against THIS
+ * surface only, never the engine's internal module paths.
  *
  * Re-exports: the declarative combinators (`definePageType`/`t`/`arg`), the Zod
  * schema adapter (`zodSchema`/`z`), the `InvariantViolationError`, and the engine's

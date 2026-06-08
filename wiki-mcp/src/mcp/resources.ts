@@ -1,12 +1,12 @@
 /**
- * `wiki://` MCP resources served from the SQL read model (DESIGN §6.1).
+ * `wiki://` MCP resources served from the SQL read model.
  *
  * Two resource shapes, both under the configured namespace `ns`:
  *  - `wiki://{ns}/workspace/{id}` — the workspace rendered as Markdown (its page
  *    tree, via the engine renderer);
  *  - `wiki://{ns}/page/{workspaceId}/{pageId}` — a single page rendered as Markdown.
  *
- * Reads are token-gated by the session's high-water marks (DESIGN §6.2), same as the
+ * Reads are token-gated by the session's high-water marks, same as the
  * read tools. We expose a fixed `list` (every workspace) plus a `read` that parses a
  * concrete URI and renders it. `server.ts` wires these to the MCP resource request
  * handlers. The URI parsing is the load-bearing contract here; rendering reuses the
@@ -104,7 +104,7 @@ function parseUri(uri: string, namespace: string): ParsedUri {
 /**
  * Read a `wiki://` resource: render the workspace tree or a single page to Markdown
  * via the hot engine handle, token-gated by the session's high-water mark on that
- * workspace (DESIGN §6.2).
+ * workspace.
  */
 export async function readResource(uri: string, ctx: WikiResourceContext): Promise<WikiResourceContents> {
   const parsed = parseUri(uri, ctx.namespace);

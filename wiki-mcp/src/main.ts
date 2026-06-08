@@ -1,16 +1,15 @@
 /**
- * The `wiki-mcp` library API (DESIGN §6, §7, §8, ADR-M5). The standalone `bin`
- * wrapper lives in `./bin` — kept SEPARATE so a host that bundles this module
- * (`wiki-server` inlines it from source, DESIGN §10) does not drag in a self-exec
- * guard that would auto-boot a second, rogue server.
+ * The `wiki-mcp` library API (ADR-M5). The standalone `bin` wrapper lives in
+ * `./bin` — kept SEPARATE so a host that bundles this module (`wiki-server`
+ * inlines it from source) does not drag in a self-exec guard that would auto-boot
+ * a second, rogue server.
  *
  * `createWikiMcp(config)` assembles the whole runtime: the embedded write-side
- * engine (hot-handle LRU, DESIGN §7), the durable SQL read model + its migrations
- * (DESIGN §5), the projection tailer that keeps SQL current off the engine's live
- * tail (DESIGN §5.1), and the MCP server (tools + resources + per-session token
- * management, DESIGN §6). The host (`wiki-server`) calls this and injects its
- * consolidating {@link Logger} (DESIGN §8/§9); a `child` scope is used per subsystem
- * so logs are attributable.
+ * engine (hot-handle LRU), the durable SQL read model + its migrations, the
+ * projection tailer that keeps SQL current off the engine's live tail, and the MCP
+ * server (tools + resources + per-session token management). The host
+ * (`wiki-server`) calls this and injects its consolidating {@link Logger}; a
+ * `child` scope is used per subsystem so logs are attributable.
  *
  * The default `main()` resolves config from flags/env (a console logger) and starts
  * over stdio — the standalone path. A host normally builds {@link WikiMcpConfig} +
@@ -43,11 +42,11 @@ export type { ModelRegistryEvent, BundleInfo } from "./models/registry.js";
 /**
  * Everything `createWikiMcp` needs: the resolved wire {@link WikiMcpConfig}, the
  * engine-shaped extras the host supplies directly (page types + deterministic
- * services), the injected {@link Logger}, and the MCP transport (DESIGN §6.1).
+ * services), the injected {@link Logger}, and the MCP transport.
  */
 export interface CreateWikiMcpOptions {
   readonly config: WikiMcpConfig;
-  /** The page types this instance understands (DESIGN §5.1, ADR-M3). */
+  /** The page types this instance understands (ADR-M3). */
   readonly pageTypes: EngineConfig["pageTypes"];
   /** Injected ISO-8601 clock (determinism/testing); engine-defaulted otherwise. */
   readonly clock?: () => string;
@@ -55,16 +54,16 @@ export interface CreateWikiMcpOptions {
   readonly ids?: () => string;
   /** Default `actor` stamped on event metadata. */
   readonly actor?: string;
-  /** Hot-handle LRU bound (`IWikiConfig.cache.maxWorkspaces`, DESIGN §7). */
+  /** Hot-handle LRU bound (`IWikiConfig.cache.maxWorkspaces`). */
   readonly cache?: EngineConfig["cache"];
-  /** The injected host logger (DESIGN §9); defaults to a console logger standalone. */
+  /** The injected host logger; defaults to a console logger standalone. */
   readonly logger?: Logger;
-  /** Where the MCP server listens (DESIGN §6.1). @default stdio */
+  /** Where the MCP server listens. @default stdio */
   readonly transport?: McpTransport;
   /**
    * Catalog discovery poll interval (ms): the live tail subscribes per workspace for
    * data, and polls the catalog at this cadence only to attach workspaces created
-   * later by other clients (DESIGN §5.1, §9.3). @default 1000
+   * later by other clients. @default 1000
    */
   readonly discoverPollMs?: number;
 }
@@ -86,7 +85,7 @@ export interface WikiMcp {
 }
 
 /**
- * Assemble and start a wiki-mcp runtime (DESIGN §7): open + migrate the SQL store,
+ * Assemble and start a wiki-mcp runtime: open + migrate the SQL store,
  * build the read model, build the embedded engine, start the projection tailer
  * (event-driven live tail — subscribe + notify + discovery poll), and start the MCP
  * server on the chosen transport.
@@ -172,14 +171,14 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
     }
   };
 
-  // Start the EVENT-DRIVEN live tail (DESIGN §5.1): per-workspace `subscribe` for
-  // external events + the host's `notify` for local writes (wired into the MCP server
-  // below) + a low-frequency catalog discovery poll. `start` does the initial catch-up.
+  // Start the EVENT-DRIVEN live tail: per-workspace `subscribe` for external events
+  // + the host's `notify` for local writes (wired into the MCP server below) + a
+  // low-frequency catalog discovery poll. `start` does the initial catch-up.
   const discoverOpts = options.discoverPollMs !== undefined ? { discoverPollMs: options.discoverPollMs } : {};
   const stopTail = await projection.start(source, discoverOpts);
 
   // Boot reconcile for render sinks that can lag a current read model (the Markdown-disk
-  // mirror): self-heal the output directory against the stream head (DESIGN §5.1).
+  // mirror): self-heal the output directory against the stream head.
   if (config.markdown?.enabled === true) {
     await projection.reconcileSinks(source);
   }
@@ -210,7 +209,7 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
     namespace: config.namespace,
     logger: logger.child?.({ subsystem: "mcp" }) ?? logger,
     // A local commit doesn't fan out to its own handle's subscribers, so push each
-    // write tool's workspace to the tailer for prompt read-your-writes (DESIGN §5.1/§6.2).
+    // write tool's workspace to the tailer for prompt read-your-writes.
     onWrite: (workspace) => projection.notify(workspace),
   });
   await server.start(transport);
@@ -242,7 +241,7 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
  * stdio. Invoked by the `./bin` entry; production runs through a host that supplies
  * its page-type set via {@link createWikiMcp}. NOTE: there is intentionally no
  * `import.meta.url` self-exec guard here — it lives in `./bin`, so bundling this
- * library into a host never auto-starts it (DESIGN §10).
+ * library into a host never auto-starts it.
  */
 export async function main(argv = process.argv.slice(2), env = process.env): Promise<void> {
   const config = resolveConfig(argv, env);

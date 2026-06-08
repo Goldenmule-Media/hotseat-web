@@ -23,7 +23,7 @@ export const TestingPlan = definePageType({
       // engine gates content edits per OP, so freezing the set here does NOT freeze
       // result-recording: markCasePassed/markCaseFailed are element-FSM transitions
       // (no content op), so they stay legal in `ready` and the brief's `allCasesPassed`
-      // ship gate is reachable (feature-review Item 5).
+      // ship gate is reachable.
       required: true,
       mutableIn: ["draft"],
       fields: { items: { kind: "list", element: "case" } },

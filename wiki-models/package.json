@@ -2,7 +2,7 @@
   "name": "wiki-models",
   "version": "0.1.0",
   "type": "module",
-  "description": "Runtime-loadable page-type schema bundles for the wiki engine. Authored against wiki's public authoring API; loaded by reference (dynamic import) and hot-reloaded — see DESIGN.md.",
+  "description": "Runtime-loadable page-type schema bundles for the wiki engine. Authored against wiki's public authoring API; loaded by reference (dynamic import) and hot-reloaded.",
   "exports": {
     "./feature": "./src/feature/index.ts",
     "./toc": "./src/toc/index.ts",

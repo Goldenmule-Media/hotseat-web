@@ -1,8 +1,8 @@
 /**
- * The configurable Markdown render READ MODEL (structured-content §8). Walks a
+ * The configurable Markdown render READ MODEL. Walks a
  * page's section tree in render-config order and dispatches on each target field's
  * field-kind to a per-kind default renderer. Pure over folded state + static config,
- * so equal state renders byte-identically (§10). The per-type `render` is retired.
+ * so equal state renders byte-identically. The per-type `render` is retired.
  */
 import type {
   ComputedFlag,
@@ -48,7 +48,7 @@ export function buildRenderCtx(state: IWorkspaceState, _registry: Registry): IRe
   };
 }
 
-/** Resolve a ref target to its render-derived label (§3.2). Workspace-scoped: a
+/** Resolve a ref target to its render-derived label. Workspace-scoped: a
  * cross-page ref (`target.page` set) resolves against that page; same-page otherwise. */
 function makeLabelResolver(state: IWorkspaceState, page: IPageNode, ctx: IRenderCtx): LabelResolver {
   const ownerOf = (p: PageId | undefined): IPageNode | undefined =>
@@ -146,7 +146,7 @@ function fillTitleTemplate(template: string, node: IPageNode): string {
   });
 }
 
-/** Context for COMPUTED checkboxes (feature-review Item 3): the page being rendered, the
+/** Context for COMPUTED checkboxes: the page being rendered, the
  *  render ctx (cross-page reads), and the page type's named {@link ComputedFlag}s. */
 interface ComputedCtx {
   readonly page: DeepReadonly<PageState>;
@@ -235,7 +235,7 @@ export function renderPage(state: IWorkspaceState, pageId: PageId, registry: Reg
 
   for (const sr of config.sections) {
     // A DERIVED checklist: a model projection of folded state (e.g. the plan's steps +
-    // local progress), not a page field (feature-review Item 2). Rendered byte-stably.
+    // local progress), not a page field. Rendered byte-stably.
     if (sr.derived !== undefined) {
       const items = def.derived?.[sr.derived]?.(computed.page, ctx) ?? [];
       const body = items.length === 0 ? (sr.placeholder ?? placeholder()) : renderDerivedList(items);
@@ -303,7 +303,7 @@ function renderChildList(id: PageId, ctx: IRenderCtx): string {
  * carrying a boolean `checked` renders a checkbox (a derived CHECKLIST, e.g. the plan's
  * steps); a row without one renders a plain bullet (a table-of-contents entry / group row).
  * `level` indents nested rows two spaces per level. Pure + deterministic — the order and
- * shape are exactly the projection's, so equal state renders byte-identically (§10).
+ * shape are exactly the projection's, so equal state renders byte-identically.
  */
 function renderDerivedList(items: readonly DerivedItem[]): string {
   return items

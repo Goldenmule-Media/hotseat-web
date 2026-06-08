@@ -1,13 +1,13 @@
 /**
- * The guarded code-edit command + the CONTENT-HASH PRECONDITION (structured-content
- * §5/§11, Phase 3). Drives the REAL engine over an in-memory DurableStreamTestServer:
+ * The guarded code-edit command + the CONTENT-HASH PRECONDITION.
+ * Drives the REAL engine over an in-memory DurableStreamTestServer:
  *
  *  1. The generated `apply<Section><Field>Edits` command applies a precomputed
  *     `TextEdit[]` to a `code` field, recomputes the hash, folds, and renders byte-stably.
  *  2. A WRONG `expectedHash` is REJECTED with the typed {@link StaleEditError}; the
  *     correct current hash APPLIES (the precondition re-runs inside the decide window).
  *  3. History records the SEMANTIC label (`label` arg, default = command name).
- *  4. The same machinery reaches a `code` BLOCK inside a `blocks` field (§3.1).
+ *  4. The same machinery reaches a `code` BLOCK inside a `blocks` field.
  *
  * The engine NEVER parses: it only replays the host-computed edits under the precondition.
  */
@@ -130,7 +130,7 @@ describe("guarded code-edit command + content-hash precondition", () => {
     expect(after.hash).toBe(contentHash(after.source));
   });
 
-  it("edits a code BLOCK inside a blocks field under the same precondition (§3.1)", async () => {
+  it("edits a code BLOCK inside a blocks field under the same precondition", async () => {
     const blockSrc = `function helper(){ return helper(); }\n`;
     await ws.mutate(page, "addCodeBlock", { source: blockSrc, lang: "ts", id: "blk-1" });
     const state = await (await ws.page(page)).state();

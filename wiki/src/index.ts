@@ -1,5 +1,5 @@
 /**
- * PUBLIC BARREL (DESIGN §10.7). The single public entry point of the `wiki`
+ * PUBLIC BARREL. The single public entry point of the `wiki`
  * package: re-exports the entry function, the public type surface, the authoring
  * helpers, the FSM guard helpers, the typed error hierarchy, and the Zod adapter.
  *
@@ -7,16 +7,16 @@
  * deliberately NOT re-exported here — those are implementation details behind the
  * interfaces in `./api`. The `Registry` is the one exception: not in this barrel, but
  * exposed via the `wiki/registry` subpath so an external read model can build one and
- * reuse the public `foldWorkspace` (DESIGN §8.6).
+ * reuse the public `foldWorkspace`.
  */
 
 // ── entry point ───────────────────────────────────────────────────────────────
 export { createWiki } from "./core/wiki";
 
-// ── public, pure fold (for external read models — DESIGN §8.6, §16.1) ──────────
+// ── public, pure fold (for external read models) ──────────
 export { foldWorkspace, applyWorkspace } from "./core/workspace";
 
-// ── consistency-token codec (the §8.6 token SHAPE; for external read models) ───
+// ── consistency-token codec (the token SHAPE; for external read models) ───
 // An external IReadModel (e.g. wiki-mcp's SQL projection) must encode/decode the
 // SAME opaque `{ workspaceId, version }` token the engine's writes return, so the
 // codec is part of the public surface alongside the token type.
@@ -59,7 +59,7 @@ export type {
   JsonSchema,
   DeepReadonly,
   Unsubscribe,
-  // CQRS consistency tokens & read model (§8.6)
+  // CQRS consistency tokens & read model
   ConsistencyToken,
   Committed,
   IReadOpts,
@@ -73,7 +73,7 @@ export type {
   IPageNode,
   IWorkspaceState,
   PageState,
-  // content tree (§2, §3)
+  // content tree
   SectionId,
   BlockId,
   ISection,

@@ -1,17 +1,17 @@
 /**
- * Per-session high-water {@link ConsistencyToken} per workspace (DESIGN §6.2,
- * ADR-M4) — the bookkeeping that gives an MCP agent automatic read-your-writes.
+ * Per-session high-water {@link ConsistencyToken} per workspace (ADR-M4) — the
+ * bookkeeping that gives an MCP agent automatic read-your-writes.
  *
  * Each MCP **session** holds the max token from every write tool it ran (including
- * the void structural commands, DESIGN §3.2). A **write tool** records the engine's
+ * the void structural commands). A **write tool** records the engine's
  * returned token here; a **single-workspace read** passes that workspace's
  * high-water token as `consistentWith`, waiting for the SQL read model to catch up
  * before serving; a **cross-workspace read** fans out over every workspace the
- * session has written (DESIGN §6.2). Sessions are independent, and a reconnect
+ * session has written. Sessions are independent, and a reconnect
  * (new session id) starts with no marks — subsequent reads are eventually
  * consistent until the session writes again.
  *
- * Token comparison is **within a workspace only** (DESIGN §3.1): we decode each to
+ * Token comparison is **within a workspace only**: we decode each to
  * `{ workspaceId, version }` and keep the max version per workspace. No host
  * clock / RNG here — pure bookkeeping over opaque tokens.
  */
@@ -24,7 +24,7 @@ class SessionMarks {
 
   /**
    * Record a write's token, advancing this workspace's high-water mark (monotonic;
-   * a lower/equal token is ignored, DESIGN §6.2).
+   * a lower/equal token is ignored).
    */
   record(token: ConsistencyToken): void {
     const { workspaceId, version } = decodeToken(token);
@@ -47,7 +47,7 @@ class SessionMarks {
 }
 
 /**
- * Tracks high-water tokens for every live session (DESIGN §6.2). The MCP server
+ * Tracks high-water tokens for every live session. The MCP server
  * keys sessions by the transport's `sessionId`; a stdio session (no id) collapses to
  * a single ambient session, which is correct for the one-agent-per-process stdio
  * case.
@@ -58,8 +58,8 @@ export class SessionTokenManager {
   private static readonly AMBIENT = "@ambient";
 
   /**
-   * Record a write tool's returned token against a session's high-water marks
-   * (DESIGN §6.2). Called by the write tool path after the engine commits.
+   * Record a write tool's returned token against a session's high-water marks.
+   * Called by the write tool path after the engine commits.
    */
   recordWrite(sessionId: string | undefined, token: ConsistencyToken): void {
     this.marksFor(sessionId).record(token);
@@ -68,7 +68,7 @@ export class SessionTokenManager {
   /**
    * The high-water token for `workspace` in this session — passed as
    * `consistentWith` on a single-workspace read so it waits for the read model to
-   * apply the session's own writes (DESIGN §6.2). `undefined` ⇒ no write yet ⇒ an
+   * apply the session's own writes. `undefined` ⇒ no write yet ⇒ an
    * eventually-consistent read.
    */
   consistentWith(sessionId: string | undefined, workspace: WorkspaceId): ConsistencyToken | undefined {
@@ -78,13 +78,13 @@ export class SessionTokenManager {
   /**
    * Every workspace the session has written, each with its high-water token — a
    * cross-workspace read (`listWorkspaces` — the catalog/discovery affordance) fans out and waits on all of
-   * them so the result reflects ALL the session's writes (DESIGN §6.2).
+   * them so the result reflects ALL the session's writes.
    */
   allWritten(sessionId: string | undefined): readonly ConsistencyToken[] {
     return this.sessions.get(sessionId ?? SessionTokenManager.AMBIENT)?.all() ?? [];
   }
 
-  /** Drop a session's marks (a reconnect resets read-your-writes, DESIGN §6.2). */
+  /** Drop a session's marks (a reconnect resets read-your-writes). */
   forget(sessionId: string | undefined): void {
     this.sessions.delete(sessionId ?? SessionTokenManager.AMBIENT);
   }

@@ -1,6 +1,6 @@
 /**
- * Type-aware single-source rename in the TS/JS analyzer (structured-content §5/§11/§12,
- * Phase 3). Built on a single-file `ts.Program` + checker, so:
+ * Type-aware single-source rename in the TS/JS analyzer (Phase 3). Built on a
+ * single-file `ts.Program` + checker, so:
  *
  *  - occurrences that BIND to the target declaration are renamed (def + uses);
  *  - a SHADOWING inner binding of the same name is NOT renamed (scope-correct);

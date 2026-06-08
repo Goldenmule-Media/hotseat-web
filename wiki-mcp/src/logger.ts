@@ -1,14 +1,14 @@
 /**
- * Logging seam (DESIGN §9). `wiki-mcp` owns NO log API of its own — it emits all
+ * Logging seam. `wiki-mcp` owns NO log API of its own — it emits all
  * telemetry (projection progress, tail lag, MCP requests, errors) through a
  * {@link Logger} the host injects (`createWikiMcp({ logger })`), so the host can
- * consolidate it with the stream host's logs and expose it via the host's log API
- * ([wiki-server DESIGN §8.5]). When run standalone, the {@link consoleLogger}
+ * consolidate it with the stream host's logs and expose it via the host's log API.
+ * When run standalone, the {@link consoleLogger}
  * default writes structured lines to the console.
  */
 
 /**
- * Minimal structured logger interface (DESIGN §9). Three leveled methods plus an
+ * Minimal structured logger interface. Three leveled methods plus an
  * optional `child` for scoped/bound fields (e.g. one logger per workspace tail).
  */
 export interface Logger {

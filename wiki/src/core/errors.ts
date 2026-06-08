@@ -1,5 +1,5 @@
 /**
- * Typed error hierarchy (DESIGN §14). Every error extends {@link WikiError}, so a
+ * Typed error hierarchy. Every error extends {@link WikiError}, so a
  * consumer can catch the base or narrow on `code` / `instanceof`. No I/O here.
  */
 
@@ -198,7 +198,7 @@ export class PreconditionUnmetError extends WikiError {
 }
 
 /**
- * Thrown when a code edit carries a CONTENT-HASH PRECONDITION (structured-content §5)
+ * Thrown when a code edit carries a CONTENT-HASH PRECONDITION
  * that no longer holds: the target `code` field/block's CURRENT content hash differs
  * from the `expectedHash` the edits were computed against. Distinct from the
  * stream-level {@link ConcurrencyError} (OCC `Stream-Seq`): this is a *semantic* stale
@@ -254,7 +254,7 @@ export class BatchCommandError extends WikiError {
 
 /**
  * Thrown when a token-gated read's `waitFor` exceeds its timeout — the read model
- * hasn't applied the requested {@link ConsistencyToken} in time (DESIGN §8.6/§14).
+ * hasn't applied the requested {@link ConsistencyToken} in time.
  * Carries the awaited `token` + `timeoutMs` so a caller can retry or fall back to an
  * eventually-consistent read (omit the token). `token` is a `ConsistencyToken`
  * (an opaque `string`, declared in `api.ts`); kept as `string` here to keep this
@@ -294,7 +294,7 @@ export class ReadModelClosedError extends WikiError {
 
 /**
  * Thrown to a token-gated search when the best-effort search-index reindex for that
- * workspace FAILED to reach the awaited version (DESIGN — search seam). The durable
+ * workspace FAILED to reach the awaited version. The durable
  * write itself succeeded; only the derived full-text index could not apply, so the
  * caller should retry the search or read without a consistency token (an
  * eventually-consistent, token-less search still works). Distinct from

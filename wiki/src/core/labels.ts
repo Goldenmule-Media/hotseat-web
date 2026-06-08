@@ -1,8 +1,8 @@
 /**
- * Display-label helpers (feature-review.md Item 4). The friendly default title for a
+ * Display-label helpers. The friendly default title for a
  * page is its type def's `label`, falling back to a deterministic title-cased type id.
  * Pure and locale-INDEPENDENT (no `toLocale*`) so it respects the engine's
- * byte-identical-render rule (§10).
+ * byte-identical-render rule.
  */
 
 /**

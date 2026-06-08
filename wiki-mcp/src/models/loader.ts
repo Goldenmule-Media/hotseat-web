@@ -1,6 +1,6 @@
 /**
  * Dynamic model-bundle loader (wiki-mcp ADR-M6). Loads a built model bundle — ESM with
- * the engine inlined (wiki-models/DESIGN.md §5) — by path and returns its page-type defs.
+ * the engine inlined — by path and returns its page-type defs.
  *
  * To HOT-RELOAD edited code, each load appends a cache-busting query (`?v=<token>`) to the
  * module URL: a plain `import()` of the same path returns Node's CACHED module, so the

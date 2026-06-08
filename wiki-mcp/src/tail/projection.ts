@@ -1,25 +1,25 @@
 /**
- * The projection service / tailer (DESIGN §5.1, §7). Keeps the SQL read model
+ * The projection service / tailer. Keeps the SQL read model
  * current by projecting each workspace's events; for every commit it drives
  * {@link applyCommit} (fold → serialize → SQL), advancing `applied_version` and
  * notifying the {@link SqlReadModel} so parked `waitFor`s wake.
  *
- * The live tail ({@link start}) is **event-driven** (DESIGN §5.1), not a hot poll.
+ * The live tail ({@link start}) is **event-driven**, not a hot poll.
  * Each workspace is fed by THREE signals:
  *
  *  1. **subscribe** — the engine handle's stream tail fans out EXTERNAL events
- *     (writes by *other* clients, §8.4), which schedule a (coalesced) re-projection;
+ *     (writes by *other* clients), which schedule a (coalesced) re-projection;
  *  2. **{@link notify}** — a local commit does NOT fan out to its own handle's
  *     subscribers, so THIS process pushes its own writes in explicitly (the host
  *     calls `notify(workspace)` after each write tool);
  *  3. a low-frequency **discovery** poll — the namespace catalog is not publicly
- *     subscribable (§9.3), so we periodically list workspaces and attach any new
+ *     subscribable, so we periodically list workspaces and attach any new
  *     ones; per-workspace DATA flows via (1)/(2), so the poll only discovers.
  *
  * The raw Durable Streams wire format is engine-internal, so this takes an injected
  * {@link EventSource} seam: anything that yields a workspace's contiguous history
  * (and optionally a live `subscribe`) drives the same apply path. A poison event the
- * configured page types can't fold **halts** that workspace's projection (§9) rather
+ * configured page types can't fold **halts** that workspace's projection rather
  * than corrupting SQL.
  */
 import {
@@ -55,16 +55,16 @@ const DEFAULT_DISCOVER_POLL_MS = 1000;
  * the projection can fold it with the engine reducer (ADR-M3).
  */
 export interface EventSource {
-  /** Discover the workspaces currently known to the namespace catalog (§5.1). */
+  /** Discover the workspaces currently known to the namespace catalog. */
   listWorkspaces(): Promise<readonly WorkspaceId[]>;
   /**
    * Read the workspace's full event history (optionally only events past
    * `sinceVersion`, though a re-read of all is always safe — the fold + offset
-   * skip make apply idempotent, §5.1).
+   * skip make apply idempotent).
    */
   readHistory(workspace: WorkspaceId, sinceVersion: number): Promise<readonly IEventEnvelope[]>;
   /**
-   * Live tail (§5.1): invoke `onChange` whenever NEW external events land for
+   * Live tail: invoke `onChange` whenever NEW external events land for
    * `workspace`, returning an unsubscribe. Optional — a source without it (a scripted
    * test source) is driven by {@link ProjectionService.drain}/`notify` alone.
    */
@@ -85,7 +85,7 @@ export class ProjectionService {
   private fingerprint: string;
   /**
    * The {@link LanguageRegistry} the symbol/reference projection consults per `code`
-   * field/block `lang` (§6.2/§7). Defaults to the built-in (TS/JS) registry; analyzers
+   * field/block `lang`. Defaults to the built-in (TS/JS) registry; analyzers
    * swap re-projects the symbol/reference indexes only, never the write model.
    */
   private readonly languages: LanguageRegistry;
@@ -139,7 +139,7 @@ export class ProjectionService {
   /**
    * Project a single {@link Commit} into SQL (fold → serialize → advance offset),
    * then notify the read model so parked `waitFor`s wake. On an unfoldable event
-   * (`UnknownPageTypeError`) the workspace's projection **halts** (§9): the read
+   * (`UnknownPageTypeError`) the workspace's projection **halts**: the read
    * model rejects its `waitFor`s non-retryably and the error is re-thrown for the
    * caller to log. Returns the new applied version.
    */
@@ -322,7 +322,7 @@ export class ProjectionService {
   /**
    * Project one workspace from its `applied_version` to head — the body of
    * {@link drain} and of the live tail. Idempotent: events `<= applied_version` are
-   * skipped (§5.1), so a re-run with no new events is a no-op.
+   * skipped, so a re-run with no new events is a no-op.
    */
   async projectWorkspace(source: EventSource, workspace: WorkspaceId): Promise<void> {
     const since = await this.appliedVersionOf(workspace);
@@ -382,7 +382,7 @@ export class ProjectionService {
     this.logger.info("reprojected read model", { workspaces: all.size, halted, fingerprint: this.fingerprint });
   }
 
-  // ── live tail (DESIGN §5.1) ─────────────────────────────────────────────────────
+  // ── live tail ───────────────────────────────────────────────────────────────────
 
   /**
    * Start the **event-driven** live tail. Discovers + attaches every current
@@ -410,7 +410,7 @@ export class ProjectionService {
 
   /**
    * Push a (coalesced) projection of `workspace` — called for THIS process's own
-   * writes, which a local commit does not fan out to stream subscribers (§8.4).
+   * writes, which a local commit does not fan out to stream subscribers.
    * Attaches the workspace first if the tail hasn't seen it yet. No-op before
    * {@link start}.
    */
@@ -505,7 +505,7 @@ export class ProjectionService {
     }
   }
 
-  /** The registry fingerprint stamped on offsets (§5.3) — exposed for rebuild checks. */
+  /** The registry fingerprint stamped on offsets — exposed for rebuild checks. */
   get registryFingerprint(): string {
     return this.fingerprint;
   }

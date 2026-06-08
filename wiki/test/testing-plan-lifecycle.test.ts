@@ -1,6 +1,5 @@
 /**
- * Regression: testing-plan "author the set, then record results" lifecycle
- * (feature-review.md Item 5).
+ * Regression: testing-plan "author the set, then record results" lifecycle.
  *
  * The bug: `cases` was `mutableIn: ["draft"]`, and `markCasePassed`/`markCaseFailed`
  * TARGET the `cases` section, so they inherited that section's CONTENT write-gate.
@@ -9,7 +8,7 @@
  * permanently unreachable — a silent deadlock that the worked-example never caught
  * (it marks a case while the plan is still `draft`).
  *
- * The cure (Item 5b, per-op gating) gates each OP by its nature: a content edit
+ * The cure (per-op gating) gates each OP by its nature: a content edit
  * (addCase) is gated by the section's `mutableIn`, but an element-FSM transition
  * (markCasePassed) is gated only by the element FSM. So after `markReady`:
  *   - recording results MUST work (the deadlock is gone), and

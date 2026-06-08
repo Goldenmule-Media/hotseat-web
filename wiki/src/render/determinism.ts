@@ -1,9 +1,9 @@
 /**
- * Pure canonicalization helpers for deterministic Markdown rendering (DESIGN §11,
- * BUILD_NOTES §7). Equal input → byte-identical output. No wall clock, no randomness,
+ * Pure canonicalization helpers for deterministic Markdown rendering. Equal input →
+ * byte-identical output. No wall clock, no randomness,
  * no external lookups — every function here is a total, pure transform of its arguments.
  *
- * Formatting contract (DESIGN §11.3): fixed heading levels, `\n` line endings, a single
+ * Formatting contract: fixed heading levels, `\n` line endings, a single
  * blank line between blocks, exactly one trailing newline, no trailing whitespace.
  */
 
@@ -35,7 +35,7 @@ export function heading(level: number, text: string): string {
  * (no blank line between them), e.g. `section("## Summary", "Text.")` →
  * `"## Summary\nText."`. Sections are emitted as a SINGLE block so {@link joinBlocks}
  * places the canonical blank line BETWEEN sections, never between a heading and its
- * body (DESIGN §13.5). An empty body falls back to a {@link placeholder}.
+ * body. An empty body falls back to a {@link placeholder}.
  */
 export function section(headingLine: string, body: string): string {
   const content = body.length > 0 ? body : placeholder();
@@ -64,15 +64,14 @@ export function numbered(items: string[]): string {
 }
 
 /**
- * Canonical status badge line, e.g. `statusBadge("building")` → `"**Status:** building"`
- * (matches DESIGN §13.5).
+ * Canonical status badge line, e.g. `statusBadge("building")` → `"**Status:** building"`.
  */
 export function statusBadge(status: string): string {
   return `**Status:** ${status}`;
 }
 
 /**
- * Placeholder for an empty/optional section so diffs stay local (DESIGN §11.4).
+ * Placeholder for an empty/optional section so diffs stay local.
  * Defaults to `_None._`.
  */
 export function placeholder(text: string = "_None._"): string {

@@ -1,5 +1,5 @@
 /**
- * A static {@link MigrationProvider} (DESIGN §5.3 — Kysely migrations). The
+ * A static {@link MigrationProvider} (Kysely migrations). The
  * read model is a rebuildable cache, so migrations are few and additive; we list
  * them in code (rather than `FileMigrationProvider`) because `wiki-mcp` is
  * compiled to `dist/` and a bundled list avoids a runtime filesystem dependency.

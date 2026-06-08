@@ -1,5 +1,5 @@
 /**
- * Section-tree structural invariants (§6): unique sibling key, acyclic tree,
+ * Section-tree structural invariants: unique sibling key, acyclic tree,
  * required-section non-removal, and the engine errors they raise.
  */
 import { describe, expect, it } from "vitest";

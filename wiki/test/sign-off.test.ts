@@ -1,5 +1,5 @@
 /**
- * Bundle sign-off (feature-review): shipping the brief CASCADES every pinned child to
+ * Bundle sign-off: shipping the brief CASCADES every pinned child to
  * its terminal status in one atomic commit, so the whole bundle lands aligned instead
  * of "shipped brief over draft/building children". The cascade is fully validated — a
  * child that isn't ready (here: a spec whose resolved decisions aren't all referenced)

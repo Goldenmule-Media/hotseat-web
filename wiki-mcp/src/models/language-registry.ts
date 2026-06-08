@@ -1,12 +1,12 @@
 /**
- * The runtime LanguageRegistry (structured-content §4, §11; mirrors the ModelRegistry
+ * The runtime LanguageRegistry (mirrors the ModelRegistry
  * dynamic-import pattern, ADR-M6). It maps a `code` field/block's `lang` tag to a
  * loaded {@link ILanguageAnalyzer}, or returns `undefined` when no analyzer covers
  * that language — in which case the symbol-index projector keeps its canonical-location
- * stub row (the §12 "opaque blob served verbatim" behaviour).
+ * stub row (the "opaque blob served verbatim" behaviour).
  *
  * Parsers are dependencies of the analyzer plugins, **never** of `wiki` (the engine
- * stays dep-free + deterministic, §4/§13). A built-in TS/JS analyzer is registered
+ * stays dep-free + deterministic). A built-in TS/JS analyzer is registered
  * synchronously as the default (mirroring the ModelRegistry's in-memory `register`),
  * so `get(lang)` resolves without any dynamic import for the languages it covers;
  * out-of-tree analyzers may still load lazily through {@link load}.
@@ -36,7 +36,7 @@ export interface AnalyzerSymbol {
 
 /**
  * An identifier occurrence in canonical source — a textual reference by `name`. These
- * complement the §6.3 structural `ref` cross-reference index: that one walks typed
+ * complement the structural `ref` cross-reference index: that one walks typed
  * `ref` nodes; this one is the in-source identifier index a rename/where-used reads.
  * Resolution to a specific declaration (across files/types) is Phase 3 — here a
  * reference is keyed by name + offset only.
@@ -72,7 +72,7 @@ export type RenameTarget = { readonly name: string } | { readonly offset: number
  * same-name identifiers are excluded). `unresolved` carries human-readable notes for
  * sites the analyzer could not safely rename (e.g. the target name was not found, or a
  * `newName` collision) — reported, never guessed. `oldName` echoes the resolved
- * declaration name so the host can harvest cross-field same-name candidates (§5).
+ * declaration name so the host can harvest cross-field same-name candidates.
  */
 export interface RenameResult {
   readonly oldName: string;
@@ -82,18 +82,18 @@ export interface RenameResult {
 }
 
 /**
- * The narrow per-language analyzer contract (structured-content §11; parsers are
+ * The narrow per-language analyzer contract (parsers are
  * plugin deps, never here). Every method is **pure and deterministic** — equal source
  * yields equal output — with no wall-clock or RNG, so the projection stays a pure
- * read-model derivation (§10). `parse` exposes the read-model AST; `symbols` /
- * `references` feed the §6.2/§6.3 indexes; `rename` (declared, Phase 3) returns edits
+ * read-model derivation. `parse` exposes the read-model AST; `symbols` /
+ * `references` feed the symbol/reference indexes; `rename` (declared, Phase 3) returns edits
  * the host applies as a guarded `applyTextEdits` — the analyzer never writes.
  */
 export interface ILanguageAnalyzer {
   /** Every `lang` tag this analyzer claims (e.g. `["ts","tsx","js","jsx","mjs","cjs"]`). */
   readonly langs: readonly string[];
   /**
-   * Parse canonical source into a read-model AST (derived, never stored, §4). The
+   * Parse canonical source into a read-model AST (derived, never stored). The
    * optional `lang` lets a multi-dialect analyzer pick a parse mode (e.g. tsx vs ts);
    * it is one of {@link langs} and defaults to the analyzer's primary dialect.
    */

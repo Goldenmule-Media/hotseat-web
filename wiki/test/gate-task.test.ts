@@ -1,5 +1,5 @@
 /**
- * Computed gate-tasks on the implementation-checklist (feature-review.md Item 3).
+ * Computed gate-tasks on the implementation-checklist.
  *
  * A gate-task binds to a structural fact (`meta.computed = "all-cases-passed"`). Its
  * checkbox is COMPUTED at render from the sibling testing-plan's case statuses — so it

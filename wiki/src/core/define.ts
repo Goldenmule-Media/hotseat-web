@@ -1,5 +1,5 @@
 /**
- * Authoring helper (structured-content §9). `definePageType` wraps a declarative
+ * Authoring helper. `definePageType` wraps a declarative
  * page-type spec into the opaque registration object the registry consumes
  * (`{ __def }`). It performs light shape validation only — the heavy lifting
  * (declaration validation, FSM guard, Zod arg-validation) is done at registry
@@ -33,7 +33,7 @@ export function definePageType<Status extends string = string>(
   return { __def: def };
 }
 
-/** `arg("name")` sugar — maps a command arg to a field value (§9.8). */
+/** `arg("name")` sugar — maps a command arg to a field value. */
 export function arg(name: string): { readonly __arg: string } {
   return { __arg: name };
 }

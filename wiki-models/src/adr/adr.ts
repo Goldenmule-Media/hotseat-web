@@ -1,7 +1,7 @@
 /**
  * `decision-record` page type (human label "ADR") — an Architecture Decision Record as a
  * first-class, FSM-governed wiki page. It replaces the flat ADR appendices that used to live
- * at the bottom of each package's DESIGN.md: those carried no status, no lifecycle, no link
+ * at the bottom of each package's design doc: those carried no status, no lifecycle, no link
  * from a decision to the one that revises it, and only a PER-FILE id (so `wiki-mcp` and
  * `wiki-models` could both ship an "ADR-M7"). Here every decision is one page in one global
  * "ADRs" workspace, and IDENTITY is the stable global page id. A human-friendly `ADR-N` label

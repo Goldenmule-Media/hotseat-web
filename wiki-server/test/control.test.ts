@@ -1,8 +1,8 @@
 /**
- * Log API & consolidation tests (DESIGN §8.5, §11). These drive the REAL
+ * Log API & consolidation tests. These drive the REAL
  * consolidating logger (`createLogger`) and the REAL control listener
  * (`startControlServer`) over HTTP — the same wiring `main.ts`/`startWikiServer`
- * use — and assert the §11 behaviors:
+ * use — and assert the behaviors:
  *
  *  - a record emitted via the **injected** (`mcp`-sourced) logger — the exact view
  *    `wiki-server` hands `createWikiMcp` — shows up in `GET /_server/logs`;
@@ -95,7 +95,7 @@ describe("control: /_server/logs history + consolidation", () => {
     const logger = makeLogger();
     const control = await startControl(logger);
 
-    // The exact view wiki-server hands createWikiMcp — `source: mcp` (DESIGN §8.5).
+    // The exact view wiki-server hands createWikiMcp — `source: mcp`.
     const mcpLog = logger.forSource("mcp");
     mcpLog.info("projection caught up", { workspace: "ws-1", lag: 0 });
 
@@ -148,7 +148,7 @@ describe("control: /_server/logs history + consolidation", () => {
     logger.info("hello");
 
     // The caller's last-seen boot differs → still returns what we have, tagged with
-    // THIS process's boot, so the caller knows to resync (DESIGN §8.5).
+    // THIS process's boot, so the caller knows to resync.
     const { body } = await getJson(`${control.url}/_server/logs?boot=boot-OLD`);
     expect(body.boot).toBe("boot-A");
     expect((body.records as LogRecord[]).map((r) => r.boot)).toEqual(["boot-A"]);

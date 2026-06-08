@@ -4,7 +4,7 @@
  * list elements (todo ⇄ done).
  *
  * A task may be MANUAL (hand-checked build work) or a GATE-TASK bound to a structural
- * fact via `meta.computed` (feature-review Item 3). A gate-task's checkbox is COMPUTED
+ * fact via `meta.computed`. A gate-task's checkbox is COMPUTED
  * at render from the named flag below — it cannot be hand-toggled (the engine refuses to
  * drive a computed element's FSM) and so cannot lie. Gate-tasks are pure visibility; the
  * real gate stays on the brief (e.g. `allCasesPassed` on `ship`), and the brief's
@@ -47,7 +47,7 @@ const allTestingPlanCasesPassed: ComputedFlag = (page, ctx: IRenderCtx) => {
  * on the plan step (beside its text), recorded via the plan's `markStepDone` — an element-FSM
  * transition that, like the testing-plan's `markCasePassed`, stays legal after the plan is
  * sealed. The checklist stores ZERO step state, so it cannot drift from the plan and
- * `markComplete` cannot freeze progress (feature-review Item 2). Editing the plan's steps
+ * `markComplete` cannot freeze progress. Editing the plan's steps
  * flows through automatically — this is a pure view.
  */
 const planSteps: DerivedList = (page, ctx: IRenderCtx) => {
@@ -101,7 +101,7 @@ export const ImplementationChecklist = definePageType({
     /**
      * Add a GATE-TASK whose checkbox is COMPUTED from a named flag (not hand-toggled).
      * Bound via the element's `meta.computed`; the engine renders the box from the flag
-     * and rejects any attempt to check/uncheck it (Item 3).
+     * and rejects any attempt to check/uncheck it.
      */
     addGateTask: {
       args: zodSchema(z.object({ text: z.string(), computed: z.enum(["all-cases-passed"]) })),
@@ -147,7 +147,7 @@ export const ImplementationChecklist = definePageType({
     title: "{title}",
     graphSections: false,
     sections: [
-      // Derived from the plan's steps (the canonical breakdown) + local progress — Item 2.
+      // Derived from the plan's steps (the canonical breakdown) + local progress.
       { derived: "plan-steps", heading: "Plan steps", placeholder: "_No plan steps yet._" },
       { section: "tasks", heading: "Tasks", field: "items", as: "checklist", checkedWhen: "done", item: "{text}" },
     ],

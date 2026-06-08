@@ -1,12 +1,12 @@
 /**
- * Ingestion validation + normalization (structured-content §7, §10). Pure,
+ * Ingestion validation + normalization. Pure,
  * deterministic, engine-owned. Operates on the *resulting* state, never on meaning.
  *
- * - `contentHash` — a tiny dependency-free FNV-1a hash for `code` source (§10/§13).
- * - `normalizeBlocks` — block normal form (§10): merge adjacent same-mark text,
+ * - `contentHash` — a tiny dependency-free FNV-1a hash for `code` source.
+ * - `normalizeBlocks` — block normal form: merge adjacent same-mark text,
  *   canonical-sort marks. Runs at ingestion so render is a pure identity projection.
  * - `validateSections` — field-kind grammar, no-markdown-in-text-leaf, block normal
- *   form, and ref integrity over the whole page (§7).
+ *   form, and ref integrity over the whole page.
  */
 import type {
   FieldDecl,
@@ -25,7 +25,7 @@ import { BlockNormalFormError, FieldKindError, RefIntegrityError, ValidationErro
 import type { Registry } from "./registry";
 
 // ────────────────────────────────────────────────────────────────────────────
-// Content hash (FNV-1a, 32-bit) — dependency-free, deterministic (§10)
+// Content hash (FNV-1a, 32-bit) — dependency-free, deterministic
 // ────────────────────────────────────────────────────────────────────────────
 
 export function contentHash(source: string): string {
@@ -38,7 +38,7 @@ export function contentHash(source: string): string {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Mark canonicalization (§3.2 / §10)
+// Mark canonicalization
 // ────────────────────────────────────────────────────────────────────────────
 
 /** Fixed total order: emphasis < strong < link(href) by href. */
@@ -67,7 +67,7 @@ function marksEqual(a: Mark[], b: Mark[]): boolean {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Inline / block normalization (§10) — array order, merged runs, sorted marks
+// Inline / block normalization — array order, merged runs, sorted marks
 // ────────────────────────────────────────────────────────────────────────────
 
 function normalizeInlines(inlines: IInline[]): IInline[] {
@@ -119,7 +119,7 @@ export function normalizeBlocks(blocks: IBlock[]): IBlock[] {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// no-markdown-in-text-leaf (§3.3 / §7)
+// no-markdown-in-text-leaf
 // ────────────────────────────────────────────────────────────────────────────
 
 const MARKDOWN_LEAF = /```|`|\*|_|\[[^\]]*\]\([^)]*\)|^#/m;
@@ -133,7 +133,7 @@ function assertNoMarkdownInText(value: string): void {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Block normal-form assertions (§10)
+// Block normal-form assertions
 // ────────────────────────────────────────────────────────────────────────────
 
 function assertInlineNormalForm(inlines: IInline[]): void {
@@ -191,7 +191,7 @@ function assertBlockNormalForm(block: IBlock): void {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Ref integrity (§7) — recurses into block & inline trees
+// Ref integrity — recurses into block & inline trees
 // ────────────────────────────────────────────────────────────────────────────
 
 function resolveRef(state: IWorkspaceState, page: IPageNode, target: RefTarget): boolean {
@@ -247,7 +247,7 @@ function checkBlockRefs(state: IWorkspaceState, page: IPageNode, block: IBlock):
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Field-kind grammar (§7)
+// Field-kind grammar
 // ────────────────────────────────────────────────────────────────────────────
 
 function validateField(state: IWorkspaceState, page: IPageNode, field: IField): void {
@@ -302,7 +302,7 @@ function validateSection(state: IWorkspaceState, page: IPageNode, section: ISect
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Declared-constraint validation (§6/§9.2) — required fields + scalar field schemas
+// Declared-constraint validation — required fields + scalar field schemas
 //
 // The engine auto-generates structural commands (setField / setElementField / addElement)
 // that pass caller values straight to the reducer; without this pass they would bypass a
@@ -373,7 +373,7 @@ function validateDeclaredConstraints(section: ISection, def: IPageTypeDef, type:
 }
 
 /**
- * Engine well-formedness over a page's resulting sections (§7): field-kind grammar,
+ * Engine well-formedness over a page's resulting sections: field-kind grammar,
  * no-markdown-in-text-leaf, block normal form, ref integrity (deep), PLUS the page type's
  * declared `required`/scalar-`schema` constraints (so generated structural commands can't
  * bypass them). Pure.

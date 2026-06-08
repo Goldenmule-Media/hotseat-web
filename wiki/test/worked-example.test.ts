@@ -1,5 +1,5 @@
 /**
- * Worked-example integration test (DESIGN §13.3 / §13.5; BUILD_NOTES §9).
+ * Worked-example integration test.
  *
  * Drives the FULL motivating session end-to-end against a real (in-memory)
  * DurableStreamTestServer via `createTestWiki(featurePageTypes)`:
@@ -317,8 +317,8 @@ describe("worked example: plan → build → ship a feature", () => {
     expect(await ws.toMarkdown(brief)).toBe(md);
 
     // The brief shipped, so its status badge reads "shipped"; q2 lives on the plan
-    // now, so Open questions is empty; q1 is the lone resolved question. Per
-    // DESIGN §13.5 each section heading is immediately followed by its body (no
+    // now, so Open questions is empty; q1 is the lone resolved question. Each
+    // section heading is immediately followed by its body (no
     // blank line between them), and `joinBlocks` puts exactly one blank line
     // BETWEEN blocks (and a single trailing newline). The H1 and the status badge
     // are their own blocks; each `## section` block bundles its heading + body.

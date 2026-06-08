@@ -1,5 +1,5 @@
 /**
- * Concurrency / rebase-and-retry integration test (DESIGN §15; BUILD_NOTES §9).
+ * Concurrency / rebase-and-retry integration test.
  *
  * Two INDEPENDENT wiki instances are bound to the SAME server url + namespace
  * (via `wikiOn`), each opening the SAME workspace → two separate in-memory

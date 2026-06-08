@@ -2,7 +2,7 @@ import { defineConfig } from "tsdown";
 
 /**
  * Build each model bundle to a SELF-CONTAINED, runtime-loadable ESM file under `dist/`
- * (wiki-models/DESIGN.md §5, wiki-mcp ADR-M6). A bundle is authored against `wiki`'s
+ * (wiki-mcp ADR-M6). A bundle is authored against `wiki`'s
  * public authoring API (consumed as TS *source* with extensionless imports), so tsdown
  * (Rolldown) **inlines the engine authoring code from source** and emits a stand-alone
  * `dist/<bundle>.js` that `wiki-mcp`'s `ModelRegistry` can `import()` at runtime.

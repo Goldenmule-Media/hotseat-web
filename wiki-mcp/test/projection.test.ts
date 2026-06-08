@@ -1,5 +1,5 @@
 /**
- * Projection correctness + CQRS token semantics (DESIGN §11, §3.3, §5).
+ * Projection correctness + CQRS token semantics.
  *
  * Drives the real engine to produce a workspace history, captures it via
  * `handle.history()`, then folds + serializes it into an in-memory PGlite read
@@ -10,7 +10,7 @@
  *     never semantically diverge from the write model (ADR-M3).
  *  2. `waitFor(token)` parks until the projection applies that version, then
  *     resolves; `appliedToken` advances exactly to the applied head; and a token
- *     past the applied head times out — the CQRS bargain (§3.3).
+ *     past the applied head times out — the CQRS bargain.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -120,7 +120,7 @@ describe("SQL read model: fold → serialize → SQL", () => {
 
     // the engine's own fold of the same history is the source of truth
     const folded = foldWorkspace(history, registry);
-    // applied position == stream length == the write token's version (§3.1).
+    // applied position == stream length == the write token's version.
     expect(applied).toBe(folded.version);
 
     // ── pages match (including fields JSONB) ──

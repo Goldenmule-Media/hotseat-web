@@ -2,8 +2,8 @@
  * INTERNAL types (never re-exported raw). The persistence contract, projection
  * cache, snapshot/catalog serialization shapes, and the event-log interface.
  *
- * Persistence model (verified empirically against @durable-streams 0.2.6/0.3.5 —
- * see BUILD_NOTES.md): the real client does NOT split a posted JSON array into
+ * Persistence model (verified empirically against @durable-streams 0.2.6/0.3.5):
+ * the real client does NOT split a posted JSON array into
  * per-element messages, and `Stream-Seq` enforces strict-greater optimistic
  * concurrency. Therefore each COMMAND's events are stored as ONE message holding
  * a JSON array (`IEventEnvelope[]`), appended with `seq = pad(expectedVersion)`.
@@ -54,11 +54,11 @@ export interface SerializedSnapshot {
   /** DS resume cursor at the snapshot point (coarse; fold stays idempotent). */
   readonly cursor: string;
   readonly state: SerializedWorkspaceState;
-  /** Page-type version fingerprint; a mismatch invalidates the snapshot (DESIGN §8.3/§8.5). */
+  /** Page-type version fingerprint; a mismatch invalidates the snapshot. */
   readonly fingerprint: string;
 }
 
-/** Namespace catalog stream events (DESIGN §9.3). Secondary index, not a consistency boundary. */
+/** Namespace catalog stream events. Secondary index, not a consistency boundary. */
 export type CatalogEvent =
   | { readonly type: "WorkspaceRegistered"; readonly id: WorkspaceId; readonly name: string; readonly at: string }
   | { readonly type: "WorkspaceRenamed"; readonly id: WorkspaceId; readonly name: string; readonly at: string }
@@ -66,7 +66,7 @@ export type CatalogEvent =
   | { readonly type: "WorkspaceUnarchived"; readonly id: WorkspaceId; readonly at: string };
 
 /**
- * The persistence port (DESIGN §9). The ONLY thing that talks to Durable Streams
+ * The persistence port. The ONLY thing that talks to Durable Streams
  * is the concrete `EventLog` implementing this; everything else depends on the
  * interface. Promote/extend only when a real second backend appears (ADR-001).
  */
@@ -116,7 +116,7 @@ export function isStaleAppend(e: unknown): e is StaleAppendError {
   return typeof e === "object" && e !== null && (e as { __stale?: unknown }).__stale === true;
 }
 
-/** Per-open-workspace in-memory projection (DESIGN §8.4). */
+/** Per-open-workspace in-memory projection. */
 export interface ProjectionEntry {
   state: IWorkspaceState;
   /** DS cursor for the last event folded into `state`. */

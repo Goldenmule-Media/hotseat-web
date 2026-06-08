@@ -86,8 +86,8 @@ export const ImplementationPlan = definePageType({
       },
     },
     // Per-step progress — element-FSM transitions (no content op), so they remain legal after
-    // `markReady` seals the plan, exactly like the testing-plan's markCasePassed (feature-review
-    // Item 5). The checklist projects these statuses as its derived "Plan steps" checklist.
+    // `markReady` seals the plan, exactly like the testing-plan's markCasePassed. The checklist
+    // projects these statuses as its derived "Plan steps" checklist.
     markStepDone: {
       args: zodSchema(z.object({ stepId: z.string() })),
       target: { section: "steps", field: "items", element: { idArg: "stepId" } },

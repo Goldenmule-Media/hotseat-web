@@ -1,5 +1,5 @@
 /**
- * `feature-spec` page type (feature-review.md Item 1) — the question-free DECIDED
+ * `feature-spec` page type — the question-free DECIDED
  * source of truth, authored FROM the brief's resolved questions. The brief stays the
  * deliberation record (its Q&A is the trail); the spec is the clean, current design:
  * flowing prose + data-model code blocks + inline `ref`s back to the decisions they

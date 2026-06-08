@@ -1,6 +1,6 @@
 /**
- * The derived-projection MCP read tools (wiki-mcp §6, structured-content §11/§12):
- * `outline`, `symbols`, `references`. Same rig as mcp-tools.test.ts — the REAL engine
+ * The derived-projection MCP read tools: `outline`, `symbols`, `references`.
+ * Same rig as mcp-tools.test.ts — the REAL engine
  * over an in-memory Durable Streams server + in-memory PGlite read model, driven through
  * the tool handlers. Asserts:
  *

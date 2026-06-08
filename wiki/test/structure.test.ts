@@ -1,5 +1,5 @@
 /**
- * Structural handler / invariant unit tests (BUILD_NOTES §9, DESIGN §17).
+ * Structural handler / invariant unit tests.
  *
  * The structure handlers are PURE functions over a folded `IWorkspaceState`, parsed
  * args, injected `services`, and the `registry`; they return the `DomainEvent`s the

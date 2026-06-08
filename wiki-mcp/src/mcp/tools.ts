@@ -1,17 +1,17 @@
 /**
- * The engine command catalog + read queries turned into MCP tools (DESIGN §6.1).
+ * The engine command catalog + read queries turned into MCP tools.
  *
  * - **Write tools.** The structural commands (`createPage`, `reparent`, `link`, …)
  *   get hand-authored JSON-Schema inputs (they aren't covered by
- *   `IPageView.describeMutations()` today, DESIGN §6.1). Page-scoped content/status
+ *   `IPageView.describeMutations()` today). Page-scoped content/status
  *   mutations flow through a single `mutatePage` tool whose `args` are validated by
  *   the engine's own Zod `argsSchema`; a companion `describeMutations` tool reports
  *   the page's CURRENTLY-legal command set + each command's `argsSchema` (straight
  *   from `IPageView.describeMutations()`), which is how an agent discovers the exact
- *   per-page input schema before calling `mutatePage` (DESIGN §6.1 "only-legal-actions").
+ *   per-page input schema before calling `mutatePage` ("only-legal-actions").
  * - **Read tools.** `getPage`, `renderPage`, `tree`, `listWorkspaces`, `search`,
- *   `attention` — backed by the SQL read model (DESIGN §5), token-gated per the
- *   session's high-water marks (DESIGN §6.2). `nextActions` additionally rolls the
+ *   `attention` — backed by the SQL read model, token-gated per the
+ *   session's high-water marks. `nextActions` additionally rolls the
  *   engine's per-page `describeMutations`/`attentionItems` up across a subtree to
  *   self-direct an agent (do / blocked / humanGates / attention).
  *
@@ -19,8 +19,8 @@
  * handler). `server.ts` registers them on the low-level MCP `Server` so the engine's
  * RAW JSON Schema is advertised verbatim (the high-level `McpServer.registerTool`
  * wants Zod, which we don't have — we have JSON Schema from the engine). The handler
- * receives the calling session id so the token manager can thread read-your-writes
- * (DESIGN §6.2). Write tools advance the session's high-water mark and echo the
+ * receives the calling session id so the token manager can thread read-your-writes.
+ * Write tools advance the session's high-water mark and echo the
  * token in their result so a client MAY also thread it.
  */
 import {
@@ -43,7 +43,7 @@ import type { SessionTokenManager } from "./tokens.js";
 
 /**
  * The shared default {@link LanguageRegistry} (built-in TS/JS analyzer, stateless/pure)
- * the semantic-operation write tools consult to compute rename edits host-side (§11).
+ * the semantic-operation write tools consult to compute rename edits host-side.
  */
 const LANGUAGES: LanguageRegistry = createLanguageRegistry();
 
@@ -70,7 +70,7 @@ export interface WikiToolContext {
    */
   readonly searchIndex?: ISearchIndex;
   readonly tokens: SessionTokenManager;
-  /** The MCP session id (undefined for stdio) — the token-manager key (DESIGN §6.2). */
+  /** The MCP session id (undefined for stdio) — the token-manager key. */
   readonly sessionId: string | undefined;
 }
 
@@ -127,7 +127,7 @@ function optStrOrNull(args: Record<string, unknown>, key: string): string | null
 
 /**
  * Wait for the session's high-water token on `workspace` before a single-workspace
- * read, so the read reflects the session's own writes (DESIGN §6.2). A
+ * read, so the read reflects the session's own writes. A
  * `ConsistencyTimeoutError` from `waitFor` propagates to a structured tool error in
  * `server.ts` (the agent can retry or read stale).
  */
@@ -138,7 +138,7 @@ async function awaitConsistency(ctx: WikiToolContext, workspace: WorkspaceId): P
 
 /**
  * Fan out a cross-workspace read's consistency wait over every workspace the session
- * has written (DESIGN §6.2): the result reflects ALL of the session's writes.
+ * has written: the result reflects ALL of the session's writes.
  */
 async function awaitAllConsistency(ctx: WikiToolContext): Promise<void> {
   const tokens = ctx.tokens.allWritten(ctx.sessionId);
@@ -474,8 +474,8 @@ const createWorkspaceTool: WikiTool = {
   write: true,
   async handle(args, ctx) {
     const handle = await ctx.engine.createWorkspace({ name: reqStr(args, "name") });
-    // `IWiki.createWorkspace` returns a handle, not a Committed token (DESIGN §3.2 is
-    // about write-tool returns). Derive the high-water token from the workspace head:
+    // `IWiki.createWorkspace` returns a handle, not a Committed token. Derive the
+    // high-water token from the workspace head:
     // stream length == head event `version` + 1 == the projection's applied position.
     const history = await handle.history();
     const head = history.length === 0 ? 0 : history[history.length - 1].version + 1;
@@ -673,7 +673,7 @@ const describeMutationsTool: WikiTool = {
   description:
     "List the commands a page can run right now: each with its JSON-Schema args and " +
     "whether it is currently legal in the page's status. Use this to discover the exact " +
-    "input schema before calling mutatePage (DESIGN §6.1).",
+    "input schema before calling mutatePage.",
   inputSchema: obj({ workspaceId: STR, pageId: STR }, ["workspaceId", "pageId"]),
   write: false,
   async handle(args, ctx) {
@@ -884,7 +884,7 @@ const renderPageTool: WikiTool = {
   async handle(args, ctx) {
     const ws = asWorkspaceId(reqStr(args, "workspaceId"));
     // Render via the hot engine handle; gate it on the session's high-water token so
-    // it reflects the session's own writes (DESIGN §6.2). The engine read is
+    // it reflects the session's own writes. The engine read is
     // token-aware via `consistentWith`.
     const token = ctx.tokens.consistentWith(ctx.sessionId, ws);
     const handle = await ctx.engine.open(ws);
@@ -976,7 +976,7 @@ const attentionTool: WikiTool = {
 };
 
 // ────────────────────────────────────────────────────────────────────────────
-// Derived-projection read tools (outline · symbols · references, DESIGN §6)
+// Derived-projection read tools (outline · symbols · references)
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -994,7 +994,7 @@ interface OutlineNode {
 const outlineTool: WikiTool = {
   name: "outline",
   description:
-    "A page's section tree (key, name, order) from the outline projection (DESIGN §6.1) — " +
+    "A page's section tree (key, name, order) from the outline projection — " +
     "no parsing, straight from folded state. Token-gated for read-your-writes.",
   inputSchema: obj({ workspaceId: STR, pageId: STR }, ["workspaceId", "pageId"]),
   write: false,
@@ -1030,7 +1030,7 @@ const symbolsTool: WikiTool = {
   name: "symbols",
   description:
     "Symbols (declarations) indexed from `code` fields/blocks across a workspace " +
-    "(DESIGN §6.2), optionally scoped to one page and/or filtered by exact name or kind. " +
+    "optionally scoped to one page and/or filtered by exact name or kind. " +
     "Each symbol carries its kind, container, and [defStart, defEnd) offset range into " +
     "canonical source. A `code` field in an unanalyzed language yields only a location " +
     "stub (no name/kind). Token-gated for read-your-writes.",
@@ -1069,7 +1069,7 @@ const referencesTool: WikiTool = {
   name: "references",
   description:
     "In-source references (identifier occurrences) to a given symbol name across a " +
-    "workspace's `code` fields/blocks (DESIGN §6.2), optionally scoped to one page. Each " +
+    "workspace's `code` fields/blocks, optionally scoped to one page. Each " +
     "reference carries its [start, end) offset. Resolution to a specific declaration " +
     "(cross-file / type-aware) is deferred; this is the by-name where-used index. " +
     "Token-gated for read-your-writes.",
@@ -1097,7 +1097,7 @@ const referencesTool: WikiTool = {
 };
 
 // ────────────────────────────────────────────────────────────────────────────
-// Semantic operations (write) — renameSymbol (DESIGN §5/§11, Phase 3)
+// Semantic operations (write) — renameSymbol (Phase 3)
 // ────────────────────────────────────────────────────────────────────────────
 
 /** Capitalize the first letter (mirrors the engine's generated-command derivation). */
@@ -1109,7 +1109,7 @@ function cap(s: string): string {
  * The engine's generated guarded code-edit command name for a `(section, field)`
  * target — `apply<Section><Field>Edits` for a `code` field, or
  * `apply<Section><Field>BlockEdits` when addressing a `code` block in a `blocks`
- * field (mirrors `registry.deriveGenerated`, §9.4).
+ * field (mirrors `registry.deriveGenerated`).
  */
 function codeEditCommand(section: string, field: string, onBlock: boolean): string {
   return onBlock ? `apply${cap(section)}${cap(field)}BlockEdits` : `apply${cap(section)}${cap(field)}Edits`;
@@ -1137,7 +1137,7 @@ interface CodeLocation {
 /**
  * Locate a `code` field (or a `code` block by id, when `block` is given) in a page's
  * serialized section tree, returning its canonical source + hash. The canonical source
- * is the write-model source of truth (§4); we read it from the read-model page row.
+ * is the write-model source of truth; we read it from the read-model page row.
  */
 function locateCode(sections: SectionJson[], section: string, field: string, block: string | undefined): CodeLocation | undefined {
   const sec = sections.find((s) => s.key === section);
@@ -1195,7 +1195,7 @@ const renameSymbolTool: WikiTool = {
     }
 
     // Read the CURRENT canonical source + hash for this code field/block, gated on the
-    // session's own writes so we rename against the latest committed source (§6.2).
+    // session's own writes so we rename against the latest committed source.
     await awaitConsistency(ctx, ws);
     const located = await readCode(ctx, ws, pageId, section, field, block);
     if (located === undefined) {
@@ -1320,8 +1320,8 @@ async function readCode(
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
- * The full tool catalog (DESIGN §6.1 "the full catalog is exposed; the engine's
- * guard rejects illegal calls with structured errors the agent self-corrects on").
+ * The full tool catalog: the full catalog is exposed; the engine's guard rejects
+ * illegal calls with structured errors the agent self-corrects on.
  */
 export function wikiTools(): readonly WikiTool[] {
   return [
@@ -1351,7 +1351,7 @@ export function wikiTools(): readonly WikiTool[] {
     renderPageTool,
     searchTool,
     attentionTool,
-    // derived projections (§6)
+    // derived projections
     outlineTool,
     symbolsTool,
     referencesTool,

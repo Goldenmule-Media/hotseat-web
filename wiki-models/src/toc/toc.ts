@@ -4,7 +4,7 @@
  * The list of entries is a DERIVED VIEW of `ctx.childrenOf(self)` (the `contents`
  * {@link DerivedList} below), so it is NEVER hand-duplicated and can't drift: add / move /
  * rename / remove a child and the TOC re-renders to match, with no write to the TOC page
- * (the same discipline as the implementation-checklist's "Plan steps", feature-review Item 2).
+ * (the same discipline as the implementation-checklist's "Plan steps").
  *
  * What the page stores is ONLY the value-add an automatic child list can't express:
  *  - `groups` — named buckets with an optional blurb, in display order;

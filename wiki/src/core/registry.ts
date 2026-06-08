@@ -1,5 +1,5 @@
 /**
- * Page-type Registry (structured-content §6, §9). Built from the wiki config's
+ * Page-type Registry. Built from the wiki config's
  * `pageTypes`. Validates declarations mechanically, memoizes page/element FSM
  * guards, derives the generated structural command set, and produces a stable
  * `fingerprint()` for snapshot invalidation. Pure: no I/O, no host clock/RNG.
@@ -66,7 +66,7 @@ export class Registry {
     }
   }
 
-  // ── declaration validation (§6/§9.6) ──────────────────────────────────────
+  // ── declaration validation ─────────────────────────────────────────────────
 
   private validateDef(def: IPageTypeDef): void {
     const issues: { path: (string | number)[]; message: string }[] = [];
@@ -97,7 +97,7 @@ export class Registry {
     };
     for (const [key, sd] of Object.entries(def.sections)) validateSectionDecl(key, sd);
 
-    // ── static reachability guards (§6; feature-review Item 5) ────────────────
+    // ── static reachability guards ───────────────────────────────────────────
     // Turn whole classes of silent, load-after deadlocks into load-time errors.
     const reachableFrom = (initial: string, transitions: readonly ITransition[]): Set<string> => {
       const seen = new Set<string>([initial]);
@@ -169,7 +169,7 @@ export class Registry {
     }
   }
 
-  // ── generated command derivation (§9.4 / §9.8) ────────────────────────────
+  // ── generated command derivation ──────────────────────────────────────────
 
   private deriveGenerated(def: IPageTypeDef): Map<string, GeneratedCommand> {
     const out = new Map<string, GeneratedCommand>();
@@ -195,14 +195,14 @@ export class Registry {
           const setName = `set${cap(key)}${cap(fk)}`;
           out.set(setName, { name: setName, kind: "setField", section: key, field: fk });
           // A `code` field also gets a guarded code-edit command: it applies a
-          // precomputed `TextEdit[]` under a content-hash precondition (§5/§11). The
+          // precomputed `TextEdit[]` under a content-hash precondition. The
           // host (wiki-mcp) computes the edits (rename, etc.) and calls this command.
           if (fd.kind === "code") {
             const editName = `apply${cap(key)}${cap(fk)}Edits`;
             out.set(editName, { name: editName, kind: "applyTextEdits", section: key, field: fk });
           }
           // A `blocks` field may hold `code` blocks — the same guarded code-edit
-          // command, addressing one block by id (§3.1: a code block IS a code field).
+          // command, addressing one block by id (a code block IS a code field).
           if (fd.kind === "blocks") {
             const editName = `apply${cap(key)}${cap(fk)}BlockEdits`;
             out.set(editName, {

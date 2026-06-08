@@ -1,5 +1,5 @@
 /**
- * Structural command handlers + invariants (DESIGN §6.2, BUILD_NOTES §5).
+ * Structural command handlers + invariants.
  *
  * Each handler is a PURE function over the current workspace `state`, the parsed
  * `args`, the injected `services` (clock + id generation), and the `registry`.
@@ -231,7 +231,7 @@ export const createPage: StructureHandler = (state, args, services, registry) =>
     // Required children are created atomically as pinned children, recursively. Each
     // gets a FRIENDLY default title (the child def's `label`, else a title-cased type
     // id) instead of the raw slug — so the tree / breadcrumb / rendered H1 read
-    // "Implementation plan" rather than "implementation-plan" (feature-review Item 4).
+    // "Implementation plan" rather than "implementation-plan".
     for (const childType of def.requiredChildren ?? []) {
       const childDef = registry.page(childType);
       emitPage(childType, childDef.label ?? titleCase(childType), id, true);
@@ -445,7 +445,7 @@ export const unlink: StructureHandler = (state, args) => {
  * Move a list element (by id) from one page's `(section, field)` list to another's,
  * atomically. The element must exist on `from` (else {@link ItemNotFoundError}).
  * Emits one `SectionOpsApplied{removeElement}` on `from` + one
- * `SectionOpsApplied{addElement}` on `to` in ONE batch (§2.3).
+ * `SectionOpsApplied{addElement}` on `to` in ONE batch.
  */
 export const moveItem: StructureHandler = (state, args) => {
   const { from, to, section, field, itemId } = args as {

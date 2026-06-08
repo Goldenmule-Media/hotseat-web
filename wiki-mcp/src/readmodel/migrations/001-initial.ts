@@ -1,5 +1,5 @@
 /**
- * Initial read-model schema (DESIGN §5.2). Core relational tables + JSONB for the
+ * Initial read-model schema. Core relational tables + JSONB for the
  * engine's pluggable, type-specific data. Pure Postgres DDL via Kysely's schema
  * builder, so it runs identically on PGlite (local) and pg (prod) — `jsonb` is a
  * raw `sql` type expression because Kysely has no first-class JSONB data-type tag.

@@ -1,5 +1,5 @@
 /**
- * Zod adapter (BUILD_NOTES §8, DESIGN §8). Wraps a `z.ZodType` as an {@link ISchema}:
+ * Zod adapter. Wraps a `z.ZodType` as an {@link ISchema}:
  * `parse()` validates and throws {@link ValidationError} on failure (issues mapped from
  * Zod's `error.issues`); `toJsonSchema()` exports a JSON Schema for LLM/tooling surfaces.
  * Re-exports `z` so page authors can build their command/field schemas from one import.

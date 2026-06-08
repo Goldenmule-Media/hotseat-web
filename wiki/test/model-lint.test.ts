@@ -1,6 +1,6 @@
 /**
- * Load-time static guards in the registry (feature-review.md Item 5, the
- * static-analysis-over-structure guardrail). A model whose write-gates or element
+ * Load-time static guards in the registry (the static-analysis-over-structure
+ * guardrail). A model whose write-gates or element
  * FSMs encode an unreachable/undrivable state is rejected at REGISTRATION, turning a
  * silent runtime deadlock into a load-time `ValidationError`.
  */

@@ -1,5 +1,5 @@
 /**
- * In-house FSM guard (DESIGN §7.2). typescript-fsm-inspired, ZERO dependency.
+ * In-house FSM guard. typescript-fsm-inspired, ZERO dependency.
  * Pure functions over a declarative transition table. The event log — not any
  * `_current` field — is the source of truth for status; this only answers
  * "is this transition legal?" and "what's the resulting status?".
@@ -52,7 +52,7 @@ export function makeGuard<S extends string, C extends string>(
   };
 }
 
-/** Render a transition table as a Mermaid `stateDiagram-v2` (DESIGN §11, dev docs). */
+/** Render a transition table as a Mermaid `stateDiagram-v2`. */
 export function renderMermaid<S extends string, C extends string>(
   transitions: readonly ITransition<S, C>[],
   title?: string,

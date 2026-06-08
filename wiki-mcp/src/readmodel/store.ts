@@ -1,5 +1,5 @@
 /**
- * Kysely store wiring (DESIGN §5.3). Builds a `Kysely<ReadModelDatabase>` over the
+ * Kysely store wiring. Builds a `Kysely<ReadModelDatabase>` over the
  * configured dialect — embedded {@link PGliteDialect} locally, the built-in
  * `PostgresDialect` (node-postgres) in production — and runs the bundled
  * migrations to latest. Same Postgres SQL both places (dev/prod parity); the choice
@@ -24,8 +24,8 @@ export interface ReadModelStore {
 
 /**
  * Build a `Kysely<ReadModelDatabase>` for the given {@link DbConfig}. For
- * `pglite`, an in-memory store is used unless `dataDir` is set (then it persists,
- * §5.3). For `pg`, a node-postgres `Pool` is opened against `connectionString`.
+ * `pglite`, an in-memory store is used unless `dataDir` is set (then it persists).
+ * For `pg`, a node-postgres `Pool` is opened against `connectionString`.
  * Does NOT run migrations — call {@link migrateToLatest} after building.
  */
 export function buildStore(config: DbConfig): ReadModelStore {
@@ -42,7 +42,7 @@ export function buildStore(config: DbConfig): ReadModelStore {
 }
 
 /**
- * Run all bundled migrations to latest (DESIGN §5.3 / §9 — migrations at startup).
+ * Run all bundled migrations to latest (migrations at startup).
  * Throws on the first failed migration so a bad schema fails closed rather than
  * serving a half-built read model.
  */

@@ -1,5 +1,5 @@
 /**
- * Workspace aggregate reducer / event router (DESIGN §6.2, §8.2, §8.5; BUILD_NOTES §2).
+ * Workspace aggregate reducer / event router.
  *
  * `foldWorkspace` rebuilds `IWorkspaceState` from an event sequence: it asserts
  * `version` contiguity (fail fast on a gap), skips events already covered by a
@@ -28,7 +28,7 @@ import { applyOps, materializeSectionFields } from "./operations";
 import type { Registry } from "./registry";
 
 // ────────────────────────────────────────────────────────────────────────────
-// Structural / workspace event taxonomy (BUILD_NOTES §2)
+// Structural / workspace event taxonomy
 // ────────────────────────────────────────────────────────────────────────────
 
 /** Event `type`s handled directly by `applyWorkspace` (never routed to a page). */
@@ -71,7 +71,7 @@ interface PageCreatedPayload {
   readonly parentId?: PageId | null;
   readonly title: string;
   readonly pinned?: boolean;
-  /** Pre-minted ids for the required sections so the reducer stays id-free (§2.4). */
+  /** Pre-minted ids for the required sections so the reducer stays id-free. */
   readonly requiredSectionIds?: Record<string, SectionId>;
   /** Engine-minted `serial` field values, keyed `section → field → value`. Computed at
    *  decide time from committed state (so the fold stays a pure replay), applied over the
@@ -161,7 +161,7 @@ export function emptyWorkspace(created: IEventEnvelope): IWorkspaceState {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Upcasting (DESIGN §8.5)
+// Upcasting
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -255,7 +255,7 @@ function applyStructural(
       const def = registry.page(p.type);
       const parentKey: PageId | RootId = p.parentId ?? ROOT;
 
-      // Auto-materialize required sections empty, keyed by declared key (§6), with
+      // Auto-materialize required sections empty, keyed by declared key, with
       // pre-minted ids from the event payload so the reducer stays id-free.
       const sections: ISection[] = [];
       const required = registry.requiredSectionsOf(p.type);
@@ -424,7 +424,7 @@ function applyContent(
  * Fold an event sequence into workspace state. With no `from` snapshot,
  * `events[0]` must be `WorkspaceCreated`. Asserts `version` contiguity (throws on
  * a gap) but SKIPS any event with `version <= fromVersion` so a coarse-cursor
- * snapshot read stays idempotent (DESIGN §8.3). Returns the folded state.
+ * snapshot read stays idempotent. Returns the folded state.
  *
  * @param from optional snapshot state to fold the tail onto.
  * @param fromVersion the workspace version a `from` snapshot already covers; events

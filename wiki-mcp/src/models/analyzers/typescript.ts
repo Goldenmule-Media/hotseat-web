@@ -1,5 +1,5 @@
 /**
- * The built-in TypeScript / JavaScript analyzer (structured-content §11, wiki-mcp §6.2).
+ * The built-in TypeScript / JavaScript analyzer.
  *
  * A pure, deterministic symbol/reference indexer over canonical `code` source, built on
  * the **`typescript` compiler API** — `ts.createSourceFile` + a single deterministic
@@ -7,7 +7,7 @@
  * by-name *reference* index are syntactic, so a lone `SourceFile` parse suffices (and
  * keeps it cheap, side-effect-free, and version-pinned to the installed `typescript`).
  *
- * Determinism (§10): the only inputs are the source string and the constant
+ * Determinism: the only inputs are the source string and the constant
  * `ScriptTarget`/`ScriptKind` we pick from `lang`; no wall-clock, no RNG, no filesystem.
  * Offsets are 0-based UTF-16 code-unit offsets into the canonical source (the units
  * `ts.Node` positions and `String.slice` share), so a `[defStart, defEnd)` slice is the
@@ -15,7 +15,7 @@
  * reference binds to) is **Phase 3** — here references are keyed by name + offset.
  *
  * `typescript` is a host dependency of `wiki-mcp` and stays EXTERNAL in the tsdown
- * build (never bundled); `wiki` never sees it (§4/§13).
+ * build (never bundled); `wiki` never sees it.
  */
 import ts from "typescript";
 
@@ -78,8 +78,8 @@ function virtualFileName(lang: string): string {
 }
 
 /**
- * Build a SINGLE-FILE `ts.Program` + type-checker over `source` (structured-content
- * §5/§11/§12). No filesystem, no tsconfig, no lib resolution — a fixed in-memory host
+ * Build a SINGLE-FILE `ts.Program` + type-checker over `source`. No filesystem, no
+ * tsconfig, no lib resolution — a fixed in-memory host
  * serving exactly one file, with `noResolve` + `noLib` so the build is deterministic,
  * cheap, and independent of the runtime's `typescript` lib layout. The checker resolves
  * which DECLARATION an identifier binds to WITHIN this one source unit (so a shadowing
@@ -140,7 +140,7 @@ class TypeScriptAnalyzer implements ILanguageAnalyzer {
   readonly langs = LANGS;
 
   parse(source: string, lang = "ts"): unknown {
-    // The read-model AST (derived, never stored §4) — parsed with the lang's script kind.
+    // The read-model AST (derived, never stored) — parsed with the lang's script kind.
     return sourceFileFor(source, lang);
   }
 
@@ -247,7 +247,7 @@ class TypeScriptAnalyzer implements ILanguageAnalyzer {
   }
 
   /**
-   * TYPE-AWARE single-source rename (structured-content §5/§11, Phase 3). Builds a
+   * TYPE-AWARE single-source rename (Phase 3). Builds a
    * single-file `ts.Program` + checker, resolves `target` to its declaration symbol,
    * then renames EXACTLY the identifier occurrences that bind to that same symbol —
    * so a SHADOWING inner binding of the same name, and an unrelated same-name symbol,
@@ -255,7 +255,7 @@ class TypeScriptAnalyzer implements ILanguageAnalyzer {
    * notes (target not found, `newName` collides with an existing binding). Deterministic
    * and pure: the only inputs are `source`, `target`, `newName`, and the constant
    * compiler options; no wall-clock, RNG, or filesystem. The analyzer NEVER writes —
-   * the host applies these edits via a guarded `applyTextEdits` (engine §5).
+   * the host applies these edits via a guarded `applyTextEdits`.
    */
   rename(source: string, target: RenameTarget, newName: string, lang = "ts"): RenameResult {
     const { program, sourceFile } = singleFileProgram(source, lang);

@@ -1,6 +1,6 @@
 /**
- * The MCP surface layer (DESIGN §6): tools wired to the engine + SQL read model, the
- * per-session token manager (§6.2), and `wiki://` resources (§6.1).
+ * The MCP surface layer: tools wired to the engine + SQL read model, the
+ * per-session token manager, and `wiki://` resources.
  *
  * Drives the REAL engine against an in-memory Durable Streams server + an in-memory
  * PGlite read model (the same rig as projection.test.ts), then exercises the tool

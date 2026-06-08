@@ -1,5 +1,5 @@
 /**
- * The symbol/reference projection (wiki-mcp §6.2, structured-content §11/§12). Drives
+ * The symbol/reference projection. Drives
  * the real engine to author a page with a `code` FIELD and a `code` BLOCK inside a
  * `blocks` field, projects the folded history through the LanguageRegistry, and asserts:
  *

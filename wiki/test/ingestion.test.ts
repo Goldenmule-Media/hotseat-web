@@ -1,5 +1,5 @@
 /**
- * Ingestion validators (§2.5 / §7): field-kind grammar, no-markdown-in-text-leaf,
+ * Ingestion validators: field-kind grammar, no-markdown-in-text-leaf,
  * ref integrity (incl. deep inline refs), block normal form.
  */
 import { describe, expect, it } from "vitest";

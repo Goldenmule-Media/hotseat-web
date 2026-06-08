@@ -1,5 +1,5 @@
 /**
- * The `renameSymbol` MCP WRITE tool end-to-end (structured-content §5/§11/§12, Phase 3).
+ * The `renameSymbol` MCP WRITE tool end-to-end (Phase 3).
  * Same rig as projection-tools.test.ts — the REAL engine over an in-memory Durable
  * Streams server + in-memory PGlite read model, driven through the tool handlers. Asserts:
  *

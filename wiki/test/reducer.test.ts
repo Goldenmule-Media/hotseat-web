@@ -145,7 +145,7 @@ describe("foldWorkspace — version contiguity", () => {
   });
 });
 
-describe("foldWorkspace — upcasting over SectionOp payloads (§10)", () => {
+describe("foldWorkspace — upcasting over SectionOp payloads", () => {
   // A note page at schema version 3 whose upcasters reshape the op payload: rename
   // the targeted field key `body` → `text` (v1→v2) and add a second op (v2→v3).
   const Note = definePageType({

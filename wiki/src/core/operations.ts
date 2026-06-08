@@ -1,5 +1,5 @@
 /**
- * The single engine-owned reducer over section operations (§9.4). One pure, total
+ * The single engine-owned reducer over section operations. One pure, total
  * function folds a `SectionOp[]` into a page's `sections` tree — replacing every
  * author `apply`. No clock/RNG: `now` and any ids ride in via the op payload / ctx.
  */
@@ -76,7 +76,7 @@ function declOfElement(def: IPageTypeDef | undefined, elementType: string): Elem
   return def?.elements?.[elementType];
 }
 
-/** Route an op through a section/element's `reduceMeta` single-writer hook (§9.5). */
+/** Route an op through a section/element's `reduceMeta` single-writer hook. */
 function routeMeta(meta: unknown, op: SectionOp, reduceMeta?: (m: unknown, o: SectionOp) => unknown): unknown {
   if (reduceMeta === undefined) return meta;
   return reduceMeta(meta, op);
@@ -303,7 +303,7 @@ function normalizeFields(fields: Record<string, IField>): Record<string, IField>
   return out;
 }
 
-/** Materialize empty fields for a section from its declaration (§6). */
+/** Materialize empty fields for a section from its declaration. */
 export function materializeSectionFields(sec: ISection, decl: SectionDecl): void {
   for (const [fieldKey, fd] of Object.entries(decl.fields)) {
     if (sec.fields[fieldKey] !== undefined) continue;

@@ -1,13 +1,13 @@
 /**
- * A Kysely {@link Dialect} backed by embedded {@link PGlite} (DESIGN §5.3).
+ * A Kysely {@link Dialect} backed by embedded {@link PGlite}.
  *
  * PGlite has no published Kysely dialect, but it speaks Postgres, so we reuse
  * Kysely's Postgres **adapter**, **query compiler**, and **introspector**, and only
  * supply a thin driver that runs the compiled SQL through PGlite's single
  * in-process connection. PGlite is single-connection (no pool), so the driver hands
  * out one shared {@link DatabaseConnection} and serializes transactions with
- * `BEGIN`/`COMMIT`/`ROLLBACK` — sufficient for the v1 single-process topology
- * (§5.2). Object row-mode + result fields map straight onto Kysely's `QueryResult`.
+ * `BEGIN`/`COMMIT`/`ROLLBACK` — sufficient for the v1 single-process topology.
+ * Object row-mode + result fields map straight onto Kysely's `QueryResult`.
  */
 import type { PGlite } from "@electric-sql/pglite";
 import {

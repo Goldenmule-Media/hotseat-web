@@ -1,18 +1,18 @@
 /**
- * wiki-mcp configuration (DESIGN §10). The namespace + stream `baseUrl` the
- * projection tailer reads, the read-model database tier (PGlite local / pg prod,
- * §5.3), the read-consistency timeout (§3.3), and the injected {@link Logger}
- * (§9). Resolved from **flags → env → defaults** (first wins), so the server runs
- * with none. The host (`wiki-server`) normally supplies these directly via
- * `createWikiMcp({ … })` rather than the CLI path.
+ * wiki-mcp configuration. The namespace + stream `baseUrl` the projection tailer
+ * reads, the read-model database tier (PGlite local / pg prod), the
+ * read-consistency timeout, and the injected {@link Logger}. Resolved from
+ * **flags → env → defaults** (first wins), so the server runs with none. The host
+ * (`wiki-server`) normally supplies these directly via `createWikiMcp({ … })`
+ * rather than the CLI path.
  */
 import { consoleLogger, type Logger } from "./logger.js";
 import type { IMarkdownProjectionConfig } from "./tail/markdown-projection.js";
 
 /**
- * The read-model database tier (DESIGN §5.3). `pglite` is embedded
- * Postgres-in-process — `dataDir` persists, or omit it (`memory`) for tests.
- * `pg` is a real Postgres server addressed by `connectionString`.
+ * The read-model database tier. `pglite` is embedded Postgres-in-process —
+ * `dataDir` persists, or omit it (`memory`) for tests. `pg` is a real Postgres
+ * server addressed by `connectionString`.
  */
 export type DbConfig =
   | { readonly kind: "pglite"; readonly dataDir?: string }
@@ -20,15 +20,15 @@ export type DbConfig =
 
 /** Fully-resolved wiki-mcp configuration. */
 export interface WikiMcpConfig {
-  /** Single namespace served by this instance (DESIGN §2). */
+  /** Single namespace served by this instance. */
   readonly namespace: string;
-  /** Base URL of the Durable Streams host the tailer reads (localhost in v1, §8). */
+  /** Base URL of the Durable Streams host the tailer reads (localhost in v1). */
   readonly streamBaseUrl: string;
-  /** The read-model database tier (§5.3). */
+  /** The read-model database tier. */
   readonly db: DbConfig;
-  /** Default `waitFor` timeout (ms) for a token-gated read before it rejects (§3.3). @default 5000 */
+  /** Default `waitFor` timeout (ms) for a token-gated read before it rejects. @default 5000 */
   readonly readConsistencyTimeoutMs: number;
-  /** Backstop poll interval (ms) for `waitFor` when no in-process notify fires (§5.2). @default 50 */
+  /** Backstop poll interval (ms) for `waitFor` when no in-process notify fires. @default 50 */
   readonly waitForPollMs: number;
   /**
    * The Markdown-disk mirror (off by default). Present when enabled via `--md`/`WIKI_MCP_MD=true`

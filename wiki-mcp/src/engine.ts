@@ -1,17 +1,16 @@
 /**
- * The embedded `wiki` engine — the WRITE side (DESIGN §3.4, §7). Builds the
- * engine's {@link IWiki} via the engine's own `createWiki`, and keeps active
- * workspace **handles hot** behind a small LRU so a command on a recently-used
- * workspace appends with no refold (DESIGN §7 "write side — stays hot"). The LRU
- * bound is the engine's `IWikiConfig.cache.maxWorkspaces`.
+ * The embedded `wiki` engine — the WRITE side. Builds the engine's {@link IWiki}
+ * via the engine's own `createWiki`, and keeps active workspace **handles hot**
+ * behind a small LRU so a command on a recently-used workspace appends with no
+ * refold. The LRU bound is the engine's `IWikiConfig.cache.maxWorkspaces`.
  *
  * Every write returns the engine's {@link Committed} value carrying the
  * {@link ConsistencyToken} for the committed head; this module is the seam the MCP
  * write tools call, and the token it surfaces is what the per-session token manager
- * advances and the read model later catches up to (DESIGN §3.2, §6.2).
+ * advances and the read model later catches up to.
  *
- * It imports ONLY the engine's public surface (DESIGN §10, ADR-M5) — never
- * `wiki-server` and never the engine's internals.
+ * It imports ONLY the engine's public surface (ADR-M5) — never `wiki-server` and
+ * never the engine's internals.
  */
 import {
   createWiki,
@@ -35,11 +34,11 @@ const DEFAULT_MAX_HOT_WORKSPACES = 32;
  * + deterministic services without round-tripping through flags.
  */
 export interface EngineConfig {
-  /** Base URL of the Durable Streams host the engine appends to / tails (DESIGN §8). */
+  /** Base URL of the Durable Streams host the engine appends to / tails. */
   readonly streamBaseUrl: string;
-  /** The single namespace this instance serves (DESIGN §2). */
+  /** The single namespace this instance serves. */
   readonly namespace: string;
-  /** The page types this wiki understands (DESIGN §5.1, ADR-M3). */
+  /** The page types this wiki understands (ADR-M3). */
   readonly pageTypes: IWikiConfig["pageTypes"];
   /** Injected ISO-8601 clock (determinism/testing); the engine defaults it otherwise. */
   readonly clock?: () => string;
@@ -47,24 +46,24 @@ export interface EngineConfig {
   readonly ids?: () => string;
   /** Default `actor` stamped on event metadata when a call doesn't override it. */
   readonly actor?: string;
-  /** Default token-gated read `waitFor` timeout (ms) handed to the engine (DESIGN §3.3). */
+  /** Default token-gated read `waitFor` timeout (ms) handed to the engine. */
   readonly readConsistencyTimeoutMs?: number;
   /**
-   * Hot-handle LRU bound — the engine's `IWikiConfig.cache.maxWorkspaces`
-   * (DESIGN §7). Omit for {@link DEFAULT_MAX_HOT_WORKSPACES}; `false` disables the
-   * engine's projection cache entirely.
+   * Hot-handle LRU bound — the engine's `IWikiConfig.cache.maxWorkspaces`.
+   * Omit for {@link DEFAULT_MAX_HOT_WORKSPACES}; `false` disables the engine's
+   * projection cache entirely.
    */
   readonly cache?: { readonly maxWorkspaces?: number } | false;
 }
 
 /**
- * The embedded write-side engine with a hot-handle LRU (DESIGN §7).
+ * The embedded write-side engine with a hot-handle LRU.
  *
  * `open(id)` returns a hot {@link IWorkspaceHandle}, evicting the
  * least-recently-used handle past the bound. Handles stay open so their live tail
  * keeps the write-side aggregate fresh; a cold workspace opens once (snapshot +
  * short tail) and then stays hot. All writes flow through the handle and return the
- * engine's {@link Committed} token (DESIGN §3.2).
+ * engine's {@link Committed} token.
  */
 export class EmbeddedEngine {
   private wiki: IWiki;
@@ -92,7 +91,7 @@ export class EmbeddedEngine {
   /**
    * Open (or reuse) a hot {@link IWorkspaceHandle}. A hit moves the handle to the
    * MRU position; a miss opens it via the engine (which folds once) and inserts it,
-   * evicting the LRU handle if the cache is full (DESIGN §7).
+   * evicting the LRU handle if the cache is full.
    */
   async open(id: WorkspaceId): Promise<IWorkspaceHandle> {
     const cached = this.hot.get(id);
@@ -107,7 +106,7 @@ export class EmbeddedEngine {
     return handle;
   }
 
-  /** All workspace summaries (the namespace catalog — DESIGN §5.1). */
+  /** All workspace summaries (the namespace catalog). */
   listWorkspaces(): Promise<readonly IWorkspaceSummary[]> {
     return this.wiki.listWorkspaces();
   }
@@ -132,7 +131,7 @@ export class EmbeddedEngine {
     this.logger.info("engine rebound to a new page-type set", { pageTypes: pageTypes.length });
   }
 
-  /** Insert a handle at MRU, evicting the LRU entry past the bound (DESIGN §7). */
+  /** Insert a handle at MRU, evicting the LRU entry past the bound. */
   private remember(id: WorkspaceId, handle: IWorkspaceHandle): void {
     this.hot.delete(id);
     this.hot.set(id, handle);
@@ -143,13 +142,13 @@ export class EmbeddedEngine {
       this.hot.delete(lru);
       // The engine keeps its own open-handle map keyed by id; dropping our LRU
       // reference simply lets it fall out of our hot set. We log for tail-lag /
-      // capacity visibility (DESIGN §9).
+      // capacity visibility.
       this.logger.info("evicted hot workspace handle", { workspace: lru });
     }
   }
 }
 
-/** Resolve the hot-handle LRU bound from the engine `cache` knob (DESIGN §7). */
+/** Resolve the hot-handle LRU bound from the engine `cache` knob. */
 function resolveMaxHot(cache: EngineConfig["cache"]): number {
   if (cache === false) return 0;
   return cache?.maxWorkspaces ?? DEFAULT_MAX_HOT_WORKSPACES;

@@ -1,5 +1,5 @@
 /**
- * Wiring smoke test (DESIGN §11). Boots the REAL process wiring — `startWikiServer`,
+ * Wiring smoke test. Boots the REAL process wiring — `startWikiServer`,
  * the same function the `bin` entry calls — and confirms BOTH planes it stands up
  * answer: the **stream host** serves a stream round-trip, and the **control
  * listener** answers `/_server/health` and `/_server/info`.
@@ -7,7 +7,7 @@
  * The hosted `wiki-mcp` is injected via the `startMcp` seam so the smoke test
  * exercises the wiring (stream host → control listener, with `wiki-mcp` pointed at
  * the live `baseUrl`) without standing up the full engine + PGlite read model — that
- * surface is covered by `wiki-mcp`'s own suite (DESIGN §11). We still assert the
+ * surface is covered by `wiki-mcp`'s own suite. We still assert the
  * wiring fed `wiki-mcp` THIS host's localhost `baseUrl` and the host's `mcp` logger.
  */
 import { afterEach, describe, expect, it } from "vitest";
@@ -63,7 +63,7 @@ describe("wiring smoke", () => {
     expect(mcpBaseUrl).toBe(server.baseUrl);
     expect(mcpLogger).toBeDefined();
     // The injected logger is the host's consolidating logger (mcp records land in the
-    // same buffer the control listener reads, DESIGN §8.5).
+    // same buffer the control listener reads).
     mcpLogger!.info("hello from mcp");
     expect(server.logger.history({ source: "mcp" }).records.map((r) => r.msg)).toContain("hello from mcp");
 

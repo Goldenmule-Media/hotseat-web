@@ -1,10 +1,10 @@
 /**
- * PUBLIC TYPE SURFACE (DESIGN §10). Types only — no runtime code lives here.
+ * PUBLIC TYPE SURFACE. Types only — no runtime code lives here.
  * Everything depends on this module; this module depends on nothing.
  *
  * Type-level helpers (PageTypeName, CommandName<K>, …) are pragmatic v1 aliases:
  * runtime safety comes from Zod arg-validation + the FSM guard. Full per-registry
- * inference is deferred (DESIGN §10.4 note / §18).
+ * inference is deferred.
  *
  * One exception to "depends on nothing": the optional full-text search seam references
  * the search index's public types (which ride on Kysely — the engine's one sanctioned
@@ -42,19 +42,19 @@ export type DeepReadonly<T> = T extends (infer U)[]
 export type Unsubscribe = () => void;
 
 // ────────────────────────────────────────────────────────────────────────────
-// CQRS consistency tokens & read model (DESIGN §8.6, ADR-003)
+// CQRS consistency tokens & read model (ADR-003)
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
  * Opaque, comparable token marking a position in a workspace's history. Encodes
  * `{ workspaceId, version }` — `version` being the per-workspace 0-based sequence
- * (== stream length; drives fold order & OCC, §8.1). Compared **within a single
+ * (== stream length; drives fold order & OCC). Compared **within a single
  * workspace only**; cross-workspace tokens are independent.
  */
 export type ConsistencyToken = string;
 
 /**
- * The return shape of **every** write (DESIGN §8.6): the command's `value` plus a
+ * The return shape of **every** write: the command's `value` plus a
  * {@link ConsistencyToken} naming the committed head `version` after the append and
  * any OCC rebase-retry. A void write resolves to `Committed<void>` — the token still
  * names where the events landed so a caller can read the mutated graph back.
@@ -65,7 +65,7 @@ export interface Committed<T> {
 }
 
 /**
- * Optional read consistency for a token-gated read (DESIGN §8.6). With
+ * Optional read consistency for a token-gated read. With
  * `consistentWith` present, the read `waitFor`s the read model to apply that token
  * before serving (read-your-writes / monotonic); absent, it serves the current
  * (possibly stale) projection.
@@ -78,7 +78,7 @@ export interface IReadOpts {
 }
 
 /**
- * The read-side seam (DESIGN §8.6). Any projection — the default in-memory one or an
+ * The read-side seam. Any projection — the default in-memory one or an
  * external one (e.g. a SQL read model) — implements this so a read can wait until the
  * read side has caught up to a write's token.
  */
@@ -90,7 +90,7 @@ export interface IReadModel {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Event sourcing (DESIGN §8.1)
+// Event sourcing
 // ────────────────────────────────────────────────────────────────────────────
 
 export interface IEventMeta {
@@ -99,7 +99,7 @@ export interface IEventMeta {
   readonly actor?: string;
   /** Idempotency: the command that produced this event. */
   readonly commandId?: string;
-  /** The semantic command name that produced this content event (§9.4) — keeps
+  /** The semantic command name that produced this content event — keeps
    *  history semantic (`answerQuestion`) without per-type events. */
   readonly command?: string;
   readonly causationId?: string;
@@ -115,7 +115,7 @@ export interface IEventEnvelope<T extends string = string, P = unknown> {
   /** 0-based per-WORKSPACE sequence; defines fold order & drives OCC. */
   readonly version: number;
   readonly type: T;
-  /** Schema version the payload was written under (DESIGN §8.5). */
+  /** Schema version the payload was written under. */
   readonly schemaVersion: number;
   readonly payload: P;
   readonly meta: IEventMeta;
@@ -129,16 +129,16 @@ export interface DomainEvent {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Workspace aggregate state (DESIGN §6.2)
+// Workspace aggregate state
 // ────────────────────────────────────────────────────────────────────────────
 
 export type WorkspaceStatus = "active" | "archived";
 
 // ────────────────────────────────────────────────────────────────────────────
-// Content tree: Sections, Fields, Items, Blocks (DESIGN structured-content §2, §3)
+// Content tree: Sections, Fields, Items, Blocks
 // ────────────────────────────────────────────────────────────────────────────
 
-/** Closed, engine-owned field-kind vocabulary (§3). */
+/** Closed, engine-owned field-kind vocabulary. */
 export type FieldKind =
   | "scalar"
   | "prose"
@@ -149,15 +149,14 @@ export type FieldKind =
   | "list";
 
 /**
- * A typed cross-reference target; the displayed label is render-derived (§3.2).
+ * A typed cross-reference target; the displayed label is render-derived.
  *
  * Every non-`page` kind carries an OPTIONAL `page?: PageId`: omitted = same page (the
  * historical behaviour), present = a CROSS-PAGE ref into that page's content. The
  * `element` kind addresses a list `IItem` by its stable id — the one content node no
  * ref could previously point at — and carries an optional `labelField` naming which of
  * the element's fields supplies the render-derived label (explicit, never object-key
- * order). Together these let a page reference a decision/step/case on a sibling page
- * (feature-review Item 1).
+ * order). Together these let a page reference a decision/step/case on a sibling page.
  */
 export type RefTarget =
   | { readonly kind: "section"; page?: PageId; id: SectionId }
@@ -166,16 +165,16 @@ export type RefTarget =
   | { readonly kind: "block"; page?: PageId; section: SectionId; field: string; block: BlockId }
   | { readonly kind: "element"; page?: PageId; section: SectionId; field: string; element: string; labelField?: string };
 
-/** A `text` run's overlapping inline style, carried as a canonical-sorted set (§3.2). */
+/** A `text` run's overlapping inline style, carried as a canonical-sorted set. */
 export type Mark = "strong" | "emphasis" | { readonly kind: "link"; href: string };
 
-/** Inline run inside a prose-bearing block (§3.2). */
+/** Inline run inside a prose-bearing block. */
 export type IInline =
   | { readonly kind: "text"; value: string; marks: Mark[] }
   | { readonly kind: "code-span"; value: string }
   | { readonly kind: "ref"; target: RefTarget };
 
-/** Closed document block vocabulary (§3.1). Each carries an injected `BlockId`. */
+/** Closed document block vocabulary. Each carries an injected `BlockId`. */
 export type IBlock =
   | { readonly kind: "paragraph"; id: BlockId; inlines: IInline[] }
   | { readonly kind: "heading"; id: BlockId; level: 1 | 2 | 3 | 4 | 5 | 6; inlines: IInline[] }
@@ -191,7 +190,7 @@ export type IBlock =
   | { readonly kind: "quote"; id: BlockId; variant?: string; blocks: IBlock[] }
   | { readonly kind: "divider"; id: BlockId };
 
-/** A typed field value — the closed value shapes per field-kind (§3). */
+/** A typed field value — the closed value shapes per field-kind. */
 export type IField =
   | { readonly kind: "scalar"; value: string | number | boolean }
   | { readonly kind: "prose"; value: string }
@@ -209,14 +208,14 @@ export interface IItem {
   meta?: Record<string, unknown>;
 }
 
-/** An addressable, contract-bearing node in a page's content tree (§2). */
+/** An addressable, contract-bearing node in a page's content tree. */
 export interface ISection {
   readonly id: SectionId;
   /** Stable, model-declared; unique among siblings. */
   key: string;
   name: string;
   description?: string;
-  /** Explicit ordering — never object-key order (§10). */
+  /** Explicit ordering — never object-key order. */
   order: number;
   /** Intra-page section tree parent. */
   parentId: SectionId | null;
@@ -230,7 +229,7 @@ export interface IPageNode {
   parentId: PageId | null;
   title: string;
   status: string;
-  /** The page's content tree — ordered typed sections (§2). */
+  /** The page's content tree — ordered typed sections. */
   sections: ISection[];
   /** Page types auto-created with this page and pinned (cannot reparent-out / archive alone). */
   pinned?: boolean;
@@ -256,7 +255,7 @@ export interface IWorkspaceState {
 
 /**
  * The page state shape passed to the engine reducer / deciders / render read model.
- * Content is the typed section tree (§2) — no `fields`/`items` containers.
+ * Content is the typed section tree — no `fields`/`items` containers.
  */
 export interface PageState {
   readonly id: PageId;
@@ -270,7 +269,7 @@ export interface PageState {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Entry point & configuration (DESIGN §10.1)
+// Entry point & configuration
 // ────────────────────────────────────────────────────────────────────────────
 
 export interface IStreamConfig {
@@ -297,7 +296,7 @@ export interface IWikiConfig {
   /** Snapshot after this many ms of write-idle. @default 5000 */
   readonly snapshotIdleMs?: number;
   /** Default timeout (ms) for a token-gated read's `waitFor` before it throws
-   *  {@link ConsistencyTimeoutError}; a per-read `timeoutMs` overrides it. @default 5000 @see §8.6 */
+   *  {@link ConsistencyTimeoutError}; a per-read `timeoutMs` overrides it. @default 5000 */
   readonly readConsistencyTimeoutMs?: number;
   /** Bound the in-memory projection cache, or `false` to disable caching. */
   readonly cache?: { readonly maxWorkspaces?: number } | false;
@@ -308,13 +307,13 @@ export interface IWikiConfig {
    * projection). The container injects a Kysely handle over a Postgres-compatible
    * database (pg or PGlite); when omitted, `search` reads return an empty result. The
    * index is fed off the same fold the read model is and is read-your-writes via
-   * write tokens (DESIGN — search seam).
+   * write tokens.
    */
   readonly search?: IWikiSearchConfig;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// IWiki (DESIGN §10.2)
+// IWiki
 // ────────────────────────────────────────────────────────────────────────────
 
 export interface IWorkspaceSummary {
@@ -329,7 +328,7 @@ export interface IWiki {
   listWorkspaces(): Promise<readonly IWorkspaceSummary[]>;
   close(): Promise<void>;
   /**
-   * The serializable status-FSM of a registered page TYPE (DESIGN §7.2) — states +
+   * The serializable status-FSM of a registered page TYPE — states +
    * named transitions + the initial status — for inspection/visualization. Schema-
    * agnostic: works for any registered type (incl. runtime-loaded models). Throws
    * {@link UnknownPageTypeError} for an unregistered type. Pure (no I/O).
@@ -338,8 +337,8 @@ export interface IWiki {
   /** Every registered page-type tag, in declaration order. Pure (no I/O). */
   pageTypes(): readonly PageTypeName[];
   /**
-   * The full TYPE-level authoring surface of a registered page type (DESIGN §6.1,
-   * §7.2): its status FSM plus every command it can ever run — each with the
+   * The full TYPE-level authoring surface of a registered page type: its status
+   * FSM plus every command it can ever run — each with the
    * machine-readable {@link JsonSchema} for its args, its description, the
    * section/field it edits, and (for a page-transition command) the FSM event it
    * fires. This is the companion to {@link fsmOf}: it answers "what can I author on
@@ -385,7 +384,7 @@ export type CommandResult<K extends PageTypeName = PageTypeName, C extends Comma
 export type CreateArgs<K extends PageTypeName = PageTypeName> = Record<string, unknown>;
 
 // ────────────────────────────────────────────────────────────────────────────
-// IWorkspaceHandle (DESIGN §10.3)
+// IWorkspaceHandle
 // ────────────────────────────────────────────────────────────────────────────
 
 export interface ITreeNode {
@@ -412,7 +411,7 @@ export interface IWorkspaceHandle {
 
   // ── structural commands (atomic; guarded by invariants + workspace/page status) ──
   // Every write resolves to a {@link Committed} value carrying the committed-head
-  // {@link ConsistencyToken} — the position after the append AND any OCC rebase-retry (§8.6).
+  // {@link ConsistencyToken} — the position after the append AND any OCC rebase-retry.
   createPage<K extends PageTypeName>(
     type: K,
     input: { title: string; parentId: PageId | null } & CreateArgs<K>,
@@ -425,7 +424,7 @@ export interface IWorkspaceHandle {
   link(from: PageId, to: PageId, role: string): Promise<Committed<void>>;
   unlink(from: PageId, to: PageId, role: string): Promise<Committed<void>>;
   /** Cross-page list-element move: remove from one page's `(section, field)` list and
-   *  add to another's, in one atomic append (§1.9). */
+   *  add to another's, in one atomic append. */
   moveItem(input: {
     from: PageId;
     to: PageId;
@@ -452,7 +451,7 @@ export interface IWorkspaceHandle {
     args: CommandArgs<K, C>,
   ): Promise<Committed<CommandResult<K, C>>>;
   /**
-   * Run an ordered batch of commands on ONE page as a single ATOMIC commit (§5):
+   * Run an ordered batch of commands on ONE page as a single ATOMIC commit:
    * each command is decided against the state left by the previous one (so an
    * order-dependent sequence — set a field, then a transition gated on it — works),
    * all the resulting events are appended as one array-message, and the whole batch
@@ -465,7 +464,7 @@ export interface IWorkspaceHandle {
     commands: readonly { command: string; args?: Record<string, unknown> }[],
   ): Promise<Committed<BatchResult>>;
 
-  // ── reads (token-gated; async — §8.6) ──
+  // ── reads (token-gated; async) ──
   // Pass `consistentWith` a write's token to read-your-writes (waits up to `timeoutMs`,
   // default IWikiConfig.readConsistencyTimeoutMs); omit it for current/eventually-consistent state.
   status(opts?: IReadOpts): Promise<WorkspaceStatus>;
@@ -486,7 +485,7 @@ export interface IWorkspaceHandle {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// IPageView (DESIGN §10.4)
+// IPageView
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -512,11 +511,11 @@ export interface IMutationDescriptor {
    * When the command is otherwise in-gate but a precondition currently fails, the
    * first failed precondition's human reason (e.g. "all testing-plan cases must be
    * passed"). Absent when `available` is true, or when the command is simply not
-   * status-legal. Lets a UI render a transition as "blocked — here's why" (§7.2).
+   * status-legal. Lets a UI render a transition as "blocked — here's why".
    */
   readonly unmet?: string;
   readonly description?: string;
-  /** Which section/field this command edits (§6 write-gate surfacing). */
+  /** Which section/field this command edits (write-gate surfacing). */
   readonly target?: { readonly section: string; readonly field?: string };
   /**
    * Model-declared autonomy classifier for a PAGE-transition command, joined from its
@@ -554,7 +553,7 @@ export interface IAttentionItem {
 export interface IPageView<K extends PageTypeName = PageTypeName> {
   readonly id: PageId;
   readonly type: K;
-  // Reads are token-gated and async (§8.6): pass `consistentWith` a write's token to
+  // Reads are token-gated and async: pass `consistentWith` a write's token to
   // read-your-writes, or omit it for current state.
   parentId(opts?: IReadOpts): Promise<PageId | null>;
   title(opts?: IReadOpts): Promise<string>;
@@ -577,7 +576,7 @@ export interface IPageView<K extends PageTypeName = PageTypeName> {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// FSM transition (DESIGN §7.2 / §10.5) — `t()` & `makeGuard()` live in core/guard.ts
+// FSM transition — `t()` & `makeGuard()` live in core/guard.ts
 // ────────────────────────────────────────────────────────────────────────────
 
 export interface ITransition<S extends string = string, C extends string = string> {
@@ -594,8 +593,8 @@ export interface ITransition<S extends string = string, C extends string = strin
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// FSM descriptor — the serializable, public projection of a page type's status FSM
-// (DESIGN §7.2 / §10.5). Built by {@link IWiki.fsmOf} from the registry's guard; the
+// FSM descriptor — the serializable, public projection of a page type's status FSM.
+// Built by {@link IWiki.fsmOf} from the registry's guard; the
 // stable, transport-friendly shape a UI/tool consumes (vs the internal `Guard`).
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -625,7 +624,7 @@ export interface FsmDescriptor {
 
 // ────────────────────────────────────────────────────────────────────────────
 // Type descriptor — the serializable, INSTANCE-FREE authoring surface of a page
-// type (DESIGN §6.1). Built by {@link IWiki.describeType}; the type-level companion
+// type. Built by {@link IWiki.describeType}; the type-level companion
 // to the instance-level {@link IMutationDescriptor} (which adds availability).
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -669,7 +668,7 @@ export interface TypeDescriptor {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Authoring API (DESIGN §10.5)
+// Authoring API
 // ────────────────────────────────────────────────────────────────────────────
 
 /** Adapter over a runtime validator (Zod by default): parse + export JSON Schema. */
@@ -682,7 +681,7 @@ export interface ISchema<T = unknown> {
 /**
  * Context passed to a command's `produces`. Pure: no I/O.
  * `related` exposes read-only access to OTHER pages in the same workspace so a
- * command can enforce cross-page invariants atomically (DESIGN §13.4) — e.g.
+ * command can enforce cross-page invariants atomically — e.g.
  * `beginImplementation` reading the implementation-plan's steps.
  */
 export interface ICommandContext {
@@ -703,7 +702,7 @@ export interface IRelatedReader {
   readonly self: PageId;
 }
 
-/** Read-only workspace context passed to a renderer (DESIGN §11). */
+/** Read-only workspace context passed to a renderer. */
 export interface IRenderCtx {
   titleOf(id: PageId): string | undefined;
   typeOf(id: PageId): string | undefined;
@@ -717,13 +716,13 @@ export interface IRenderCtx {
    * Read another page's full folded state — the render-side twin of
    * {@link IRelatedReader.page}. Lets a {@link ComputedFlag} derive a value from a
    * sibling's ELEMENT-level state (e.g. "all testing-plan cases passed"), the same
-   * cross-page read preconditions already do (feature-review Item 3).
+   * cross-page read preconditions already do.
    */
   pageState(id: PageId): DeepReadonly<PageState> | undefined;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Section operations — the closed write vocabulary (§9.4)
+// Section operations — the closed write vocabulary
 // ────────────────────────────────────────────────────────────────────────────
 
 /** A structured edit of a code field/block: replace `[start,end)` with `replacement`. */
@@ -735,7 +734,7 @@ export interface TextEdit {
 
 /**
  * The engine-owned closed vocabulary every command emits and the one built-in
- * reducer folds (§9.4). Each op names its target by key/id, never by position.
+ * reducer folds. Each op names its target by key/id, never by position.
  * `section` is the section KEY; `addSection` mints a fresh `SectionId`.
  */
 export type SectionOp =
@@ -748,7 +747,7 @@ export type SectionOp =
       block?: BlockId;
       edits: TextEdit[];
       /**
-       * Optional CONTENT-HASH PRECONDITION (structured-content §5, §11). When present,
+       * Optional CONTENT-HASH PRECONDITION. When present,
        * the command bus's rebase-retried decide window rejects the op (with a typed
        * {@link StaleEditError}) iff the target code field/block's CURRENT content hash
        * differs — i.e. the edits were computed against now-stale source (e.g. after an
@@ -799,16 +798,16 @@ export type SectionOp =
       event: string;
     };
 
-/** The single engine content event payload (§9.4): an ordered op list. */
+/** The single engine content event payload: an ordered op list. */
 export interface SectionOpsAppliedPayload {
   readonly ops: SectionOp[];
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Declarative authoring (§9)
+// Declarative authoring
 // ────────────────────────────────────────────────────────────────────────────
 
-/** The model's view of a field-kind in a section/element declaration (§9.2). */
+/** The model's view of a field-kind in a section/element declaration. */
 export type FieldDecl =
   | { readonly kind: "scalar"; required?: boolean; schema?: ISchema }
   | { readonly kind: "prose"; required?: boolean }
@@ -831,9 +830,9 @@ export type FieldDecl =
 export interface SectionDecl {
   readonly name: string;
   readonly description?: string;
-  /** requiredSection (§6) — materialized empty at create. */
+  /** requiredSection — materialized empty at create. */
   readonly required?: boolean;
-  /** The write-gate (§6/§9.2). */
+  /** The write-gate. */
   readonly mutableIn?: readonly string[];
   readonly fields: Readonly<Record<string, FieldDecl>>;
   readonly meta?: ISchema;
@@ -857,18 +856,18 @@ export interface ElementDecl {
   readonly awaitsHuman?: (element: DeepReadonly<IItem>) => boolean;
 }
 
-/** Section-set contract (§6). */
+/** Section-set contract. */
 export interface SectionSetContract {
   readonly mode: "open" | "closed";
   readonly prohibited?: readonly string[];
   readonly cardinality?: Readonly<Record<string, { min?: number; max?: number }>>;
 }
 
-/** `arg("name")` sugar — maps a command arg to a field value (§9.8). */
+/** `arg("name")` sugar — maps a command arg to a field value. */
 export type ArgRef = { readonly __arg: string };
 export type FieldValueSpec = ArgRef | { readonly literal: IField };
 
-/** A pure precondition for a transition (§6); returns `true` or `{ unmet }`. */
+/** A pure precondition for a transition; returns `true` or `{ unmet }`. */
 export type Precondition = (
   page: DeepReadonly<PageState>,
   related: IRelatedReader,
@@ -885,7 +884,7 @@ export interface DeclarativeCommand {
     | { readonly level: "element"; readonly event: string };
   readonly preconditions?: readonly Precondition[];
   /**
-   * SIGN-OFF (feature-review). When this page-transition command runs, the engine ALSO
+   * SIGN-OFF. When this page-transition command runs, the engine ALSO
    * drives each PINNED CHILD to its declared {@link IPageTypeDef.finalize} transition in
    * the SAME atomic commit — each child fully FSM- + precondition-validated, so a child
    * that isn't ready (e.g. a spec with undocumented decisions) rejects the whole sign-off.
@@ -893,21 +892,21 @@ export interface DeclarativeCommand {
    * finalized is skipped. Non-recursive (direct pinned children).
    */
   readonly cascadeFinalize?: boolean;
-  /** Escape hatch (§9.4): compute the effect as the same closed op vocabulary. */
+  /** Escape hatch: compute the effect as the same closed op vocabulary. */
   readonly produces?: (page: DeepReadonly<PageState>, args: unknown, ctx: ICommandContext) => SectionOp[];
 }
 
 export type DeclarativeCommandMap = Readonly<Record<string, DeclarativeCommand>>;
 
 // ────────────────────────────────────────────────────────────────────────────
-// Render config (§9.7)
+// Render config
 // ────────────────────────────────────────────────────────────────────────────
 
 export interface SectionRender {
   /** A page section key, the engine pseudo-sections `@references`/`@children`, or — when
    *  `derived` is set — ignored (the body comes from the named {@link DerivedList}). */
   readonly section?: string;
-  /** Render this section's body from a model-declared {@link DerivedList} (Item 2) rather
+  /** Render this section's body from a model-declared {@link DerivedList} rather
    *  than a page field — a projection of cross-page state (e.g. the plan's steps). */
   readonly derived?: string;
   readonly heading?: string;
@@ -932,12 +931,12 @@ export interface RenderConfig {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Page type definition (§9) — declarative; no author apply/render/produces
+// Page type definition — declarative; no author apply/render/produces
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
  * A model-declared, PURE boolean a renderer computes from folded state — possibly
- * cross-page via {@link IRenderCtx} (feature-review Item 3). A checklist element binds
+ * cross-page via {@link IRenderCtx}. A checklist element binds
  * to one by name via `meta.computed = "<key>"`: its checkbox is then COMPUTED from this
  * flag (a projection of the real fact, e.g. "all testing-plan cases passed") rather than
  * a stored, hand-toggled status — so it cannot lie, and the engine refuses to drive such
@@ -964,8 +963,8 @@ export interface DerivedItem {
 
 /**
  * A model-declared, PURE projection that synthesizes a checklist from folded state —
- * typically a SIBLING page's list joined to this page's local progress (feature-review
- * Item 2: the checklist is a DERIVED VIEW of `plan.steps`, not a hand-duplicated copy).
+ * typically a SIBLING page's list joined to this page's local progress (the checklist
+ * is a DERIVED VIEW of `plan.steps`, not a hand-duplicated copy).
  * Referenced from a render section via `derived: "<key>"`. Deterministic like every
  * renderer (no clock/RNG); order is the projection's order.
  */
@@ -975,7 +974,7 @@ export interface IPageTypeDef<Status extends string = string> {
   readonly type: string;
   /**
    * Human-friendly display name (e.g. "Implementation plan"). Used as the DEFAULT
-   * title for auto-created required children (§structure) and available to UIs /
+   * title for auto-created required children and available to UIs /
    * breadcrumbs. When omitted, a deterministic title-cased `type` id is used. This is
    * a creation-time default frozen into the page's title — editing `label` later does
    * NOT rename existing pages (their titles live in the event log).
@@ -983,7 +982,7 @@ export interface IPageTypeDef<Status extends string = string> {
   readonly label?: string;
   readonly version: number;
   readonly initialStatus: Status;
-  /** Lifecycle FSM ONLY (§9.4). */
+  /** Lifecycle FSM ONLY. */
   readonly statusTransitions: readonly ITransition<Status, string>[];
   readonly sections: Readonly<Record<string, SectionDecl>>;
   readonly elements?: Readonly<Record<string, ElementDecl>>;
@@ -993,15 +992,15 @@ export interface IPageTypeDef<Status extends string = string> {
   readonly render: RenderConfig;
   /** The page-transition command/event that drives this page to its terminal "done"
    *  status, applied when an ancestor's {@link DeclarativeCommand.cascadeFinalize} command
-   *  signs the bundle off (feature-review sign-off). */
+   *  signs the bundle off. */
   readonly finalize?: string;
   /** Named pure flags a renderer computes from folded state; an element binds via
-   *  `meta.computed = "<key>"` to derive its checkbox (feature-review Item 3). */
+   *  `meta.computed = "<key>"` to derive its checkbox. */
   readonly computed?: Readonly<Record<string, ComputedFlag>>;
   /** Named pure projections a render section materializes via `derived: "<key>"` —
-   *  e.g. a checklist DERIVED from a sibling's list + local progress (Item 2). */
+   *  e.g. a checklist DERIVED from a sibling's list + local progress. */
   readonly derived?: Readonly<Record<string, DerivedList>>;
-  /** Upcasters keyed by from-version, over `SectionOp` payloads (§10). */
+  /** Upcasters keyed by from-version, over `SectionOp` payloads. */
   readonly upcasters?: Readonly<Record<number, (payload: unknown) => unknown>>;
 }
 

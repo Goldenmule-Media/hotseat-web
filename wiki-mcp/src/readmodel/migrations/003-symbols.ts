@@ -1,5 +1,5 @@
 /**
- * Symbol-index analyzer columns + the reference index (Phase 2, §6.2/§11). Phase 1's
+ * Symbol-index analyzer columns + the reference index (Phase 2). Phase 1's
  * `002-sections` shipped `symbol_index` as a STUB (`name`/`kind`/`range` for the future
  * analyzer). Phase 2 makes it real: a `range` jsonb is replaced by explicit
  * `def_start`/`def_end` offset columns (one row per declaration), a `container` column
@@ -33,7 +33,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .columns(["workspace_id", "name"])
     .execute();
 
-  // The in-source identifier reference index (§6.2).
+  // The in-source identifier reference index.
   await db.schema
     .createTable("reference_index")
     .ifNotExists()

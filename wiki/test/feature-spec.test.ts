@@ -1,5 +1,5 @@
 /**
- * feature-spec page + cross-page element `ref` (feature-review.md Item 1).
+ * feature-spec page + cross-page element `ref`.
  *
  * Exercises the engine primitive (an element-addressable, CROSS-PAGE ref + its
  * integrity check + render-derived label) end-to-end through the model:

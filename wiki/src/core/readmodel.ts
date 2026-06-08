@@ -1,13 +1,12 @@
 /**
- * Consistency tokens + the default in-memory read model (DESIGN §8.4, §8.6;
- * ADR-003; BUILD_NOTES — CQRS contract).
+ * Consistency tokens + the default in-memory read model (ADR-003).
  *
  * Strict CQRS: the command bus folds a write-side decide-aggregate to validate the
- * FSM / invariants / OCC and append (§5, §15); a SEPARATE read model — fed by the
+ * FSM / invariants / OCC and append; a SEPARATE read model — fed by the
  * same fold off the live tail — serves all reads. This module owns:
  *
  *  - the {@link ConsistencyToken} codec: `{ workspaceId, version }` ↔ an opaque,
- *    comparable string (compared WITHIN a workspace only, §8.6);
+ *    comparable string (compared WITHIN a workspace only);
  *  - {@link InMemoryReadModel}, the default `IReadModel`. It tracks the highest
  *    `version` applied per workspace (its **applied token**) and answers
  *    `appliedToken()` / `waitFor()` locally — the common path needs no re-read.
@@ -16,7 +15,7 @@
  * single in-process fold (shared with the write side in this default), and tells
  * the read model how far it has applied via {@link InMemoryReadModel.notifyApplied}.
  * An external read model (e.g. a SQL projection) implements the same `IReadModel`
- * seam against its own store, fed by the public `foldWorkspace` (§16.1).
+ * seam against its own store, fed by the public `foldWorkspace`.
  *
  * Pure of host clock / RNG: timeouts use the host timer, which is I/O, not
  * determinism-sensitive reducer/renderer logic.
@@ -25,7 +24,7 @@ import type { ConsistencyToken, IReadModel, WorkspaceId } from "../api";
 import { VersionWaiterRegistry } from "./version-waiters";
 
 // ────────────────────────────────────────────────────────────────────────────
-// Token codec — { workspaceId, version } ↔ opaque comparable string (§8.6)
+// Token codec — { workspaceId, version } ↔ opaque comparable string
 // ────────────────────────────────────────────────────────────────────────────
 
 /** The applied position of a brand-new / unknown workspace (no events yet). */
@@ -35,7 +34,7 @@ export const ZERO_VERSION = 0;
  * Encode a {@link ConsistencyToken} for `{ workspaceId, version }`. The format is
  * opaque to callers; we keep the workspace id and a zero-padded version so tokens
  * are stable strings (the padding makes them lexicographically comparable within a
- * workspace, matching the OCC seq encoding — BUILD_NOTES §1).
+ * workspace, matching the OCC seq encoding).
  */
 export function encodeToken(workspaceId: WorkspaceId, version: number): ConsistencyToken {
   return `${workspaceId}@${padVersion(version)}` as ConsistencyToken;
@@ -59,7 +58,7 @@ function padVersion(version: number): string {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// InMemoryReadModel — the default IReadModel (§8.4 / §8.6)
+// InMemoryReadModel — the default IReadModel
 // ────────────────────────────────────────────────────────────────────────────
 
 /**

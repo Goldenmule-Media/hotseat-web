@@ -1,5 +1,5 @@
 /**
- * Determinism tests for blocks/refs (§10): byte-identical render, canonical marks,
+ * Determinism tests for blocks/refs: byte-identical render, canonical marks,
  * array order, ref-derived labels, per-kind goldens.
  */
 import { describe, expect, it } from "vitest";

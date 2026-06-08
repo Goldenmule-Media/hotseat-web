@@ -1,5 +1,5 @@
 /**
- * Intra-page section-tree mechanics + invariants (structured-content §2, §6).
+ * Intra-page section-tree mechanics + invariants.
  * Pure helpers reused by the reducer (`operations.ts`) and the registry's contract
  * checks. Mirrors the page-tree acyclic/ordering invariants at the section level:
  * unique sibling key, acyclic tree, explicit `order` maintained on insert/move.

@@ -1,10 +1,10 @@
 /**
- * The SQL read-model schema as Kysely table types (DESIGN §5.2). One schema serves
+ * The SQL read-model schema as Kysely table types. One schema serves
  * EVERY page type — the engine's types are pluggable, so type-specific data lives
  * in JSONB (`fields`, `items`, event `payload`), queryable with Postgres JSON
  * operators. These are the relational projection of `IWorkspaceState`; the
  * applied position is the single source of truth in `projection_offsets`, never on
- * `workspaces` (DESIGN §5.2 comment).
+ * `workspaces`.
  *
  * Kysely column helpers: `Generated<T>` marks a column the DB fills (insert may
  * omit it); `JSONColumnType<T>` is a JSONB column whose Selectable shape is `T`
@@ -43,7 +43,7 @@ export interface WorkspacesTable {
 
 /**
  * `pages(id PK, workspace_id FK, type, parent_id, title, status, archived, sections JSONB,
- * created_at, updated_at)`. Content is the typed section tree (§2), serialized to
+ * created_at, updated_at)`. Content is the typed section tree, serialized to
  * a single `sections` JSONB column.
  */
 export interface PagesTable {
@@ -61,7 +61,7 @@ export interface PagesTable {
   updated_at: string;
 }
 
-/** `outline(workspace_id, page_id, section_id, parent_section_id, key, name, ord)` (§11). */
+/** `outline(workspace_id, page_id, section_id, parent_section_id, key, name, ord)`. */
 export interface OutlineTable {
   workspace_id: string;
   page_id: string;
@@ -73,13 +73,13 @@ export interface OutlineTable {
 }
 
 /**
- * `symbol_index(...)` — the symbol projection (§6.2). For a `code` field/block whose
- * `lang` has a loaded analyzer (the §7 LanguageRegistry), one row **per declaration**:
+ * `symbol_index(...)` — the symbol projection. For a `code` field/block whose
+ * `lang` has a loaded analyzer (the LanguageRegistry), one row **per declaration**:
  * `name` / `kind` / `def_start` / `def_end` carry the symbol and its `[def_start,
  * def_end)` offset range into canonical source. For a `lang` with **no** analyzer it
  * keeps the Phase-1 STUB shape — one location-only row with `name`/`kind`/offsets null
- * (the "opaque blob served verbatim" case, §12). `source_hash` is the field/block
- * content hash (`def_hash`), so a rename reads source + hash straight from here (§6.4).
+ * (the "opaque blob served verbatim" case). `source_hash` is the field/block
+ * content hash (`def_hash`), so a rename reads source + hash straight from here.
  */
 export interface SymbolIndexTable {
   workspace_id: string;
@@ -100,7 +100,7 @@ export interface SymbolIndexTable {
 }
 
 /**
- * `reference_index(...)` — the in-source identifier index (§6.2/§11). One row per
+ * `reference_index(...)` — the in-source identifier index. One row per
  * identifier occurrence inside a `code` field/block whose `lang` has an analyzer; a
  * rename's where-used set and the `references` read tool read this. Resolution to a
  * specific declaration (cross-file / type-aware) is Phase 3 — a reference is keyed by
@@ -120,7 +120,7 @@ export interface ReferenceIndexTable {
   ref_end: number;
 }
 
-/** `xref_index(...)` — every `ref` field and inline `ref`, harvested deep (§7). */
+/** `xref_index(...)` — every `ref` field and inline `ref`, harvested deep. */
 export interface XrefIndexTable {
   workspace_id: string;
   from_page: string;
@@ -136,7 +136,7 @@ export interface XrefIndexTable {
 /** `tree_edges(workspace_id, parent_id, child_id, ord)` — ordered children. */
 export interface TreeEdgesTable {
   workspace_id: string;
-  /** The sentinel `@root` for top-level pages (DESIGN: ROOT). */
+  /** The sentinel `@root` for top-level pages (ROOT). */
   parent_id: string;
   child_id: string;
   ord: number;
@@ -163,14 +163,14 @@ export interface EventsTable {
 /**
  * `projection_offsets(workspace_id PK, applied_version, cursor, fingerprint)` —
  * the resume cursor + the `IReadModel` applied position. `waitFor({ws, version})`
- * resolves when `applied_version >= version` (the load-bearing semantic, §5.2).
+ * resolves when `applied_version >= version` (the load-bearing semantic).
  */
 export interface ProjectionOffsetsTable {
   workspace_id: string;
   applied_version: number;
   /** Durable Streams resume cursor (opaque); null before the first applied commit. */
   cursor: string | null;
-  /** Registered page-type set + schema version; a change triggers a rebuild (§5.3). */
+  /** Registered page-type set + schema version; a change triggers a rebuild. */
   fingerprint: string;
 }
 

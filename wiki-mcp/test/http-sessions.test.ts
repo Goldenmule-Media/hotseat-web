@@ -1,5 +1,5 @@
 /**
- * Streamable-HTTP MCP transport: CONCURRENT SESSIONS (DESIGN §6.1).
+ * Streamable-HTTP MCP transport: CONCURRENT SESSIONS.
  *
  * Regression test for the single-session wiring bug: `startHttp` used to connect ONE
  * `StreamableHTTPServerTransport` once, so the first client to `initialize` claimed the

@@ -1,5 +1,5 @@
 /**
- * Direct unit tests of `applyOps` (§2.1): each section operation in isolation.
+ * Direct unit tests of `applyOps`: each section operation in isolation.
  */
 import { describe, expect, it } from "vitest";
 

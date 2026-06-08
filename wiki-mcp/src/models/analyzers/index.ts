@@ -1,5 +1,5 @@
 /**
- * Built-in analyzer registration (wiki-mcp §6.2/§7). Constructs a {@link LanguageRegistry}
+ * Built-in analyzer registration. Constructs a {@link LanguageRegistry}
  * seeded with the in-tree analyzers (the TS/JS one mirrors the ModelRegistry's built-in
  * default), so the symbol-index projector resolves `get(lang)` synchronously for the
  * languages it covers. Out-of-tree analyzers may still register a lazy specifier and load

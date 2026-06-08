@@ -3,8 +3,7 @@
  * the engine depends on the `IEventLog` port (see `core/types.ts`), never on the
  * concrete client.
  *
- * Persistence model (verified empirically against @durable-streams 0.2.6/0.3.5 —
- * see BUILD_NOTES.md §1):
+ * Persistence model (verified empirically against @durable-streams 0.2.6/0.3.5):
  *  - A posted JSON array is NOT split into per-element messages: one `append()`
  *    stores exactly ONE message (the whole body). So each command's events are
  *    stored as ONE message = a JSON array `IEventEnvelope[]` (a "commit"). On read
@@ -44,7 +43,7 @@ export interface EventLogConfig {
 /**
  * Is this error a 409 sequence/exists conflict from the DS client?
  * Covers `FetchError` (`.status`), `DurableStreamError` (`.status`/`.code`), and
- * any error whose message names a sequence/conflict (defensive, per BUILD_NOTES).
+ * any error whose message names a sequence/conflict (defensive).
  */
 function isConflict(e: unknown): boolean {
   if (e instanceof FetchError) return e.status === 409;

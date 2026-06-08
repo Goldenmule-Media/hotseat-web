@@ -1,8 +1,8 @@
 /**
- * The consolidating logger (DESIGN §8.5). `wiki-server` is the natural place to
+ * The consolidating logger. `wiki-server` is the natural place to
  * unify telemetry from *both* planes it runs — the stream host **and** the hosted
  * `wiki-mcp` — so it constructs ONE structured {@link Logger} (the interface
- * `wiki-mcp` injects, see wiki-mcp/DESIGN §9) and fans every record three ways:
+ * `wiki-mcp` injects) and fans every record three ways:
  *
  *  1. **stdout** (`json` off a TTY, else `pretty`);
  *  2. a **bounded in-memory ring buffer** (`--log-buffer`, default 1000) backing
@@ -13,8 +13,7 @@
  * monotonic per-process counter, `boot` identifies this process run (so a tail
  * detects a restart and resyncs rather than gapping), and `source ∈ server | stream
  * | mcp` tags origin. The `control.ts` listener reads from the ring buffer and
- * subscribes here; it is NOT a durable stream — logs are ephemeral operational data
- * (DESIGN §8.5).
+ * subscribes here; it is NOT a durable stream — logs are ephemeral operational data.
  *
  * This file imports the {@link Logger}/{@link ILogger} interface from `wiki-mcp`
  * (the module `wiki-server` hosts), never from `wiki` directly (G2).
@@ -25,14 +24,14 @@ import type { Logger as ILogger } from "wiki-mcp";
 // `node dist/main.js` (raw Node ESM needs explicit extensions). The `wiki-mcp`
 // import above is a bare package specifier, so it needs none.
 
-/** Telemetry origin — which plane emitted the record (DESIGN §8.5). */
+/** Telemetry origin — which plane emitted the record. */
 export type LogSource = "server" | "stream" | "mcp";
 
 /** A severity level, matching the three {@link ILogger} methods. */
 export type LogLevel = "info" | "warn" | "error";
 
 /**
- * One consolidated log record (DESIGN §8.5). `seq`/`boot` let a tail detect gaps
+ * One consolidated log record. `seq`/`boot` let a tail detect gaps
  * and restarts; `source` tags origin; `fields` carries any structured extras
  * (merged from {@link ILogger.child} bindings + the per-call fields).
  */
@@ -45,7 +44,7 @@ export interface LogRecord {
   readonly ts: string;
   /** Severity. */
   readonly level: LogLevel;
-  /** Which plane emitted this (DESIGN §8.5). */
+  /** Which plane emitted this. */
   readonly source: LogSource;
   /** The human message. */
   readonly msg: string;
@@ -59,7 +58,7 @@ export type LogSubscriber = (record: LogRecord) => void;
 /**
  * The consolidating logger surface the host wires up. It IS an {@link ILogger}
  * (so it can be injected straight into `createWikiMcp`), plus it exposes the ring
- * buffer + subscription seam the control listener reads (DESIGN §8.5).
+ * buffer + subscription seam the control listener reads.
  */
 export interface IConsolidatingLogger extends ILogger {
   /** This process run's boot id (stable for the lifetime of the process). */
@@ -68,7 +67,7 @@ export interface IConsolidatingLogger extends ILogger {
   forSource(source: LogSource): IConsolidatingLogger;
   /**
    * History from the ring buffer, oldest→newest, filtered by the given query
-   * (DESIGN §8.5). `since` returns only records with `seq > since`; a `boot`
+   * `since` returns only records with `seq > since`; a `boot`
    * mismatch is the caller's signal to resync, so we still return what we have.
    */
   history(query?: LogHistoryQuery): LogHistoryResult;
@@ -90,7 +89,7 @@ export interface LogHistoryQuery {
   readonly source?: LogSource;
 }
 
-/** The shape `GET /_server/logs` (history mode) returns (DESIGN §8.5). */
+/** The shape `GET /_server/logs` (history mode) returns. */
 export interface LogHistoryResult {
   /** This process's boot id (so the client can detect a restart). */
   readonly boot: string;
@@ -104,9 +103,9 @@ export interface LogHistoryResult {
 
 /** Options for {@link createLogger}. */
 export interface CreateLoggerOptions {
-  /** Ring-buffer capacity (DESIGN §6 `--log-buffer`). */
+  /** Ring-buffer capacity (`--log-buffer`). */
   readonly bufferSize: number;
-  /** Output format for stdout (DESIGN §6 `--log-format`). */
+  /** Output format for stdout (`--log-format`). */
   readonly format: "pretty" | "json";
   /** Override the boot id (tests/determinism); defaults to a per-process value. */
   readonly boot?: string;
@@ -214,7 +213,7 @@ function pickSource(fields: Record<string, unknown>): LogSource | undefined {
   return s === "server" || s === "stream" || s === "mcp" ? s : undefined;
 }
 
-/** Apply a {@link LogHistoryQuery} against the ring buffer (DESIGN §8.5). */
+/** Apply a {@link LogHistoryQuery} against the ring buffer. */
 function readHistory(core: LoggerCore, query: LogHistoryQuery = {}): LogHistoryResult {
   const { since, limit, level, source } = query;
   let records = core.buffer.filter((r) => {
@@ -240,7 +239,7 @@ function defaultBoot(): string {
 }
 
 /**
- * Build the host's one consolidating logger (DESIGN §8.5). The returned value is
+ * Build the host's one consolidating logger. The returned value is
  * an {@link IConsolidatingLogger}: use {@link IConsolidatingLogger.forSource} to
  * get the `server` / `stream` / `mcp`-tagged views the host wires into the stream
  * lifecycle hooks and `createWikiMcp`. The default `source` is `server`.

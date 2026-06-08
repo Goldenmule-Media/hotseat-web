@@ -1,20 +1,20 @@
 /**
- * The MCP server (DESIGN §6) — exposes the engine command catalog + read queries as
+ * The MCP server — exposes the engine command catalog + read queries as
  * MCP tools and `wiki://` resources, plugging the two CQRS planes together with the
- * per-session token manager (DESIGN §6.2).
+ * per-session token manager.
  *
  * Built on the SDK's LOW-LEVEL {@link Server} (not the high-level `McpServer`),
  * because our tool input schemas are the engine's RAW JSON Schema (from
  * `argsSchema` / `describeMutations`), and `McpServer.registerTool` wants Zod —
  * which we don't have. The low-level `Server.setRequestHandler` also exposes
- * `extra.sessionId`, the key the token manager threads read-your-writes on
- * (DESIGN §6.2). The engine validates a write's `args` itself and rejects illegal
- * calls with structured errors the agent self-corrects on (DESIGN §6.1) — those map
+ * `extra.sessionId`, the key the token manager threads read-your-writes on.
+ * The engine validates a write's `args` itself and rejects illegal
+ * calls with structured errors the agent self-corrects on — those map
  * to a tool result with `isError: true`.
  *
  * Transports: **stdio** for a local agent (one ambient session), and
  * **streamable HTTP** for a networked / `wiki-server`-embedded deployment
- * (per-request session ids, DESIGN §6.1). The stream client / DB live elsewhere; this
+ * (per-request session ids). The stream client / DB live elsewhere; this
  * module only wires the protocol surface.
  */
 import { randomUUID } from "node:crypto";
@@ -55,14 +55,14 @@ export interface McpServerDeps {
   readonly namespace: string;
   readonly logger: Logger;
   /**
-   * Push the just-written workspace to the projection tailer (DESIGN §5.1): a local
+   * Push the just-written workspace to the projection tailer: a local
    * commit does NOT fan out to its own handle's stream subscribers, so the host wires
    * this to `ProjectionService.notify` to project THIS process's writes promptly.
    */
   readonly onWrite?: (workspace: WorkspaceId) => void;
 }
 
-/** The transport to listen on (DESIGN §6.1). */
+/** The transport to listen on. */
 export type McpTransport =
   | { readonly kind: "stdio" }
   | { readonly kind: "http"; readonly host?: string; readonly port: number; readonly path?: string };
@@ -70,7 +70,7 @@ export type McpTransport =
 /**
  * The wiki MCP server: builds the protocol surface once and connects it to a chosen
  * transport. One {@link SessionTokenManager} is shared across sessions; the transport
- * supplies each request's session id (DESIGN §6.2).
+ * supplies each request's session id.
  */
 export class WikiMcpServer {
   private readonly tokens = new SessionTokenManager();
@@ -85,7 +85,7 @@ export class WikiMcpServer {
     for (const tool of wikiTools()) this.toolsByName.set(tool.name, tool);
   }
 
-  /** Start the chosen transport (DESIGN §6.1). */
+  /** Start the chosen transport. */
   async start(transport: McpTransport): Promise<void> {
     if (transport.kind === "stdio") {
       // stdio is one ambient session: a single Server bound to the process's stdio.
@@ -117,7 +117,7 @@ export class WikiMcpServer {
    * registered. Called once per session (stdio: once; HTTP: per `initialize`), so each
    * transport gets its own Server while they all SHARE this instance's engine, read
    * model, and {@link SessionTokenManager}. That sharing is the point: the token manager
-   * keys read-your-writes by the transport-supplied `sessionId` (DESIGN §6.2), so
+   * keys read-your-writes by the transport-supplied `sessionId`, so
    * distinct sessions are independent yet read from the one read model.
    */
   private buildServer(): Server {
@@ -140,7 +140,7 @@ export class WikiMcpServer {
 
   /**
    * After a successful write tool, push its workspace to the projection tailer
-   * (DESIGN §5.1) so SQL catches up promptly. The workspace is read from the tool's
+   * so SQL catches up promptly. The workspace is read from the tool's
    * echoed `token` (decoded) or its `workspaceId`.
    */
   private afterWrite(data: unknown): void {
@@ -212,7 +212,7 @@ export class WikiMcpServer {
   }
 
   /**
-   * Map an engine error onto a structured tool error (DESIGN §6.1/§9). A
+   * Map an engine error onto a structured tool error. A
    * {@link WikiError} (validation / not-allowed / consistency-timeout) carries a
    * stable `code` the agent self-corrects on; anything else is an internal error.
    */
@@ -229,7 +229,7 @@ export class WikiMcpServer {
   // ── streamable HTTP transport ─────────────────────────────────────────────────
 
   /**
-   * Serve over streamable HTTP (DESIGN §6.1) with **per-session** transports. The MCP
+   * Serve over streamable HTTP with **per-session** transports. The MCP
    * streamable-HTTP protocol is multi-session: a POST with no `Mcp-Session-Id` that is
    * an `initialize` opens a NEW session (a fresh transport + Server, recorded under the
    * session id the transport mints); every later request carries that id and routes to
@@ -290,7 +290,7 @@ export class WikiMcpServer {
   }
 
   /**
-   * Route one HTTP request to the right session transport (DESIGN §6.1). POST is the
+   * Route one HTTP request to the right session transport. POST is the
    * JSON-RPC channel; GET opens the SSE stream and DELETE terminates a session — both
    * require an existing session id. We parse the POST body ourselves (to detect
    * `initialize` and pick the session) and pass the parsed body to the transport, which
@@ -372,7 +372,7 @@ function errorResult(text: string, data?: unknown): CallToolResult {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// HTTP helpers (per-session routing, §6.1)
+// HTTP helpers (per-session routing)
 // ────────────────────────────────────────────────────────────────────────────
 
 /** First value of a (possibly repeated) HTTP header. */

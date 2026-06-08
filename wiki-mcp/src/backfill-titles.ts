@@ -1,6 +1,6 @@
 /**
- * One-shot maintenance: backfill friendly titles onto auto-created child pages
- * (feature-review.md Item 4). Pages materialized BEFORE the friendly-title fix kept
+ * One-shot maintenance: backfill friendly titles onto auto-created child pages.
+ * Pages materialized BEFORE the friendly-title fix kept
  * the raw type id as their title (e.g. `implementation-plan`); the title is
  * denormalized into the event log, so the fix is forward-only and existing pages need
  * an explicit `setPageTitle` to catch up.

@@ -1,5 +1,5 @@
 /**
- * The projection apply step (DESIGN §5.1, ADR-M3): **fold then serialize**.
+ * The projection apply step (ADR-M3): **fold then serialize**.
  *
  * For each commit (an ordered event batch ending at some `version`) we fold the
  * workspace's full history with the engine's PUBLIC `foldWorkspace` to the
@@ -10,7 +10,7 @@
  *
  * Each apply writes the workspace's row set AND the new `applied_version` in ONE
  * transaction, so `projection_offsets.applied_version` never reports ahead of the
- * data (§5.1 "atomic per commit"). The append is **idempotent**: events with
+ * data (atomic per commit). The append is **idempotent**: events with
  * `version <= applied_version` are skipped, so re-delivery causes no double-apply.
  */
 import { ROOT } from "wiki";
@@ -86,7 +86,7 @@ function pageRows(state: IWorkspaceState): PageInsert[] {
   return rows;
 }
 
-/** Build `outline` rows — the section tree, straight from folded state (§11). */
+/** Build `outline` rows — the section tree, straight from folded state. */
 function outlineRows(state: IWorkspaceState): OutlineInsert[] {
   const rows: OutlineInsert[] = [];
   for (const node of state.pages.values()) {
@@ -107,13 +107,13 @@ function outlineRows(state: IWorkspaceState): OutlineInsert[] {
 
 /**
  * Build the `symbol_index` + `reference_index` rows over every `code` field and `code`
- * block (recursing `blocks` fields, §6.2). For a `lang` with a loaded analyzer
+ * block (recursing `blocks` fields). For a `lang` with a loaded analyzer
  * ({@link LanguageRegistry}) we parse canonical source and emit one symbol row **per
  * declaration** (name/kind/container/offsets) plus one reference row per identifier
  * occurrence. For a `lang` with **no** analyzer we keep the Phase-1 STUB: a single
  * location-only symbol row (name/kind/offsets null), serving the code as an opaque
- * canonical blob (§12). Pure + deterministic: the analyzer is pure over its source, the
- * walk is source-ordered, so equal state yields equal rows (§10).
+ * canonical blob. Pure + deterministic: the analyzer is pure over its source, the
+ * walk is source-ordered, so equal state yields equal rows.
  */
 function symbolAndReferenceRows(
   state: IWorkspaceState,
@@ -133,7 +133,7 @@ function symbolAndReferenceRows(
   ): void => {
     const analyzer = langs.get(lang);
     if (analyzer === undefined) {
-      // No analyzer for this lang → the STUB: one location-only row (§12).
+      // No analyzer for this lang → the STUB: one location-only row.
       symbols.push({
         workspace_id: state.id,
         page_id: node.id,
@@ -199,7 +199,7 @@ function symbolAndReferenceRows(
   return { symbols, references };
 }
 
-/** Build `xref_index` rows — every `ref` field + inline ref, harvested deep (§7). */
+/** Build `xref_index` rows — every `ref` field + inline ref, harvested deep. */
 function xrefRows(state: IWorkspaceState): XrefInsert[] {
   const rows: XrefInsert[] = [];
   const push = (node: IPageNode, sec: ISection, field: string, target: RefTarget): void => {
@@ -337,9 +337,9 @@ export interface ApplyResult {
  * Idempotent: if the commit's head `version` is already `<= applied_version`, the
  * apply is a no-op — only `version` is returned, with no `state`/`newEvents`.
  *
- * @param fingerprint the registry fingerprint stamped on the offset row (§5.3).
+ * @param fingerprint the registry fingerprint stamped on the offset row.
  * @param languages the {@link LanguageRegistry} the symbol/reference projection
- *   consults per `code` field/block `lang` (§6.2); a lang with no analyzer keeps the
+ *   consults per `code` field/block `lang`; a lang with no analyzer keeps the
  *   location-only stub row.
  */
 export async function applyCommit(

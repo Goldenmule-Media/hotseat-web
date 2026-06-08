@@ -1,5 +1,5 @@
 /**
- * `feature-brief` page type (structured-content §13). Declarative: sections +
+ * `feature-brief` page type. Declarative: sections +
  * elements + lifecycle FSM + declarative commands + render config. No author
  * apply/render/produces. The two cross-page gates (beginImplementation, ship)
  * are pure `Precondition`s reading siblings via `related`.
@@ -53,7 +53,7 @@ const checklistComplete: Precondition = (page, related) => {
   const checklist = childOfType(related, related.self, "implementation-checklist");
   // Only MANUAL tasks gate ship; gate-tasks (`meta.computed`) are computed visibility
   // whose underlying fact is gated directly (e.g. `allCasesPassed`), so counting them
-  // here would double-gate and could deadlock if their stored status never moves (Item 3).
+  // here would double-gate and could deadlock if their stored status never moves.
   const tasks = listElements(checklist, "tasks", "items").filter((tk) => tk.meta?.["computed"] === undefined);
   if (tasks.length < 1) return { unmet: "needs ≥1 implementation-checklist task" };
   if (tasks.some((tk) => tk.status !== "done")) return { unmet: "all implementation-checklist tasks must be done" };

@@ -1,5 +1,5 @@
 /**
- * Host-behavior tests (DESIGN §11). These assert that wiki-server *hosts streams*
+ * Host-behavior tests. These assert that wiki-server *hosts streams*
  * correctly, using `@durable-streams/client` directly — with **no `wiki` import**
  * (G2). A full client/host round-trip belongs in the engine's own suite.
  */

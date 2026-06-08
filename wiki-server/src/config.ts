@@ -1,11 +1,11 @@
 /**
- * wiki-server configuration (DESIGN §6). A small, flat config resolved from
+ * wiki-server configuration. A small, flat config resolved from
  * **flags → env → defaults** (first wins). Every field has a working default, so
  * `wiki-server` runs with none.
  *
- * The host knobs map directly onto `@durable-streams/server`'s `TestServerOptions`
- * (DESIGN §4); there are deliberately no auth/TLS/body knobs here — the wrapped
- * server has no request middleware, so those live in a reverse proxy (DESIGN §9).
+ * The host knobs map directly onto `@durable-streams/server`'s `TestServerOptions`;
+ * there are deliberately no auth/TLS/body knobs here — the wrapped
+ * server has no request middleware, so those live in a reverse proxy.
  */
 
 import { existsSync, readdirSync } from "node:fs";
@@ -26,20 +26,20 @@ export interface WikiServerConfig {
   /** Log format. "auto" resolves to "pretty" on a TTY, else "json". */
   readonly logFormat: "pretty" | "json";
   /**
-   * Port for the control listener (the log/health API, DESIGN §8.5) — a SEPARATE
+   * Port for the control listener (the log/health API) — a SEPARATE
    * `http.createServer` from the stream host, since the wrapped server hosts no
-   * extra paths (DESIGN §4). Default `port + 1` (i.e. 4438).
+   * extra paths. Default `port + 1` (i.e. 4438).
    */
   readonly controlPort: number;
   /**
-   * Port for the embedded `wiki-mcp` server over streamable HTTP (DESIGN §8.5) — a
+   * Port for the embedded `wiki-mcp` server over streamable HTTP — a
    * THIRD `http.createServer` (separate from the stream host and the control
    * listener), serving the MCP endpoint clients connect to at `/mcp`. Default
    * `port + 2` (i.e. 4439).
    */
   readonly mcpPort: number;
   /**
-   * History ring-buffer size for `GET /_server/logs` (DESIGN §8.5): the most
+   * History ring-buffer size for `GET /_server/logs`: the most
    * recent N records the consolidating logger retains for replay. Default 1000.
    */
   readonly logBuffer: number;
@@ -64,7 +64,7 @@ export interface WikiServerConfig {
 /** Loopback hosts that need no reverse proxy / auth to stay private. */
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1"]);
 
-/** Is `host` a loopback address (safe to run open, DESIGN §9)? */
+/** Is `host` a loopback address (safe to run open)? */
 export function isLoopback(host: string): boolean {
   return LOOPBACK_HOSTS.has(host);
 }
@@ -184,7 +184,7 @@ export function resolveConfig(
   if (storage !== "file" && storage !== "memory") {
     throw new Error(
       `invalid --storage "${storage}" (expected "file" or "memory"; ` +
-        `@durable-streams/server has no "acid" mode — use the production tier for ACID, DESIGN §8.3)`,
+        `@durable-streams/server has no "acid" mode — use the production tier for ACID)`,
     );
   }
 
@@ -197,13 +197,13 @@ export function resolveConfig(
     throw new Error(`invalid --log-format "${rawLog}" (expected "pretty", "json", or "auto")`);
   }
 
-  // The control listener (log/health API, DESIGN §8.5) defaults to the stream
+  // The control listener (log/health API) defaults to the stream
   // port + 1 so the two never collide; explicit flag/env wins.
   const controlPort = toInt(
     pick("control-port", "WIKI_SERVER_CONTROL_PORT", String(port + 1)),
     "--control-port",
   );
-  // The embedded MCP server (streamable HTTP, DESIGN §8.5) defaults to the stream
+  // The embedded MCP server (streamable HTTP) defaults to the stream
   // port + 2 so it never collides with the stream host (+0) or the control listener (+1).
   const mcpPort = toInt(pick("mcp-port", "WIKI_SERVER_MCP_PORT", String(port + 2)), "--mcp-port");
   const logBuffer = toInt(pick("log-buffer", "WIKI_SERVER_LOG_BUFFER", "1000"), "--log-buffer");
@@ -214,7 +214,7 @@ export function resolveConfig(
 }
 
 /**
- * Operator-facing warnings for a resolved config (DESIGN §9). Returned (not
+ * Operator-facing warnings for a resolved config. Returned (not
  * logged) so they are testable; `main.ts` prints them at startup.
  */
 export function configWarnings(cfg: WikiServerConfig): string[] {
@@ -222,7 +222,7 @@ export function configWarnings(cfg: WikiServerConfig): string[] {
   if (!isLoopback(cfg.host)) {
     warnings.push(
       `host is bound to ${cfg.host} (non-loopback), but this server cannot authenticate requests. ` +
-        `Put a reverse proxy in front (TLS + bearer token) or restrict to a private network — DESIGN §9.`,
+        `Put a reverse proxy in front (TLS + bearer token) or restrict to a private network.`,
     );
   }
   if (cfg.storage === "memory") {

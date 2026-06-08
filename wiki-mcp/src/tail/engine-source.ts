@@ -1,14 +1,14 @@
 /**
- * An {@link EventSource} backed by the embedded engine (DESIGN §5.1, §8). The
+ * An {@link EventSource} backed by the embedded engine. The
  * projection tailer reads localhost streams; rather than re-implement the Durable
  * Streams wire format here, we reuse the engine's PUBLIC surface: `listWorkspaces()`
  * for catalog discovery, and a hot {@link IWorkspaceHandle}'s `history()` for each
  * workspace's full contiguous event history (exactly what `applyCommit` folds,
  * ADR-M3). Keeping the engine as the only stream consumer honors ADR-M5 (wiki-mcp
- * imports only the engine) and keeps a single hydrated tail per workspace (DESIGN §7).
+ * imports only the engine) and keeps a single hydrated tail per workspace.
  *
  * `history()` returns the FULL history; `applyCommit`'s offset-skip makes re-reading
- * idempotent (events `<= applied_version` are no-ops, §5.1), so `sinceVersion` is an
+ * idempotent (events `<= applied_version` are no-ops), so `sinceVersion` is an
  * optimization the engine source can safely ignore.
  */
 import type { IEventEnvelope, Unsubscribe, WorkspaceId } from "wiki";
@@ -30,7 +30,7 @@ export function engineEventSource(engine: EmbeddedEngine): EventSource {
     },
     /**
      * Live tail: a workspace handle's `subscribe` fans out **external** events (writes
-     * by other clients arriving on the stream tail, §8.4); a local commit through the
+     * by other clients arriving on the stream tail); a local commit through the
      * same handle does NOT fan out, so THIS process's own writes are pushed via
      * {@link ProjectionService.notify} instead. We fire on each event regardless of
      * version — the coalesced projector reads to head and the offset-skip dedupes.

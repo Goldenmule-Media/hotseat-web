@@ -1,5 +1,5 @@
 /**
- * The SQL-backed {@link IReadModel} (DESIGN §3.3, §5). Implements the engine's
+ * The SQL-backed {@link IReadModel}. Implements the engine's
  * read-side seam against `projection_offsets` + the projected tables.
  *
  * - `appliedToken(ws)` reads `projection_offsets.applied_version` and encodes it
@@ -7,11 +7,11 @@
  * - `waitFor(token)` resolves once `applied_version >= token.version`. In the v1
  *   single-process topology the tailer that writes SQL and the reader that serves
  *   `waitFor` share one process, so an **in-process notify-on-commit** wakes waiters
- *   with a short **poll** as backstop (§5.2). It rejects with the engine's
+ *   with a short **poll** as backstop. It rejects with the engine's
  *   `ConsistencyTimeoutError` after `timeoutMs`, and with a non-retryable error if
- *   the workspace's projection has **halted** (§3.3, §9).
+ *   the workspace's projection has **halted**.
  *
- * Plus the typed read queries the MCP surface serves (§5): page, tree, links,
+ * Plus the typed read queries the MCP surface serves: page, tree, links,
  * events, workspace summaries — current state, token-gated by the caller via
  * `waitFor` first.
  */
@@ -49,9 +49,9 @@ export type ReferenceRow = Selectable<ReferenceIndexTable>;
 
 /** Tuning knobs for the read model's `waitFor` backstop poll + default timeout. */
 export interface ReadModelOptions {
-  /** Default `waitFor` timeout (ms) (§3.3). */
+  /** Default `waitFor` timeout (ms). */
   readonly defaultTimeoutMs: number;
-  /** Backstop poll interval (ms) for `waitFor` when no notify fires (§5.2). */
+  /** Backstop poll interval (ms) for `waitFor` when no notify fires. */
   readonly pollMs: number;
 }
 
@@ -61,7 +61,7 @@ export interface ReadModelOptions {
  * immediately, and {@link halt} marks a workspace whose projection failed closed.
  */
 export class SqlReadModel implements IReadModel {
-  /** Workspaces whose projection has halted → `waitFor` rejects non-retryably (§9). */
+  /** Workspaces whose projection has halted → `waitFor` rejects non-retryably. */
   private readonly halted = new Map<WorkspaceId, Error>();
 
   constructor(
@@ -73,7 +73,7 @@ export class SqlReadModel implements IReadModel {
 
   async appliedToken(workspace: WorkspaceId): Promise<ConsistencyToken> {
     const version = await this.readAppliedVersion(workspace);
-    // An unknown workspace is the zero token (§3.3).
+    // An unknown workspace is the zero token.
     return encodeToken(workspace, version < 0 ? 0 : version);
   }
 
@@ -93,7 +93,7 @@ export class SqlReadModel implements IReadModel {
         throw new ConsistencyTimeoutError(token, timeoutMs);
       }
       // Backstop poll: in v1 the tailer shares this process, but we still poll so a
-      // missed in-process notify can't hang the waiter past the deadline (§5.2).
+      // missed in-process notify can't hang the waiter past the deadline.
       const remaining = deadline - Date.now();
       await delay(Math.min(this.options.pollMs, Math.max(1, remaining)));
     }
@@ -102,7 +102,7 @@ export class SqlReadModel implements IReadModel {
   // ── feed side (called by the projection tailer) ──────────────────────────────
 
   /**
-   * Hook for an in-process notify-on-commit (§5.2). The poll loop already converges,
+   * Hook for an in-process notify-on-commit. The poll loop already converges,
    * so this is a latency optimization, not a correctness requirement; kept as a
    * no-op seam the tailer may call after each commit. (A future revision can wake
    * parked promises directly.)
@@ -111,7 +111,7 @@ export class SqlReadModel implements IReadModel {
     // Intentionally a no-op: `waitFor` re-reads `applied_version` on its next poll.
   }
 
-  /** Mark a workspace's projection as halted; pending/future `waitFor`s reject (§9). */
+  /** Mark a workspace's projection as halted; pending/future `waitFor`s reject. */
   halt(workspace: WorkspaceId, cause: Error): void {
     this.halted.set(workspace, cause);
   }
@@ -121,7 +121,7 @@ export class SqlReadModel implements IReadModel {
     this.halted.delete(workspace);
   }
 
-  // ── typed read queries (§5) ──────────────────────────────────────────────────
+  // ── typed read queries ──────────────────────────────────────────────────
 
   /** All workspace summaries (for `listWorkspaces`). */
   async listWorkspaces(): Promise<WorkspaceRow[]> {
@@ -164,10 +164,10 @@ export class SqlReadModel implements IReadModel {
     return this.db.selectFrom("events").selectAll().where("workspace_id", "=", workspace).orderBy("version").execute();
   }
 
-  // ── derived projections (§6) ──────────────────────────────────────────────────
+  // ── derived projections ──────────────────────────────────────────────────
 
   /**
-   * The outline rows for a page (the section tree, §6.1) — ordered by `(parent, ord)`
+   * The outline rows for a page (the section tree) — ordered by `(parent, ord)`
    * so a caller can rebuild the nested tree deterministically.
    */
   async outline(workspace: WorkspaceId, pageId: string): Promise<OutlineRow[]> {
@@ -182,7 +182,7 @@ export class SqlReadModel implements IReadModel {
   }
 
   /**
-   * Symbols in a workspace (§6.2), optionally scoped to one page and/or filtered by
+   * Symbols in a workspace, optionally scoped to one page and/or filtered by
    * exact `name` / `kind`. Stub (analyzer-less) rows have null `name`/`kind`, so a
    * name/kind filter naturally excludes them. Ordered for determinism.
    */
@@ -203,7 +203,7 @@ export class SqlReadModel implements IReadModel {
   }
 
   /**
-   * In-source references to identifier `name` in a workspace (§6.2), optionally scoped
+   * In-source references to identifier `name` in a workspace, optionally scoped
    * to one page. Resolution to a specific declaration is Phase 3; this is the
    * by-name where-used index. Ordered for determinism.
    */

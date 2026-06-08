@@ -1,5 +1,5 @@
 /**
- * `createWiki` — the public entry point (DESIGN §10.1–§10.4; BUILD_NOTES §8).
+ * `createWiki` — the public entry point.
  *
  * Wires the engine together: builds the {@link Registry}, the injected
  * {@link Services} (clock + id generation — the ONLY place a host clock / entropy
@@ -9,7 +9,7 @@
  * {@link IPageView} over an in-memory projection kept fresh by a live tail.
  *
  * Per-workspace writes are serialized through a tiny promise-chain {@link Mutex}
- * so one process never races itself (DESIGN §15); cross-process conflicts are
+ * so one process never races itself; cross-process conflicts are
  * resolved by the bus's rebase-and-retry.
  */
 import type {
@@ -64,11 +64,11 @@ import { applyWorkspace, foldWorkspace, pageStateView } from "./workspace";
 
 /** Defaults from {@link IWikiConfig}. */
 const DEFAULT_SNAPSHOT_EVERY = 100;
-/** Default token-gated read `waitFor` timeout (DESIGN §8.6 / §10.1). */
+/** Default token-gated read `waitFor` timeout. */
 const DEFAULT_READ_CONSISTENCY_TIMEOUT_MS = 5000;
 
 // ────────────────────────────────────────────────────────────────────────────
-// Mutex — a minimal promise-chain serializer (DESIGN §15)
+// Mutex — a minimal promise-chain serializer
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -136,7 +136,7 @@ export function createWiki(config: IWikiConfig): IWiki {
   };
   const bus = new CommandBus(eventLog, registry, services, busConfig);
 
-  // The default in-memory read model (DESIGN §8.4/§8.6): fed by the same fold the
+  // The default in-memory read model: fed by the same fold the
   // handle maintains off the live tail; serves token-gated reads.
   const readModel = new InMemoryReadModel(
     config.readConsistencyTimeoutMs ?? DEFAULT_READ_CONSISTENCY_TIMEOUT_MS,
@@ -216,7 +216,7 @@ class Wiki implements IWiki {
 
     // Read the full stream and fold from zero (keeps the FULL events[] for
     // history()). Snapshots remain a tested optimization but openWorkspace folds
-    // from zero for correctness of history() (BUILD_NOTES §8).
+    // from zero for correctness of history().
     const { events, nextCursor } = await this.eventLog.read(id);
     const state = foldWorkspace(events, this.registry);
     const projection: BusProjection = {
@@ -270,7 +270,7 @@ class Wiki implements IWiki {
   }
 
   /**
-   * The serializable status FSM of a registered page type (§7.2): initial status,
+   * The serializable status FSM of a registered page type: initial status,
    * the distinct states (initial first), and the named transitions — derived from
    * the registry's memoized guard. Pure; throws {@link UnknownPageTypeError} for an
    * unregistered type (via `registry.page`).
@@ -292,13 +292,13 @@ class Wiki implements IWiki {
     };
   }
 
-  /** Every registered page-type tag, in declaration order (§6.1). */
+  /** Every registered page-type tag, in declaration order. */
   pageTypes(): readonly string[] {
     return this.registry.types();
   }
 
   /**
-   * The TYPE-level authoring surface of a page type (§6.1): its FSM plus every
+   * The TYPE-level authoring surface of a page type: its FSM plus every
    * command — declared commands (with real args schema, description, target, and the
    * FSM event they fire) then generated structural commands (args implied by target).
    * The instance-free companion to {@link PageView.describeMutations}; it deliberately
@@ -377,7 +377,7 @@ class Wiki implements IWiki {
     );
     this.open.set(id, handle);
     // Seed the read model with whatever the projection has already folded so a token
-    // for an existing head is satisfiable before the first tail batch (DESIGN §8.4).
+    // for an existing head is satisfiable before the first tail batch.
     this.readModel.notifyApplied(id, projection.state.version);
     await handle.startTail(this.eventLog);
     return handle;
@@ -578,7 +578,7 @@ class WorkspaceHandle implements IWorkspaceHandle {
 
   /**
    * Run a structural command under the per-workspace mutex and wrap its outcome in
-   * a {@link Committed} carrying the committed-head token (§8.6). After committing,
+   * a {@link Committed} carrying the committed-head token. After committing,
    * advance the read model so a token threaded into a subsequent read resolves.
    */
   private structural(handler: string, args: unknown): Promise<Committed<unknown>> {
@@ -688,7 +688,7 @@ class WorkspaceHandle implements IWorkspaceHandle {
     return this.searchIndex.query([this.id], query, opts);
   }
 
-  // ── reads (token-gated; async — §8.6) ─────────────────────────────────────────
+  // ── reads (token-gated; async) ─────────────────────────────────────────
 
   async status(opts?: IReadOpts): Promise<WorkspaceStatus> {
     await this.awaitConsistency(opts);
@@ -721,7 +721,7 @@ class WorkspaceHandle implements IWorkspaceHandle {
   }
 
   /**
-   * Honor a read's consistency option (§8.6): if `consistentWith` is set, wait for
+   * Honor a read's consistency option: if `consistentWith` is set, wait for
    * the read model to apply that token (bounded by `timeoutMs` /
    * `readConsistencyTimeoutMs` → {@link ConsistencyTimeoutError}) before serving;
    * otherwise serve the current (eventually-consistent) projection.
@@ -767,7 +767,7 @@ class WorkspaceHandle implements IWorkspaceHandle {
 
   /**
    * Build the read-only {@link IRelatedReader} the command bus hands a precondition at
-   * commit (DESIGN §13.4), over the CURRENT folded projection. Lets a read-side check
+   * commit, over the CURRENT folded projection. Lets a read-side check
    * (e.g. {@link PageView.describeMutations}) evaluate the SAME pure preconditions a
    * write would, so reported availability matches what a commit would allow.
    */

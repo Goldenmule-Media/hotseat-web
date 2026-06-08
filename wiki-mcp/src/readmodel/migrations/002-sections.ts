@@ -1,5 +1,5 @@
 /**
- * Section-model read-side projections (§11): the `outline` tree, the `symbol_index`
+ * Section-model read-side projections: the `outline` tree, the `symbol_index`
  * stub (canonical code locations; name/kind/range filled in Phase 3), and the
  * `xref_index` of every `ref` (field + inline, harvested deep). Pure additive DDL.
  */

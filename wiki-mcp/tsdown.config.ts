@@ -1,7 +1,7 @@
 import { defineConfig } from "tsdown";
 
 /**
- * Build a SELF-CONTAINED, runnable `dist/bin.js` (DESIGN §10). `wiki-mcp` embeds the
+ * Build a SELF-CONTAINED, runnable `dist/bin.js`. `wiki-mcp` embeds the
  * `wiki` engine, which is consumed as TS *source* with extensionless relative imports
  * (the engine's `Bundler`-style convention), so a plain `tsc` emit would NOT run under
  * raw Node ESM. tsdown (Rolldown) **bundles the workspace lib in from source** —
@@ -14,7 +14,7 @@ import { defineConfig } from "tsdown";
 export default defineConfig({
   // The `bin` wrapper is the entry; it pulls in `./main` (the library) and the engine.
   // Building the wrapper (not the library) keeps the self-exec guard OUT of any host
-  // that bundles `./main` from source (DESIGN §3.1).
+  // that bundles `./main` from source.
   entry: ["src/bin.ts"],
   format: ["esm"],
   platform: "node",
@@ -35,9 +35,9 @@ export default defineConfig({
       /^pg($|\/)/,
       /^zod($|\/)/,
       /^zod-to-json-schema($|\/)/,
-      // The TypeScript compiler (the §6.2 TS/JS analyzer's parser) is a heavy, version-
+      // The TypeScript compiler (the TS/JS analyzer's parser) is a heavy, version-
       // sensitive host dep — keep it EXTERNAL so it loads from node_modules at runtime,
-      // never bundled into dist (structured-content §4/§13).
+      // never bundled into dist.
       /^typescript($|\/)/,
     ],
   },

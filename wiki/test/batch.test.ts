@@ -1,5 +1,5 @@
 /**
- * Atomic batch mutation (`IWorkspaceHandle.mutateMany`, §5). A batch of page commands
+ * Atomic batch mutation (`IWorkspaceHandle.mutateMany`). A batch of page commands
  * is decided by FOLDING each command over an evolving in-flight copy of state, then
  * committed as ONE atomic array-message: order-dependent sequences work (a transition
  * sees a field an earlier command set), the whole batch shares one consistency token,

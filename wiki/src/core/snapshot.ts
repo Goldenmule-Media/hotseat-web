@@ -1,10 +1,10 @@
 /**
- * Snapshot machinery (DESIGN §8.3; BUILD_NOTES §8).
+ * Snapshot machinery.
  *
  * A snapshot is a cache, never the source of truth: it records `{ version, cursor,
  * state, fingerprint }` so reopening a workspace can fold only the tail past the
  * snapshot point instead of replaying the whole stream. The page-type version
- * `fingerprint` invalidates a snapshot across a schema bump (DESIGN §8.5) — a
+ * `fingerprint` invalidates a snapshot across a schema bump — a
  * mismatch is treated as "no snapshot" and the workspace re-folds from zero.
  *
  * `IWorkspaceState` holds `Map`s (`pages`, `children`); the on-stream
@@ -97,7 +97,7 @@ export async function writeSnapshot(
  * Load the latest snapshot for `ws`, rehydrated into live `Map`-backed state.
  *
  * Returns `undefined` when there is no snapshot OR when the stored `fingerprint`
- * does not match `fingerprint` (a schema bump invalidated it, DESIGN §8.5) — in
+ * does not match `fingerprint` (a schema bump invalidated it) — in
  * both cases the caller folds from zero. On a hit, returns the deserialized
  * `state`, the resume `cursor`, and the `version` the snapshot covers (events with
  * `version ≤` this are skipped when folding the tail).

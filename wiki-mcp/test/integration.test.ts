@@ -1,9 +1,9 @@
 /**
- * Integration tests for the wiki-mcp CQRS seam (DESIGN §11).
+ * Integration tests for the wiki-mcp CQRS seam.
  *
  * Drives the REAL `wiki` engine against an in-memory `DurableStreamTestServer`
  * and an in-memory PGlite read model — the same rig the runtime wires in
- * `main.ts` — and exercises the three load-bearing behaviors §11 calls out:
+ * `main.ts` — and exercises the three load-bearing behaviors:
  *
  *  (a) **Token semantics.** A write returns a token; a read gated on that token
  *      blocks until the projection applies it and then reflects it; a read with
@@ -18,7 +18,7 @@
  *      unchanged after a redundant re-drain).
  *
  * Determinism: an injected counter `clock`/`ids` keeps engine stamps byte-stable
- * (no host wall-clock / RNG enters the engine — DESIGN §11).
+ * (no host wall-clock / RNG enters the engine).
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -436,7 +436,7 @@ describe("wiki-mcp integration: token semantics + read-your-writes + resume", ()
   });
 
   // ──────────────────────────────────────────────────────────────────────────
-  // (d) Live tail (DESIGN §5.1): event-driven projection — NO manual drain.
+  // (d) Live tail: event-driven projection — NO manual drain.
   //     Local writes arrive via `notify` (a local commit doesn't fan out to its
   //     own subscribers); external writes arrive via the handle's `subscribe`.
   // ──────────────────────────────────────────────────────────────────────────

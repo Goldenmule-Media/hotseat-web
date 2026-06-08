@@ -1,6 +1,6 @@
 /**
- * Worked-example feature page types (BUILD_NOTES §6, DESIGN §13). Re-exports the
- * five page types and a convenience array for `createWiki({ pageTypes })`.
+ * Worked-example feature page types. Re-exports the five page types and a
+ * convenience array for `createWiki({ pageTypes })`.
  */
 export { FeatureBrief } from "./feature-brief";
 export { ImplementationPlan } from "./implementation-plan";

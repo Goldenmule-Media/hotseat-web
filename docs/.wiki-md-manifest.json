@@ -59,7 +59,7 @@
       "wiki/decision-records/generic-mutations-in-v1-generated-subcommands-later.md": "15570a69d3895532f73d70bbe72b77b8a5a152f0f0f57da7e5427e900b62d54c",
       "wiki/feature-specs/runtime-configurable-markdown-emitters-per-project-disk-mirrors/index.md": "1e09e717acc74fc4a0d035bcfd585b1b081526afca676304952ae6bec784e1bc",
       "wiki/feature-specs/runtime-configurable-markdown-emitters-per-project-disk-mirrors/implementation-plan.md": "1fa38cdc0b3bf56afea520f74d0516b1331d10cc6b081646c6ced57395baa79f",
-      "wiki/feature-specs/runtime-configurable-markdown-emitters-per-project-disk-mirrors/implementation-checklist.md": "1382f54ad9750c4a990065c61d338b87874810048350247875a0c707575d5159",
+      "wiki/feature-specs/runtime-configurable-markdown-emitters-per-project-disk-mirrors/implementation-checklist.md": "7dc6a444e6e3deff872bcad79fc45bcbc4c2e465f3fa618ee4471235f922ea02",
       "wiki/feature-specs/runtime-configurable-markdown-emitters-per-project-disk-mirrors/testing-plan.md": "f319705751ea11ef1765951473e66727fbcf993e42988c3153fead2b8d3f8f4f",
       "wiki/feature-specs/runtime-configurable-markdown-emitters-per-project-disk-mirrors/spec.md": "4b6df6f5124cf4be4b1df27167efff93d8a167cd4adb687324fa2b6c0ec201b7",
       "wiki/decision-records/cross-workspace-operations-are-an-admin-system-affordance-not-a-content-read.md": "78afba5243c32da742cc005bed0b1d707a3d9f046e81c6966d7dcf807e69e9f7",

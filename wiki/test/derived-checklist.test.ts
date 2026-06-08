@@ -1,6 +1,6 @@
 /**
  * The checklist's "Plan steps" view is DERIVED from the implementation-plan's steps
- * (feature-review.md Item 2) — not a hand-duplicated copy. The plan owns BOTH the step list
+ * — not a hand-duplicated copy. The plan owns BOTH the step list
  * (the canonical breakdown) AND each step's done-state; the checklist stores no step state at
  * all. So adding/removing/editing a plan step — and marking one done — flows through to the
  * checklist automatically, and `markComplete` on the checklist can never freeze progress.

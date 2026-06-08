@@ -1,5 +1,5 @@
 /**
- * CQRS consistency-token tests (DESIGN §8.6, ADR-003; BUILD_NOTES §9).
+ * CQRS consistency-token tests (ADR-003).
  *
  * The engine is strict CQRS with eventual consistency: every write returns a
  * `Committed<T>` carrying a `ConsistencyToken`, and reads either pass that token to

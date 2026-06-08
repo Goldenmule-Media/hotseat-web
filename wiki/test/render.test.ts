@@ -1,11 +1,11 @@
 /**
- * Renderer unit tests (BUILD_NOTES §9, DESIGN §17).
+ * Renderer unit tests.
  *
  * The feature-brief renderer is deterministic: equal state → byte-identical output.
- * We drive a live (in-memory) wiki through the §13.3 script to the §13.5 mid-flight
+ * We drive a live (in-memory) wiki through the worked-example script to the mid-flight
  * snapshot (status `building`, q1 resolved, q2 moved off, two commits, one reference),
  * then assert:
- *   - the rendered Markdown matches the §13.5 shape EXACTLY (byte-for-byte),
+ *   - the rendered Markdown matches the expected shape EXACTLY (byte-for-byte),
  *   - rendering the SAME state twice is byte-identical (no wall clock / RNG leak),
  *   - an independently-built wiki with the SAME script renders identically.
  *
@@ -18,14 +18,14 @@ import { featurePageTypes } from "wiki-models/feature";
 import { createTestWiki, type ITestWiki } from "../src/testing";
 
 /**
- * Build the §13.5 "Bulk export" brief at status `building` and return the handle +
+ * Build the "Bulk export" brief at status `building` and return the handle +
  * the brief's page id. `rbacTitle` is the title of a sibling brief used as the
  * `depends-on` reference target.
  */
 async function buildBuildingBrief(
   ws: IWorkspaceHandle,
 ): Promise<{ brief: PageId; plan: PageId; checklist: PageId; testPlan: PageId; token: string }> {
-  // A sibling brief to reference (the §13.5 "Access control (RBAC)").
+  // A sibling brief to reference (the "Access control (RBAC)").
   const { value: rbac } = await ws.createPage("feature-brief", {
     title: "Access control (RBAC)",
     parentId: null,
@@ -38,7 +38,7 @@ async function buildBuildingBrief(
   const briefView = await ws.page(brief, { consistentWith: briefToken });
   const [plan, checklist, testPlan] = (await briefView.children()).map((c) => c.id);
 
-  // Give the mandated children the display titles used in §13.5.
+  // Give the mandated children the display titles used in the worked example.
   await ws.setPageTitle(plan, "Implementation plan");
   await ws.setPageTitle(checklist, "Implementation checklist");
   await ws.setPageTitle(testPlan, "Testing plan");
@@ -124,7 +124,7 @@ _None._
 - \`e4f5g6h\` feat(cli): wiki export
 `;
 
-describe("feature-brief render — byte-stable + §13.5 shape", () => {
+describe("feature-brief render — byte-stable shape", () => {
   let tw: ITestWiki;
   let ws: IWorkspaceHandle;
   let brief: PageId;
@@ -141,7 +141,7 @@ describe("feature-brief render — byte-stable + §13.5 shape", () => {
     await tw.stop();
   });
 
-  it("matches the §13.5 mid-flight Markdown byte-for-byte", async () => {
+  it("matches the mid-flight Markdown byte-for-byte", async () => {
     expect(await ws.toMarkdown(brief, { consistentWith: token })).toBe(EXPECTED_BRIEF);
   });
 
@@ -152,7 +152,7 @@ describe("feature-brief render — byte-stable + §13.5 shape", () => {
     expect(md.includes("\r")).toBe(false);
   });
 
-  it("renders every §13.5 section heading exactly once, in order", async () => {
+  it("renders every section heading exactly once, in order", async () => {
     const md = await ws.toMarkdown(brief, { consistentWith: token });
     const headings = md.split("\n").filter((l) => l.startsWith("## "));
     expect(headings).toEqual([
@@ -188,7 +188,7 @@ describe("feature-brief render — equal state ⇒ identical output (across inde
       expect(await ws1.toMarkdown(b1, { consistentWith: t1 })).toBe(
         await ws2.toMarkdown(b2, { consistentWith: t2 }),
       );
-      // And both equal the canonical §13.5 expectation.
+      // And both equal the canonical expectation.
       expect(await ws1.toMarkdown(b1, { consistentWith: t1 })).toBe(EXPECTED_BRIEF);
     } finally {
       await tw1.stop();

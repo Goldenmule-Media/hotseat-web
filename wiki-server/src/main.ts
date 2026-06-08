@@ -1,25 +1,25 @@
 #!/usr/bin/env node
 /**
- * wiki-server entrypoint (DESIGN §3.1, §8.1, §8.5). One deployable that hosts BOTH
+ * wiki-server entrypoint. One deployable that hosts BOTH
  * planes in a single lifecycle:
  *
- *   1. build the **consolidating logger** (DESIGN §8.5);
+ *   1. build the **consolidating logger**;
  *   2. start the **stream host** ({@link DurableStreamTestServer}), wiring its
  *      `onStreamCreated`/`onStreamDeleted` hooks into the logger (`source: stream`);
  *   3. start **`wiki-mcp`** in-process via `createWikiMcp({ baseUrl: server.url,
  *      namespace, db, logger })` (`source: mcp`) — the hosted engine + SQL read
- *      model + MCP surface (DESIGN §3.1);
- *   4. start the **control listener** (log/health/info API, DESIGN §8.5) on
+ *      model + MCP surface;
+ *   4. start the **control listener** (log/health/info API) on
  *      `controlPort`; and
  *   5. trap signals for a graceful `stop()` of **all three**.
  *
- * `wiki-server` stays thin wiring (DESIGN §3, G1/G2): it imports
+ * `wiki-server` stays thin wiring (G1/G2): it imports
  * `@durable-streams/server` and `wiki-mcp` — **never `wiki` directly** — and owns no
  * engine/read-model/MCP logic of its own.
  *
  * The wiring is factored into {@link startWikiServer} so a host/test can boot the
  * same three subsystems and `stop()` them as a unit; the `bin` guard at the bottom
- * resolves config, starts them, and traps signals (DESIGN §8.1).
+ * resolves config, starts them, and traps signals.
  */
 import { DurableStreamTestServer, type StreamLifecycleEvent } from "@durable-streams/server";
 import { createWikiMcp, resolveConfig as resolveMcpConfig, type McpTransport, type WikiMcp, type WikiMcpConfig } from "wiki-mcp";
@@ -32,14 +32,14 @@ import { configWarnings, discoverModelBundles, resolveConfig, type WikiServerCon
 import { createLogger, type IConsolidatingLogger } from "./logger.js";
 import { startControlServer, type ControlServer } from "./control.js";
 
-/** Build the stream-host options, selecting storage mode by `dataDir` presence (DESIGN §4/§7). */
+/** Build the stream-host options, selecting storage mode by `dataDir` presence. */
 function serverOptions(c: WikiServerConfig, streamLog: IConsolidatingLogger) {
   return {
     host: c.host,
     port: c.port,
     longPollTimeout: c.longPollTimeout,
     // The stream host's own lifecycle hooks feed the consolidating logger
-    // (DESIGN §8.5) — the operationally meaningful stream events.
+    // — the operationally meaningful stream events.
     onStreamCreated: (e: StreamLifecycleEvent) =>
       streamLog.info("stream created", { path: e.path, contentType: e.contentType }),
     onStreamDeleted: (e: StreamLifecycleEvent) => streamLog.info("stream deleted", { path: e.path }),
@@ -53,7 +53,7 @@ function serverVersion(): string {
 }
 
 /**
- * Injectable seams for {@link startWikiServer} (DESIGN §11). Production passes
+ * Injectable seams for {@link startWikiServer}. Production passes
  * nothing — the defaults boot the real stream host, `wiki-mcp`, and control
  * listener. A wiring smoke test overrides {@link WikiServerDeps.startMcp} to boot the
  * stream host + control listener without standing up the full engine/read model,
@@ -78,19 +78,19 @@ export interface WikiServerDeps {
 export interface RunningWikiServer {
   /** The stream host's base URL clients point at (read back from `server.url`). */
   readonly baseUrl: string;
-  /** The control listener's base URL (log/health/info API, DESIGN §8.5). */
+  /** The control listener's base URL (log/health/info API). */
   readonly controlUrl: string;
-  /** The embedded MCP server's streamable-HTTP endpoint clients connect to (DESIGN §8.5). */
+  /** The embedded MCP server's streamable-HTTP endpoint clients connect to. */
   readonly mcpUrl: string;
-  /** The consolidating logger backing the log API (DESIGN §8.5). */
+  /** The consolidating logger backing the log API. */
   readonly logger: IConsolidatingLogger;
-  /** The hosted `wiki-mcp`, if one was started (DESIGN §3.1). */
+  /** The hosted `wiki-mcp`, if one was started. */
   readonly mcp: WikiMcp | undefined;
   /** Drain `wiki-mcp`, the control listener, and the stream host as a unit. */
   stop(): Promise<void>;
 }
 
-/** Default `startMcp`: resolve wiki-mcp's config from flags/env and boot it (DESIGN §3.1). */
+/** Default `startMcp`: resolve wiki-mcp's config from flags/env and boot it. */
 async function defaultStartMcp(
   baseUrl: string,
   logger: IConsolidatingLogger,
@@ -101,14 +101,14 @@ async function defaultStartMcp(
   // when `port: 0` auto-assigns). wiki-server supplies NO page types of its own
   // (it imports `wiki-mcp`, never `wiki`); a real host injects its set here. The
   // `transport` (streamable HTTP, built from cfg) makes the MCP endpoint network-
-  // reachable — an embedded host can't use stdio (that's its own terminal, DESIGN §8.5).
+  // reachable — an embedded host can't use stdio (that's its own terminal).
   const config: WikiMcpConfig = { ...resolveMcpConfig(process.argv.slice(2), process.env), streamBaseUrl: baseUrl };
   const mcp = await createWikiMcp({ config, pageTypes: [], logger, transport });
   return { mcp, config };
 }
 
 /**
- * Boot the whole wiki-server wiring (DESIGN §3.1, §8.1, §8.5) and return handles for
+ * Boot the whole wiki-server wiring and return handles for
  * a graceful shutdown. Order matters: stream host first (so its `baseUrl` is known),
  * then `wiki-mcp` pointed at that URL, then the control listener (so `/_server/info`
  * can report the live `baseUrl`).
@@ -120,7 +120,7 @@ export async function startWikiServer(
   const startedAt = deps.startedAt ?? Date.now();
   const startMcp = deps.startMcp ?? defaultStartMcp;
 
-  // ── 1. the consolidating logger (DESIGN §8.5) ──
+  // ── 1. the consolidating logger ──
   const logger = createLogger({ bufferSize: cfg.logBuffer, format: cfg.logFormat });
   const serverLog = logger.forSource("server");
   const streamLog = logger.forSource("stream");
@@ -136,7 +136,7 @@ export async function startWikiServer(
     dataDir: cfg.storage === "file" ? cfg.dataDir : undefined,
   });
 
-  // ── 3. start wiki-mcp in-process over streamable HTTP (DESIGN §3.1, §6.1) ──
+  // ── 3. start wiki-mcp in-process over streamable HTTP ──
   // The embedded MCP is served over HTTP — NOT stdio — on its own listener so a
   // networked MCP client connects to `mcpUrl`. (stdio would bind the host process's
   // own terminal, unreachable by a separate client.)
@@ -183,7 +183,7 @@ export async function startWikiServer(
     }
   }
 
-  // ── 4. start the control listener (DESIGN §8.5) ──
+  // ── 4. start the control listener ──
   const control: ControlServer = await startControlServer({
     host: cfg.host,
     port: cfg.controlPort,
@@ -224,7 +224,7 @@ export async function startWikiServer(
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// bin entry (standalone) — resolve config, start the wiring, trap signals (DESIGN §8.1)
+// bin entry (standalone) — resolve config, start the wiring, trap signals
 // ────────────────────────────────────────────────────────────────────────────
 
 /** Run as the standalone host: boot everything and shut down cleanly on SIGINT/SIGTERM. */

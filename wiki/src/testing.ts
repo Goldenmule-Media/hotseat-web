@@ -1,5 +1,5 @@
 /**
- * Dev-only testing helpers (BUILD_NOTES §8, DESIGN §10.7).
+ * Dev-only testing helpers.
  *
  * Promotes the real (in-memory) `DurableStreamTestServer` into a one-liner test
  * harness: `startTestServer()` boots a fresh server on an ephemeral port, and
@@ -9,9 +9,8 @@
  * server (same namespace) for the concurrency test.
  *
  * Host clock / entropy never enter the engine here: the injected `clock`/`ids`
- * are pure counters, so reducers/deciders/renderers stay deterministic
- * (DESIGN §11). The only non-determinism is the server's port, which is irrelevant
- * to engine output.
+ * are pure counters, so reducers/deciders/renderers stay deterministic. The only
+ * non-determinism is the server's port, which is irrelevant to engine output.
  */
 import { DurableStreamTestServer } from "@durable-streams/server";
 

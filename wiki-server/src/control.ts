@@ -1,6 +1,6 @@
 /**
- * The control listener (DESIGN §8.5). The wrapped `DurableStreamTestServer` hosts
- * no extra paths (DESIGN §4), so `wiki-server` runs its **own** small
+ * The control listener. The wrapped `DurableStreamTestServer` hosts
+ * no extra paths, so `wiki-server` runs its **own** small
  * `http.createServer` — SEPARATE from the stream host, on `--control-port`
  * (default stream port + 1) — to serve the log/health/info API:
  *
@@ -12,8 +12,8 @@
  * | `GET /_server/info` | `{ version, boot, storage, baseUrl, mcpUrl?, pid, uptimeMs }` |
  *
  * It is NOT a durable stream — it reads from the consolidating logger's ring buffer
- * and subscribes to its live feed (DESIGN §8.5). It has no built-in auth, so for a
- * shared deploy it binds loopback-only behind the reverse proxy (DESIGN §9).
+ * and subscribes to its live feed. It has no built-in auth, so for a
+ * shared deploy it binds loopback-only behind the reverse proxy.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
@@ -27,7 +27,7 @@ import type {
   LogSource,
 } from "./logger.js";
 
-/** Server facts surfaced by `GET /_server/info` (DESIGN §8.5). Mutable bits are read live. */
+/** Server facts surfaced by `GET /_server/info`. Mutable bits are read live. */
 export interface ControlInfo {
   /** Package version (from `wiki-server`'s manifest). */
   readonly version: string;
@@ -35,7 +35,7 @@ export interface ControlInfo {
   readonly storage: "file" | "memory";
   /** The stream host's base URL (read back from `server.url` after start). */
   readonly baseUrl: string;
-  /** The embedded MCP server's streamable-HTTP endpoint, if one is hosted (DESIGN §8.5). */
+  /** The embedded MCP server's streamable-HTTP endpoint, if one is hosted. */
   readonly mcpUrl?: string;
 }
 
@@ -68,11 +68,11 @@ export interface ModelsControl {
 
 /** What {@link startControlServer} needs to wire the API to the running host. */
 export interface ControlServerOptions {
-  /** Bind host (loopback by default, DESIGN §9). */
+  /** Bind host (loopback by default). */
   readonly host: string;
-  /** Control port (DESIGN §6 `--control-port`). */
+  /** Control port (`--control-port`). */
   readonly port: number;
-  /** The consolidating logger backing `/_server/logs` (DESIGN §8.5). */
+  /** The consolidating logger backing `/_server/logs`. */
   readonly logger: IConsolidatingLogger;
   /** Static server facts for `/_server/info`. */
   readonly info: ControlInfo;
@@ -96,7 +96,7 @@ export interface ControlServer {
 }
 
 /**
- * Start the control HTTP listener (DESIGN §8.5). Resolves once it is bound; the
+ * Start the control HTTP listener. Resolves once it is bound; the
  * returned {@link ControlServer} exposes its URL and a graceful `stop()`.
  */
 export function startControlServer(options: ControlServerOptions): Promise<ControlServer> {
@@ -116,7 +116,7 @@ export function startControlServer(options: ControlServerOptions): Promise<Contr
     server.listen(port, host, () => {
       server.removeListener("error", reject);
       // Read the ACTUAL bound port back from the listener — robust when `port: 0`
-      // auto-assigns (mirrors the stream host reading back `server.url`, DESIGN §6).
+      // auto-assigns (mirrors the stream host reading back `server.url`).
       const address = server.address();
       const boundPort = typeof address === "object" && address !== null ? address.port : port;
       resolve({
@@ -140,7 +140,7 @@ interface HandlerCtx {
   readonly models: ModelsControl | undefined;
 }
 
-/** Route one request (DESIGN §8.5). GET on the log/health/info paths; the models route also takes POST/DELETE. */
+/** Route one request. GET on the log/health/info paths; the models route also takes POST/DELETE. */
 function handle(req: IncomingMessage, res: ServerResponse, ctx: HandlerCtx): void {
   const url = new URL(req.url ?? "/", "http://localhost");
   const path = url.pathname;
@@ -185,7 +185,7 @@ function handle(req: IncomingMessage, res: ServerResponse, ctx: HandlerCtx): voi
   sendJson(res, 404, { error: "not_found", path });
 }
 
-/** `GET /_server/logs` history mode — read the ring buffer (DESIGN §8.5). */
+/** `GET /_server/logs` history mode — read the ring buffer. */
 function historyLogs(url: URL, res: ServerResponse, ctx: HandlerCtx): void {
   const query = parseQuery(url);
   const result = ctx.logger.history(query);
@@ -194,7 +194,7 @@ function historyLogs(url: URL, res: ServerResponse, ctx: HandlerCtx): void {
 
 /**
  * `GET /_server/logs?follow=1` tail mode — backlog from the buffer, then live via
- * SSE (DESIGN §8.5). One `LogRecord` per event. We snapshot the backlog and capture
+ * SSE. One `LogRecord` per event. We snapshot the backlog and capture
  * the live subscription's first `seq` so a record arriving mid-snapshot isn't
  * dropped or duplicated.
  */
