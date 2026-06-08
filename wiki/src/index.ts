@@ -105,6 +105,7 @@ export type {
   IWorkspaceHandle,
   // IPageView
   IMutationDescriptor,
+  IAttentionItem,
   IPageView,
   // atomic batch (IWorkspaceHandle.mutateMany)
   BatchResult,

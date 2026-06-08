@@ -70,6 +70,8 @@ export const ImplementationChecklist = definePageType({
   type: "implementation-checklist",
   version: 1,
   initialStatus: "building",
+  // markComplete carries no `agency` — driven by the brief's `ship` cascade, not the agent
+  // (it is ungated, so surfacing it would invite completing an empty checklist).
   statusTransitions: [t("building", "markComplete", "complete"), t("complete", "reopen", "building")],
   finalize: "markComplete",
   sections: {

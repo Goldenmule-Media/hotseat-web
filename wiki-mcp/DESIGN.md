@@ -430,8 +430,13 @@ are **plugged together**.
   **Structural** commands (`createPage`, `reparent`, `link`, …) aren't covered by `describeMutations()` today
   (it is page-scoped in `api.ts`), so their tool schemas need a small engine addition (a structural-command
   catalog) or hand-authored schemas in v1. Plus read tools (`getPage`, `renderPage`, `tree`, `listWorkspaces`,
-  `search`, `openQuestions`) and the **derived-projection** read tools `outline`, `symbols`, and `references`
-  (§6) — token-gated like every read.
+  `search`, `attention`, `nextActions`) and the **derived-projection** read tools `outline`, `symbols`, and
+  `references` (§6) — token-gated like every read. `attention` is a generic, cross-workspace scan for element
+  instances a model flags as awaiting a human via the model-declared `awaitsHuman` predicate (the host carries
+  no element-type/status vocabulary — it replaced the old hardcoded `openQuestions` question scan).
+  `nextActions(workspaceId, pageId?)` rolls each page's `describeMutations` (partitioned on the model-declared
+  edge `agency`) + `attentionItems` up across a subtree into do / blocked / humanGates / attention, so an agent
+  self-directs instead of asking which step is next.
 - **Resources (reads).** Workspaces/pages as resources — `wiki://{ns}/workspace/{id}` (rendered Markdown
   for the tree) and `…/page/{pageId}` — served from the SQL read model. Page Markdown is produced by the
   **render read model** (§5.2), not a stored render column.
@@ -455,7 +460,7 @@ read-model data":
   workspace's high-water mark and includes the token in the tool result (so a client *may* also thread it).
 - A **single-workspace read** passes that workspace's high-water token as `consistentWith`, waiting for the
   SQL read model to catch up ([§3.3](#33-reads-wait-on-a-token)) before serving.
-- A **cross-workspace read** (`search`, `openQuestions`) **fans out** — it waits on the high-water token of
+- A **cross-workspace read** (`search`, `attention`) **fans out** — it waits on the high-water token of
   *each* workspace the session has written, so the result reflects all of the session's writes, not just
   one (a single combined token *vector* is [§14](#14-future-work)).
 
@@ -618,7 +623,7 @@ Tests target the **CQRS seam** and the **projection**, using an in-memory `Durab
   reflects the write — and `waitFor` is what makes it pass (prove by injecting projection lag).
 - **Projection correctness.** For a scripted history, the serialized SQL equals the engine's folded
   `IWorkspaceState` (page/section/field/tree/link rows + JSONB, with `list` elements and `blocks` trees in
-  field JSONB, §5.2); cross-workspace queries (`openQuestions`) match.
+  field JSONB, §5.2); cross-workspace queries (`attention`) match.
 - **Derived projections (§6).** For a scripted history, `outline` equals the folded section tree; the symbol
   index covers symbols in **both** `code` fields and `code` blocks (keyed by `block_id`); the cross-reference
   index resolves every `ref` field **and** inline ref-span (the walk descends into block/inline trees), and

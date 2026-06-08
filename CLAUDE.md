@@ -141,3 +141,10 @@ and the embedded **wiki-mcp** streamable-HTTP MCP endpoint (`:4439/mcp`). File s
   (documented, not enforced in v1).
 - `.mcp.json` wires this Claude Code session's `wiki` MCP server to `http://127.0.0.1:4439/mcp` — i.e. a
   locally-running `wiki-server`. The `wiki` MCP tools won't work unless that server is up (with a model loaded).
+- **Self-direction (don't ask "what next?").** The wiki is self-directing via two model-declared classifiers
+  the engine surfaces generically: per-edge `agency` (`"agent"` = a forward edge to drive autonomously;
+  `"human"` = a sign-off/decision gate) on FSM transitions, and a per-instance `awaitsHuman` predicate on
+  element types. After a write, use the echoed `next` / the `nextActions` tool to drive the agent edges to
+  completion (a `blocked` edge's unmet reason names the content to author); stop only at `agency:"human"`
+  gates and `awaitsHuman` items (the `attention` tool lists them). Both classifiers live in `wiki-models`;
+  `wiki`/`wiki-mcp` stay schema-agnostic.

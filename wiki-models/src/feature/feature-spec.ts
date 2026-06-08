@@ -94,6 +94,9 @@ export const FeatureSpec = definePageType({
   label: "Spec",
   version: 1,
   initialStatus: "drafting",
+  // seal carries no `agency` — driven by the brief's `ship` cascade, not the agent (its
+  // everyDecisionReferenced gate passes vacuously on an empty spec, so surfacing it would
+  // invite sealing a spec with no design content).
   statusTransitions: [t("drafting", "seal", "sealed"), t("sealed", "reopen", "drafting")],
   finalize: "seal",
   sections: {

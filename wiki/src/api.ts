@@ -518,6 +518,37 @@ export interface IMutationDescriptor {
   readonly description?: string;
   /** Which section/field this command edits (§6 write-gate surfacing). */
   readonly target?: { readonly section: string; readonly field?: string };
+  /**
+   * Model-declared autonomy classifier for a PAGE-transition command, joined from its
+   * FSM edge's meta ({@link ITransition.meta}.agency): `"agent"` = a forward edge an
+   * in-gate agent drives autonomously; `"human"` = a sign-off/decision gate the agent
+   * stops at. Present ONLY for a page transition that is legal from the current status
+   * (so its presence already filters to reachable edges); absent for content/generated/
+   * untargeted commands, element transitions, and unclassified (escape/backward) edges.
+   * Lets a generic roll-up partition do/blocked/humanGates with zero command-name knowledge.
+   */
+  readonly agency?: "agent" | "human";
+}
+
+/**
+ * One element instance flagged by its type's {@link ElementDecl.awaitsHuman} predicate —
+ * surfaced by {@link IPageView.attentionItems}. Addresses the element generically (section
+ * key + list field + element id) and carries its type tag + current FSM status, so a host
+ * can roll these up across a subtree with NO element-type literal of its own.
+ */
+export interface IAttentionItem {
+  /** The page this element lives on. */
+  readonly pageId: PageId;
+  /** The owning section's stable model key. */
+  readonly sectionKey: string;
+  /** The list field on that section holding the element. */
+  readonly field: string;
+  /** The element's stable id ({@link IItem.id}). */
+  readonly elementId: string;
+  /** The element's type tag (the list's `elementType`). */
+  readonly elementType: string;
+  /** The element's current FSM status, if it has one. */
+  readonly status?: string;
 }
 
 export interface IPageView<K extends PageTypeName = PageTypeName> {
@@ -532,6 +563,13 @@ export interface IPageView<K extends PageTypeName = PageTypeName> {
   state(opts?: IReadOpts): Promise<DeepReadonly<PageState>>;
   availableMutations(opts?: IReadOpts): Promise<readonly CommandName<K>[]>;
   describeMutations(opts?: IReadOpts): Promise<readonly IMutationDescriptor[]>;
+  /**
+   * Generic per-instance ATTENTION scan: every section-level list element on this page whose
+   * element type declares a pure {@link ElementDecl.awaitsHuman} predicate that currently
+   * returns true. Drives self-direction ("where does a human belong?") with ZERO element-type
+   * knowledge in the engine or host. Token-gated like every read.
+   */
+  attentionItems(opts?: IReadOpts): Promise<readonly IAttentionItem[]>;
   toMarkdown(opts?: IReadOpts): Promise<string>;
   mutate<C extends CommandName<K>>(command: C, args: CommandArgs<K, C>): Promise<Committed<CommandResult<K, C>>>;
   /** Atomic ordered batch of commands on this page — see {@link IWorkspaceHandle.mutateMany}. */
@@ -546,7 +584,13 @@ export interface ITransition<S extends string = string, C extends string = strin
   readonly fromState: S;
   readonly event: C;
   readonly toState: S;
-  readonly meta?: { readonly description?: string };
+  /**
+   * Optional model-declared edge metadata. `agency` is the autonomy classifier read
+   * generically by hosts to self-direct an agent: `"agent"` = a forward edge an in-gate
+   * agent should drive autonomously; `"human"` = a sign-off/decision gate where the agent
+   * stops; absent = an escape/backward edge the agent neither auto-fires nor stops for.
+   */
+  readonly meta?: { readonly description?: string; readonly agency?: "agent" | "human" };
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -563,7 +607,8 @@ export interface FsmTransition {
   readonly event: string;
   /** Target status. */
   readonly to: string;
-  readonly meta?: { readonly description?: string };
+  /** Mirrors {@link ITransition.meta} (incl. the `agency` autonomy classifier). */
+  readonly meta?: { readonly description?: string; readonly agency?: "agent" | "human" };
 }
 
 /** A page type's status FSM, serializable and self-contained. */
@@ -602,6 +647,11 @@ export interface TypeCommandDescriptor {
   readonly target?: { readonly section: string; readonly field?: string };
   /** The FSM event this command fires, when it is a page/element transition. */
   readonly transition?: { readonly level: "page" | "element"; readonly event: string };
+  /**
+   * For a PAGE transition: the model-declared agency of the FSM edge it fires
+   * ({@link ITransition.meta}.agency), independent of any page instance. Absent otherwise.
+   */
+  readonly agency?: "agent" | "human";
   /** True for an engine-generated structural command (vs a model-declared one). */
   readonly generated: boolean;
 }
@@ -797,6 +847,14 @@ export interface ElementDecl {
   readonly status?: { readonly initial: string; readonly transitions: readonly ITransition[] };
   readonly meta?: ISchema;
   readonly reduceMeta?: (meta: unknown, op: SectionOp) => unknown;
+  /**
+   * Optional PURE per-instance predicate flagging an element of this type as awaiting a
+   * human (sign-off / decision). Evaluated per element instance over its folded state —
+   * same flavor as a {@link Precondition}/`ComputedFlag` (pure, deterministic, no clock/
+   * RNG). Surfaced generically via {@link IPageView.attentionItems}; the engine never
+   * inspects an element-type literal — only whether this predicate is declared and true.
+   */
+  readonly awaitsHuman?: (element: DeepReadonly<IItem>) => boolean;
 }
 
 /** Section-set contract (§6). */

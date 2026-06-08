@@ -10,8 +10,10 @@
  *   from `IPageView.describeMutations()`), which is how an agent discovers the exact
  *   per-page input schema before calling `mutatePage` (DESIGN §6.1 "only-legal-actions").
  * - **Read tools.** `getPage`, `renderPage`, `tree`, `listWorkspaces`, `search`,
- *   `openQuestions` — backed by the SQL read model (DESIGN §5), token-gated per the
- *   session's high-water marks (DESIGN §6.2).
+ *   `attention` — backed by the SQL read model (DESIGN §5), token-gated per the
+ *   session's high-water marks (DESIGN §6.2). `nextActions` additionally rolls the
+ *   engine's per-page `describeMutations`/`attentionItems` up across a subtree to
+ *   self-direct an agent (do / blocked / humanGates / attention).
  *
  * Each tool is a plain {@link WikiTool} descriptor (name + JSON-Schema input +
  * handler). `server.ts` registers them on the low-level MCP `Server` so the engine's
@@ -21,7 +23,17 @@
  * (DESIGN §6.2). Write tools advance the session's high-water mark and echo the
  * token in their result so a client MAY also thread it.
  */
-import { encodeToken, StaleEditError, type ISearchIndex, type JsonSchema, type WorkspaceId } from "wiki";
+import {
+  encodeToken,
+  PageNotFoundError,
+  StaleEditError,
+  type ConsistencyToken,
+  type IReadOpts,
+  type ISearchIndex,
+  type IWorkspaceHandle,
+  type JsonSchema,
+  type WorkspaceId,
+} from "wiki";
 
 import { asPageId, asWorkspaceId, type EmbeddedEngine } from "../engine.js";
 import type { SqlReadModel } from "../readmodel/readmodel.js";
@@ -149,6 +161,168 @@ async function awaitAllSearchConsistency(index: ISearchIndex, ctx: WikiToolConte
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Self-direction roll-up (generic over the engine's model-declared classifiers:
+// transition `agency` + element `awaitsHuman`; NO page-type knowledge lives here)
+// ────────────────────────────────────────────────────────────────────────────
+
+/** A page-transition command surfaced by the roll-up, tagged with the page it lives on. */
+interface ActionRef {
+  readonly pageId: string;
+  readonly pageType: string;
+  readonly command: string;
+  /** The first unmet-precondition reason, when the edge is currently blocked. */
+  readonly reason?: string;
+}
+
+/** An element instance a model flags as awaiting a human (via `awaitsHuman`). */
+interface AttentionRef {
+  readonly pageId: string;
+  readonly sectionKey: string;
+  readonly field: string;
+  readonly itemId: string;
+  readonly status?: string;
+}
+
+/**
+ * The generic "what to do next" partition of a subtree, derived purely from the engine's
+ * model-declared classifiers — there is no command-name / element-type literal here:
+ * - `do`         — agent edges legal right now (drive these autonomously);
+ * - `blocked`    — agent edges gated by an unmet precondition (satisfy `reason`, then drive);
+ * - `humanGates` — sign-off/decision edges where a human decides (stop here);
+ * - `attention`  — element instances flagged as awaiting a human.
+ */
+interface NextSummary {
+  do: ActionRef[];
+  blocked: ActionRef[];
+  humanGates: ActionRef[];
+  attention: AttentionRef[];
+}
+
+/**
+ * Roll a set of pages up into a {@link NextSummary} by reading each page's
+ * `describeMutations` (partitioned on the model-declared `agency`) and `attentionItems`
+ * (its model-declared `awaitsHuman` instances). `agency` is present only for an edge legal
+ * from the page's current status, so its presence already filters to reachable edges.
+ */
+async function rollupSubtree(
+  handle: IWorkspaceHandle,
+  pageIds: readonly string[],
+  opts: IReadOpts | undefined,
+): Promise<NextSummary> {
+  const summary: NextSummary = { do: [], blocked: [], humanGates: [], attention: [] };
+  for (const id of pageIds) {
+    // The SQL read model (structure) can be one commit ahead of this hot engine handle
+    // under a concurrent other-session write; skip a page the engine hasn't folded yet
+    // rather than failing the whole advisory roll-up.
+    let view;
+    try {
+      view = await handle.page(asPageId(id), opts);
+    } catch (e) {
+      if (e instanceof PageNotFoundError) continue;
+      throw e;
+    }
+    const [descriptors, items] = await Promise.all([view.describeMutations(opts), view.attentionItems(opts)]);
+    const pageType = view.type;
+    for (const d of descriptors) {
+      const ref: ActionRef = {
+        pageId: id,
+        pageType,
+        command: d.name,
+        ...(d.unmet !== undefined ? { reason: d.unmet } : {}),
+      };
+      if (d.agency === "agent") (d.available ? summary.do : summary.blocked).push(ref);
+      else if (d.agency === "human") summary.humanGates.push(ref);
+    }
+    for (const it of items) {
+      summary.attention.push({
+        pageId: it.pageId,
+        sectionKey: it.sectionKey,
+        field: it.field,
+        itemId: it.elementId,
+        ...(it.status !== undefined ? { status: it.status } : {}),
+      });
+    }
+  }
+  return summary;
+}
+
+/** Best-effort single-page roll-up for a just-committed write — never throws (advisory). */
+async function summarizeNext(
+  handle: IWorkspaceHandle,
+  pageId: string,
+  token: ConsistencyToken,
+): Promise<NextSummary | undefined> {
+  try {
+    return await rollupSubtree(handle, [pageId], { consistentWith: token });
+  } catch {
+    return undefined; // the write already committed; the hint is best-effort
+  }
+}
+
+/** Compact one-line suffix for a write tool's text (empty when nothing is pending). */
+function nextLine(n: NextSummary | undefined): string {
+  if (n === undefined) return "";
+  if (n.do.length + n.blocked.length + n.humanGates.length + n.attention.length === 0) return "";
+  return (
+    `\nNext: ${n.do.length} ready, ${n.blocked.length} blocked, ` +
+    `${n.humanGates.length} human gate(s), ${n.attention.length} awaiting human ` +
+    "(call nextActions for detail)."
+  );
+}
+
+/** Render a {@link NextSummary} as readable, sectioned text for the nextActions tool. */
+function renderNextSummary(n: NextSummary): string {
+  const parts: string[] = [];
+  const refLine = (a: ActionRef): string =>
+    `- ${a.command} on ${a.pageId} (${a.pageType})${a.reason !== undefined ? ` — ${a.reason}` : ""}`;
+  if (n.do.length > 0) parts.push("Ready — drive these now:", ...n.do.map(refLine));
+  if (n.blocked.length > 0) parts.push("Blocked — satisfy the reason, then the edge opens:", ...n.blocked.map(refLine));
+  if (n.humanGates.length > 0) parts.push("Human gates — stop here; a person decides:", ...n.humanGates.map(refLine));
+  if (n.attention.length > 0)
+    parts.push(
+      "Awaiting human — escalated items:",
+      ...n.attention.map((a) => `- ${a.itemId} on ${a.pageId} (${a.sectionKey}.${a.field})${a.status !== undefined ? ` [${a.status}]` : ""}`),
+    );
+  return parts.length === 0 ? "Nothing pending — this subtree is complete or fully human-gated." : parts.join("\n");
+}
+
+/**
+ * The non-archived page ids of a subtree (or the whole workspace when `scope` is null),
+ * using the same archived-hidden marking as the `tree` tool — so the roll-up never offers
+ * actions on archived pages (which the engine refuses to mutate).
+ */
+function visibleSubtreeIds(
+  pages: readonly { id: string; archived?: boolean | null }[],
+  edges: readonly { parent_id: string; child_id: string; ord: number }[],
+  scope: string | null,
+): string[] {
+  const archived = new Set(pages.filter((p) => p.archived === true).map((p) => p.id));
+  const sorted = [...edges].sort((a, b) => a.ord - b.ord);
+  const childrenOf = new Map<string, string[]>();
+  for (const e of sorted) {
+    const list = childrenOf.get(e.parent_id) ?? [];
+    list.push(e.child_id);
+    childrenOf.set(e.parent_id, list);
+  }
+  const out: string[] = [];
+  const walk = (id: string, underArchived: boolean): void => {
+    const hidden = underArchived || archived.has(id);
+    if (!hidden) out.push(id);
+    for (const child of childrenOf.get(id) ?? []) walk(child, hidden);
+  };
+  if (scope !== null) {
+    walk(scope, false);
+  } else {
+    // Roots are parent ids that are never a child (the `@root` sentinel) — start from
+    // their children (the actual top-level pages), never the sentinel itself.
+    const childIds = new Set(edges.map((e) => e.child_id));
+    const roots = [...childrenOf.keys()].filter((p) => !childIds.has(p)).sort();
+    for (const root of roots) for (const child of childrenOf.get(root) ?? []) walk(child, false);
+  }
+  return out;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Write tools (structural commands — hand-authored schemas)
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -174,7 +348,11 @@ const createPageTool: WikiTool = {
       parentId: optStrOrNull(args, "parentId") as never,
     });
     ctx.tokens.recordWrite(ctx.sessionId, token);
-    return { text: `Created page ${value}.`, data: { pageId: value, token } };
+    const next = await summarizeNext(handle, value, token);
+    return {
+      text: `Created page ${value}.` + nextLine(next),
+      data: { pageId: value, token, ...(next !== undefined ? { next } : {}) },
+    };
   },
 };
 
@@ -388,9 +566,14 @@ const mutatePageTool: WikiTool = {
     const ws = asWorkspaceId(reqStr(args, "workspaceId"));
     const handle = await ctx.engine.open(ws);
     const cmdArgs = (args.args ?? {}) as Record<string, unknown>;
-    const { value, token } = await handle.mutate(asPageId(reqStr(args, "pageId")), reqStr(args, "command"), cmdArgs);
+    const pageId = asPageId(reqStr(args, "pageId"));
+    const { value, token } = await handle.mutate(pageId, reqStr(args, "command"), cmdArgs);
     ctx.tokens.recordWrite(ctx.sessionId, token);
-    return { text: `Ran ${reqStr(args, "command")}.`, data: { result: value, token } };
+    const next = await summarizeNext(handle, pageId, token);
+    return {
+      text: `Ran ${reqStr(args, "command")}.` + nextLine(next),
+      data: { result: value, token, ...(next !== undefined ? { next } : {}) },
+    };
   },
 };
 
@@ -453,11 +636,40 @@ const mutatePageBatchTool: WikiTool = {
     // committing nothing — server.ts surfaces it as a structured [BATCH_COMMAND_FAILED] error.
     const { value, token } = await handle.mutateMany(pageId, commands);
     ctx.tokens.recordWrite(ctx.sessionId, token);
+    const next = await summarizeNext(handle, pageId, token);
     return {
-      text: `Ran ${commands.length} command(s) on ${reqStr(args, "pageId")} in one atomic commit.`,
+      text: `Ran ${commands.length} command(s) on ${reqStr(args, "pageId")} in one atomic commit.` + nextLine(next),
       // `value` is undefined on an idempotent (commandId) replay — guard the contract.
-      data: { results: value?.results ?? [], token },
+      data: { results: value?.results ?? [], token, ...(next !== undefined ? { next } : {}) },
     };
+  },
+};
+
+const nextActionsTool: WikiTool = {
+  name: "nextActions",
+  description:
+    "Self-direction roll-up across a page's subtree (or the whole workspace): partitions the " +
+    "model-declared FSM edges into `do` (agent edges legal now — drive these yourself), `blocked` " +
+    "(agent edges with the unmet precondition to satisfy first — the reason names the content to " +
+    "author), `humanGates` (sign-off/decision edges where a person decides — stop), and `attention` " +
+    "(items a model flags as awaiting a human). Drive `do`/`blocked` to completion; only `humanGates` " +
+    "+ `attention` are real stopping points. Generic — no page-type knowledge.",
+  inputSchema: obj(
+    { workspaceId: STR, pageId: nullableStr("Scope to this page's subtree, or null/omit for the whole workspace.") },
+    ["workspaceId"],
+  ),
+  write: false,
+  async handle(args, ctx) {
+    const ws = asWorkspaceId(reqStr(args, "workspaceId"));
+    await awaitConsistency(ctx, ws);
+    const handle = await ctx.engine.open(ws);
+    const scope = optStrOrNull(args, "pageId");
+    const [pages, edges] = await Promise.all([ctx.readModel.listPages(ws), ctx.readModel.treeEdges(ws)]);
+    const ids = visibleSubtreeIds(pages, edges, scope);
+    const token = ctx.tokens.consistentWith(ctx.sessionId, ws);
+    const opts = token !== undefined ? { consistentWith: token } : undefined;
+    const summary = await rollupSubtree(handle, ids, opts);
+    return { text: renderNextSummary(summary), data: summary };
   },
 };
 
@@ -475,8 +687,10 @@ const describeMutationsTool: WikiTool = {
     const handle = await ctx.engine.open(ws);
     const view = await handle.page(asPageId(reqStr(args, "pageId")));
     const descriptors = await view.describeMutations();
+    const agencyTag = (a?: string): string => (a === "agent" ? " [agent]" : a === "human" ? " [human gate]" : "");
     const lines = descriptors.map(
-      (d) => `- ${d.name}${d.available ? "" : " (not currently legal)"}${d.description ? `: ${d.description}` : ""}`,
+      (d) =>
+        `- ${d.name}${agencyTag(d.agency)}${d.available ? "" : " (not currently legal)"}${d.description ? `: ${d.description}` : ""}`,
     );
     return {
       text: `Mutations for ${view.id} (${view.type}):\n${lines.join("\n")}`,
@@ -728,12 +942,13 @@ const searchTool: WikiTool = {
   },
 };
 
-const openQuestionsTool: WikiTool = {
-  name: "openQuestions",
+const attentionTool: WikiTool = {
+  name: "attention",
   description:
-    "Cross-workspace scan for pages carrying `question` items that are not yet resolved " +
-    "(an item whose status is not \"resolved\"/\"answered\"/\"closed\"). Fans out over every " +
-    "workspace the session has written so the result reflects all of its writes (DESIGN §6.2).",
+    "Cross-workspace scan for element instances a model flags as AWAITING A HUMAN — via the " +
+    "model-declared `awaitsHuman` predicate (e.g. an escalated, still-open question). Generic: the " +
+    "host carries no element-type or status vocabulary; each model decides what awaits a person. " +
+    "Fans out over every workspace the session has written so the result reflects all of its writes.",
   inputSchema: obj(
     { workspaceId: { type: ["string", "null"], description: "Restrict to one workspace, or null for all." } },
     [],
@@ -745,31 +960,43 @@ const openQuestionsTool: WikiTool = {
     else await awaitAllConsistency(ctx);
 
     const workspaces = oneWs !== null ? [asWorkspaceId(oneWs)] : (await ctx.readModel.listWorkspaces()).map((w) => w.id as WorkspaceId);
-    const RESOLVED = new Set(["resolved", "answered", "closed", "done"]);
-    const open: Array<{ workspaceId: string; pageId: string; pageTitle: string; itemId: string; status: string }> = [];
+    const waiting: Array<{ workspaceId: string; pageId: string; pageTitle: string; itemId: string; sectionKey: string; field: string; status?: string }> = [];
+    // Trade-off: going through the engine's generic `awaitsHuman` keeps the host free of any
+    // element-type vocabulary, but a null-workspace scan opens a hot handle per workspace
+    // (one fold each) — heavier than the old pure-SQL scan, and on a >32-workspace catalog
+    // it can churn the write-handle LRU. Acceptable for v1 (single-writer host); revisit by
+    // evaluating the predicate over the read-model JSONB if it becomes hot.
     for (const ws of workspaces) {
+      const handle = await ctx.engine.open(ws);
       const pages = await ctx.readModel.listPages(ws);
+      const token = ctx.tokens.consistentWith(ctx.sessionId, ws);
+      const opts = token !== undefined ? { consistentWith: token } : undefined;
       for (const p of pages) {
-        // Walk the section tree: `question` list elements live in a `list` field
-        // whose `elementType === "question"` (the new section content model §2/§3).
-        const sections = (p.sections ?? []) as Array<{
-          fields?: Record<string, { kind?: string; elementType?: string; elements?: Array<Record<string, unknown>> }>;
-        }>;
-        for (const sec of sections) {
-          for (const f of Object.values(sec.fields ?? {})) {
-            if (f.kind !== "list" || f.elementType !== "question") continue;
-            for (const q of f.elements ?? []) {
-              const status = typeof q.status === "string" ? q.status : "open";
-              if (!RESOLVED.has(status.toLowerCase())) {
-                open.push({ workspaceId: ws, pageId: p.id, pageTitle: p.title, itemId: String(q.id ?? ""), status });
-              }
-            }
-          }
+        if (p.archived === true) continue; // archived pages can't be mutated → can't be acted on
+        let view;
+        try {
+          view = await handle.page(asPageId(p.id), opts);
+        } catch (e) {
+          if (e instanceof PageNotFoundError) continue; // engine not yet caught up to a concurrent write
+          throw e;
+        }
+        for (const it of await view.attentionItems(opts)) {
+          waiting.push({
+            workspaceId: ws,
+            pageId: p.id,
+            pageTitle: p.title,
+            itemId: it.elementId,
+            sectionKey: it.sectionKey,
+            field: it.field,
+            ...(it.status !== undefined ? { status: it.status } : {}),
+          });
         }
       }
     }
-    const lines = open.map((q) => `- [${q.workspaceId}] ${q.pageTitle}: question ${q.itemId} [${q.status}]`);
-    return { text: open.length === 0 ? "No open questions." : lines.join("\n"), data: open };
+    const lines = waiting.map(
+      (q) => `- [${q.workspaceId}] ${q.pageTitle}: ${q.itemId} (${q.sectionKey}.${q.field})${q.status !== undefined ? ` [${q.status}]` : ""}`,
+    );
+    return { text: waiting.length === 0 ? "Nothing awaiting human attention." : lines.join("\n"), data: waiting };
   },
 };
 
@@ -1140,6 +1367,7 @@ export function wikiTools(): readonly WikiTool[] {
     // semantic operations (write, Phase 3)
     renameSymbolTool,
     // reads
+    nextActionsTool,
     describeMutationsTool,
     describePageTypeTool,
     listWorkspacesTool,
@@ -1147,7 +1375,7 @@ export function wikiTools(): readonly WikiTool[] {
     treeTool,
     renderPageTool,
     searchTool,
-    openQuestionsTool,
+    attentionTool,
     // derived projections (§6)
     outlineTool,
     symbolsTool,

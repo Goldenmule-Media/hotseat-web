@@ -124,9 +124,15 @@ export class WikiMcpServer {
     const server = new Server(SERVER_INFO, {
       capabilities: { tools: {}, resources: {} },
       instructions:
-        "A structured wiki. Discover workspaces (listWorkspaces), inspect a page's legal " +
-        "commands (describeMutations), then write (createPage / mutatePage / link / …) and " +
-        "read (getPage / tree / renderPage / search). Reads reflect your own prior writes.",
+        "A structured wiki. Discover workspaces (listWorkspaces), inspect a page's legal commands " +
+        "(describeMutations / describePageType), then write (createPage / mutatePage / mutatePageBatch / " +
+        "link / …) and read (getPage / tree / renderPage / search). Reads reflect your own prior writes. " +
+        "SELF-DIRECTING: this wiki tells you what to do next — do not ask the user which step comes next, " +
+        "the FSM already encodes it. Every write echoes a `next` summary, and nextActions(workspaceId, " +
+        "pageId?) rolls a subtree up into do (agent edges — drive these yourself now), blocked (agent edges " +
+        "whose unmet reason names the content to author first), humanGates (sign-off/decision edges), and " +
+        "attention (items awaiting a human). Keep driving do/blocked to completion; STOP and defer to the " +
+        "human ONLY for humanGates and attention items (use the `attention` tool to find them).",
     });
     this.registerHandlers(server);
     return server;

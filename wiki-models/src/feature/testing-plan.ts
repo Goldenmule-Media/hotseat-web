@@ -12,6 +12,8 @@ export const TestingPlan = definePageType({
   type: "testing-plan",
   version: 1,
   initialStatus: "draft",
+  // markReady carries no `agency` — driven by the brief's `ship` cascade, not the agent
+  // (it is ungated, so surfacing it would invite sealing an empty testing plan).
   statusTransitions: [t("draft", "markReady", "ready"), t("ready", "reopen", "draft")],
   finalize: "markReady",
   sections: {

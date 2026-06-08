@@ -80,12 +80,14 @@ export const FeatureBrief = definePageType({
   version: 1,
   initialStatus: "draft",
   statusTransitions: [
-    t("draft", "beginPlanning", "planning"),
-    t("planning", "beginImplementation", "building"),
+    // Forward edges the agent drives autonomously; sign-off edges are human gates.
+    // Escape/backward edges (reopenPlanning, requestChanges, abandon) carry no agency.
+    t("draft", "beginPlanning", "planning", { agency: "agent" }),
+    t("planning", "beginImplementation", "building", { agency: "agent" }),
     t("building", "reopenPlanning", "planning"),
-    t("building", "submitForReview", "review"),
+    t("building", "submitForReview", "review", { agency: "human" }),
     t("review", "requestChanges", "building"),
-    t("review", "ship", "shipped"),
+    t("review", "ship", "shipped", { agency: "human" }),
     t("draft", "abandon", "abandoned"),
     t("planning", "abandon", "abandoned"),
     t("building", "abandon", "abandoned"),
@@ -127,8 +129,19 @@ export const FeatureBrief = definePageType({
     component: { fields: { name: { kind: "scalar", required: true } } },
     constraint: { fields: { text: { kind: "prose", required: true } } },
     question: {
-      fields: { text: { kind: "prose", required: true }, answer: { kind: "prose" } },
+      fields: {
+        text: { kind: "prose", required: true },
+        answer: { kind: "prose" },
+        // Per-instance escalation flag (absent = false). When an open question is
+        // escalated, `awaitsHuman` flags it so a host surfaces it as a human gate.
+        needsHuman: { kind: "scalar" },
+      },
       status: { initial: "open", transitions: [t("open", "answer", "resolved")] },
+      awaitsHuman: (q) => {
+        if (q.status !== "open") return false;
+        const f = q.fields["needsHuman"];
+        return f !== undefined && f.kind === "scalar" && f.value === true;
+      },
     },
     commit: {
       fields: {
@@ -173,10 +186,18 @@ export const FeatureBrief = definePageType({
       ],
     },
     askQuestion: {
-      args: zodSchema(z.object({ text: z.string() })),
+      args: zodSchema(z.object({ text: z.string(), needsHuman: z.boolean().optional() })),
       result: zodSchema(z.object({ questionId: z.string() })),
       target: { section: "questions", field: "items" },
-      set: { text: arg("text") },
+      // `needsHuman` is dropped when the arg is omitted (stored absent == false).
+      set: { text: arg("text"), needsHuman: arg("needsHuman") },
+    },
+    escalateQuestion: {
+      // Promote an existing open question to a human gate (sets needsHuman = true).
+      args: zodSchema(z.object({ questionId: z.string() })),
+      result: zodSchema(z.object({ questionId: z.string() })),
+      target: { section: "questions", field: "items", element: { idArg: "questionId" } },
+      set: { needsHuman: { literal: { kind: "scalar", value: true } } },
     },
     answerQuestion: {
       args: zodSchema(z.object({ questionId: z.string(), answer: z.string() })),

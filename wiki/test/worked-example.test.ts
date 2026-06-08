@@ -352,3 +352,51 @@ describe("worked example: plan → build → ship a feature", () => {
     ]);
   });
 });
+
+describe("per-instance human gates: awaitsHuman / attentionItems", () => {
+  let harness: ITestWiki;
+  let wiki: IWiki;
+  let ws: IWorkspaceHandle;
+  let brief: PageId;
+
+  beforeAll(async () => {
+    harness = await createTestWiki(featurePageTypes);
+    wiki = harness.wiki;
+    ws = await wiki.createWorkspace({ name: "Attention" });
+    brief = (await ws.createPage("feature-brief", { title: "Gates", parentId: null })).value;
+  });
+  afterAll(async () => {
+    await harness.stop();
+  });
+
+  const attention = async (token?: string) =>
+    (await ws.page(brief, token !== undefined ? { consistentWith: token } : undefined)).attentionItems();
+
+  it("flags ONLY escalated, still-open questions — not plain open ones", async () => {
+    const plain = ((await ws.mutate(brief, "askQuestion", { text: "agent can answer this" })).value as { questionId: string }).questionId;
+    const esc = await ws.mutate(brief, "askQuestion", { text: "needs a human", needsHuman: true });
+    const escId = (esc.value as { questionId: string }).questionId;
+
+    const items = await attention(esc.token);
+    expect(items.map((i) => i.elementId)).toEqual([escId]); // plain question is NOT awaiting a human
+    const it0 = items[0]!;
+    expect(it0.elementType).toBe("question");
+    expect(it0.sectionKey).toBe("questions");
+    expect(it0.status).toBe("open");
+    expect(plain).not.toBe(escId);
+  });
+
+  it("escalateQuestion promotes an existing open question to a human gate", async () => {
+    const q = ((await ws.mutate(brief, "askQuestion", { text: "later this needs a call" })).value as { questionId: string }).questionId;
+    expect((await attention()).some((i) => i.elementId === q)).toBe(false);
+    const up = await ws.mutate(brief, "escalateQuestion", { questionId: q });
+    expect((await attention(up.token)).some((i) => i.elementId === q)).toBe(true);
+  });
+
+  it("drops a question from attention once it is answered (resolved)", async () => {
+    const q = ((await ws.mutate(brief, "askQuestion", { text: "decide X", needsHuman: true })).value as { questionId: string }).questionId;
+    expect((await attention()).some((i) => i.elementId === q)).toBe(true);
+    const answered = await ws.mutate(brief, "answerQuestion", { questionId: q, answer: "decided: X" });
+    expect((await attention(answered.token)).some((i) => i.elementId === q)).toBe(false);
+  });
+});

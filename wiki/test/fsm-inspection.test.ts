@@ -34,11 +34,13 @@ describe("IWiki.fsmOf — serializable status-FSM descriptor", () => {
       new Set(["draft", "planning", "building", "review", "shipped", "abandoned"]),
     );
     expect(fsm.transitions).toHaveLength(10);
+    // Model-declared `agency` rides on the edge meta: forward edges the agent drives are
+    // "agent"; sign-off gates are "human"; escape/backward edges (e.g. abandon) carry none.
     expect(fsm.transitions).toEqual(
       expect.arrayContaining([
-        { from: "draft", event: "beginPlanning", to: "planning" },
-        { from: "building", event: "submitForReview", to: "review" },
-        { from: "review", event: "ship", to: "shipped" },
+        { from: "draft", event: "beginPlanning", to: "planning", meta: { agency: "agent" } },
+        { from: "building", event: "submitForReview", to: "review", meta: { agency: "human" } },
+        { from: "review", event: "ship", to: "shipped", meta: { agency: "human" } },
         { from: "review", event: "abandon", to: "abandoned" },
       ]),
     );
@@ -98,6 +100,11 @@ describe("IWiki.describeType / pageTypes — instance-free authoring surface", (
     // A declared page-transition command carries the FSM event it fires.
     const ship = desc.commands.find((c) => c.name === "ship");
     expect(ship?.transition).toEqual({ level: "page", event: "ship" });
+    // ...and its model-declared agency, joined instance-free off the static transition table
+    // (a separate code path from describeMutations' status-scoped join).
+    expect(ship?.agency).toBe("human");
+    expect(desc.commands.find((c) => c.name === "beginPlanning")?.agency).toBe("agent");
+    expect(desc.commands.find((c) => c.name === "abandon")?.agency).toBeUndefined();
   });
 
   it("includes generated structural commands (empty args schema, target only), declared first", () => {
@@ -173,6 +180,9 @@ describe("describeMutations — precondition-aware availability + unmet reason",
     expect(ship.available).toBe(false);
     expect(typeof ship.unmet).toBe("string");
     expect(ship.unmet!.length).toBeGreaterThan(0);
+    // ship is a sign-off edge — legal from `review`, so its model-declared agency is present
+    // even though it is currently precondition-blocked.
+    expect(ship.agency).toBe("human");
   });
 
   it("distinguishes FSM-illegal (no reason) from precondition-blocked (with reason)", async () => {
@@ -181,13 +191,31 @@ describe("describeMutations — precondition-aware availability + unmet reason",
     // Not a legal transition from `review` at all → unavailable, and no precondition reason.
     expect(beginPlanning.available).toBe(false);
     expect(beginPlanning.unmet).toBeUndefined();
+    // agency is read off the edge legal-from-current-status, so an unreachable edge has none.
+    expect(beginPlanning.agency).toBeUndefined();
   });
 
+  it("surfaces model-declared agency on the reachable edges of a fresh (draft) brief", async () => {
+    const fresh = await ws.createPage("feature-brief", { title: "Agency", parentId: null });
+    const descriptors = await (await ws.page(fresh.value, { consistentWith: fresh.token })).describeMutations();
+    const by = (n: string) => descriptors.find((d) => d.name === n)!;
+    // draft → beginPlanning is the forward edge the agent drives; abandon is an unclassified
+    // escape edge; ship isn't legal from draft, so it carries no agency here.
+    expect(by("beginPlanning").agency).toBe("agent");
+    expect(by("abandon").agency).toBeUndefined();
+    expect(by("ship").agency).toBeUndefined();
+  });
+
+  // NOTE: must run last in this block — it mutates the suite-shared checklist/testPlan to
+  // satisfy the ship gates the earlier tests rely on being UNMET (declaration order is
+  // load-bearing; do not enable sequence.shuffle for this file).
   it("flips ship to available (no unmet) once every ship precondition holds", async () => {
     await ws.mutate(checklist, "checkTask", { taskId });
     const passed = await ws.mutate(testPlan, "markCasePassed", { caseId });
     const ship = await shipDescriptor(passed.token);
     expect(ship.available).toBe(true);
     expect(ship.unmet).toBeUndefined();
+    // Still a human gate once fully unblocked — agency is independent of availability.
+    expect(ship.agency).toBe("human");
   });
 });

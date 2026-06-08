@@ -19,7 +19,9 @@ import type {
   DeepReadonly,
   DomainEvent,
   FsmDescriptor,
+  IAttentionItem,
   IEventEnvelope,
+  IItem,
   IMutationDescriptor,
   IPageNode,
   IPageView,
@@ -307,6 +309,12 @@ class Wiki implements IWiki {
     const def = this.registry.page(type);
     const commands: TypeCommandDescriptor[] = [];
     for (const [name, cmd] of Object.entries(def.commands)) {
+      // Instance-free: read the edge's agency off the static transition table by event
+      // name (agency is per-event-uniform in practice). Page transitions only.
+      const agency =
+        cmd.transition?.level === "page"
+          ? def.statusTransitions.find((tr) => tr.event === cmd.transition!.event)?.meta?.agency
+          : undefined;
       commands.push({
         name,
         generated: false,
@@ -317,6 +325,7 @@ class Wiki implements IWiki {
           ? { target: { section: cmd.target.section, ...(cmd.target.field !== undefined ? { field: cmd.target.field } : {}) } }
           : {}),
         ...(cmd.transition !== undefined ? { transition: { level: cmd.transition.level, event: cmd.transition.event } } : {}),
+        ...(agency !== undefined ? { agency } : {}),
       });
     }
     for (const [name, gen] of this.registry.generatedCommands(type)) {
@@ -892,6 +901,11 @@ class PageView implements IPageView {
           }
         }
       }
+      // Join the model-declared agency off the FSM edge this command fires. Keyed on the
+      // command `name` to match the legality check above (`guard.can(node.status, name)`),
+      // so agency is present iff the edge is legal from the current status.
+      const agency =
+        cmd.transition?.level === "page" ? guard.meta(node.status, name)?.agency : undefined;
       const descriptor: IMutationDescriptor = {
         name,
         argsSchema: cmd.args.toJsonSchema(),
@@ -902,6 +916,7 @@ class PageView implements IPageView {
         ...(cmd.target !== undefined
           ? { target: { section: cmd.target.section, ...(cmd.target.field !== undefined ? { field: cmd.target.field } : {}) } }
           : {}),
+        ...(agency !== undefined ? { agency } : {}),
       };
       descriptors.push(descriptor);
     }
@@ -914,6 +929,36 @@ class PageView implements IPageView {
       });
     }
     return descriptors;
+  }
+
+  async attentionItems(opts?: IReadOpts): Promise<readonly IAttentionItem[]> {
+    await this.handle.awaitConsistency(opts);
+    const node = this.handle.nodeOf(this.id);
+    const registry = this.handle.registryRef();
+    const out: IAttentionItem[] = [];
+    // Walk the (flat) section tree; for each list field, look up the element decl's pure
+    // awaitsHuman predicate (if declared) and flag the instances it accepts. Purely
+    // structural over the model declaration — no element-type literal in the engine.
+    for (const sec of node.sections) {
+      for (const [field, f] of Object.entries(sec.fields)) {
+        if (f.kind !== "list") continue;
+        const pred = registry.element(node.type, f.elementType)?.awaitsHuman;
+        if (pred === undefined) continue;
+        for (const el of f.elements) {
+          if (pred(el as DeepReadonly<IItem>)) {
+            out.push({
+              pageId: this.id,
+              sectionKey: sec.key,
+              field,
+              elementId: el.id,
+              elementType: f.elementType,
+              ...(el.status !== undefined ? { status: el.status } : {}),
+            });
+          }
+        }
+      }
+    }
+    return out;
   }
 
   async toMarkdown(opts?: IReadOpts): Promise<string> {

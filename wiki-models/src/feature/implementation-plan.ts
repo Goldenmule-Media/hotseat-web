@@ -23,6 +23,9 @@ export const ImplementationPlan = definePageType({
   type: "implementation-plan",
   version: 1,
   initialStatus: "draft",
+  // markReady carries no `agency`: a child is finalized by the brief's `ship` cascade
+  // (whose preconditions check child content), not driven independently by the agent —
+  // surfacing it would invite sealing an incomplete child.
   statusTransitions: [t("draft", "markReady", "ready"), t("ready", "reopen", "draft")],
   finalize: "markReady",
   sections: {
