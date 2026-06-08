@@ -1,6 +1,6 @@
 # Implementation checklist
 
-**Status:** building
+**Status:** complete
 
 ## Plan steps
 - [ ] Promote `@durable-streams/client` from a devDependency to a runtime `dependency` in `wiki-mcp/package.json` (the new `EmitterConfigStore` opens its own client). Confirm the tsdown config keeps it external (npm dep, not bundled) so the engine-bundle rules are unaffected.
@@ -15,4 +15,12 @@
 - [ ] Gate: run `npm run typecheck` and `npm run test` (wiki-mcp + wiki-server). The detailed test matrix (store fold last-writer-wins, removeRenderSink + single-sink reconcile, registry boot-replay + live add/remove back-fill, MCP tool round-trip) is authored in the sibling Testing plan page.
 
 ## Tasks
-_None._
+- [x] Promote @durable-streams/client to a runtime dependency in wiki-mcp (kept external in tsdown).
+- [x] Add EmitterConfigStore over the per-namespace _emitter-config durable stream: events, pure foldEmitters (last-writer-wins), append/readAll/subscribe.
+- [x] ProjectionService: add removeRenderSink (by identity) and factor a single-sink reconcileSink out of reconcileSinks (now a loop).
+- [x] Add the toMarkdownConfig emitter→projector adapter (MarkdownDiskProjector unchanged).
+- [x] Add EmitterRegistry: boot replay + per-emitter back-fill; live add / replace / remove off the config-stream tail.
+- [x] Add MCP tools configureEmitter / listEmitters / removeEmitter; thread EmitterConfigStore into WikiToolContext + server deps.
+- [x] Remove the static markdown surface from config.ts; construct EmitterConfigStore + EmitterRegistry in main.ts instead of the boot projector.
+- [x] Docs: replace the Markdown-disk mirror section in CLAUDE.md + README with the runtime emitter API + _emitter-config stream note.
+- [x] Gate: npm run typecheck + npm run test (wiki-mcp 84, wiki-server 20, wiki 219) + build, all green; verified live against a second project.

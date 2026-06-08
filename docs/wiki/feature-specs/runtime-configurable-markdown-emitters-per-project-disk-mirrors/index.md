@@ -1,6 +1,6 @@
 # Feature: Runtime-configurable Markdown emitters (per-project disk mirrors)
 
-**Status:** building
+**Status:** shipped
 
 ## Summary
 The shipped "Markdown projection to disk" feature mirrors a workspace's deterministic Markdown to a single, statically-configured root (`--md` / `WIKI_MCP_MD_*`). That model breaks the moment one long-running server is shared by several projects: each project is a different repo checkout on disk and needs *its own* workspace mirrored into *its own* checkout's `docs/`. A single boot-time root cannot express that, and the server does not know each project's path at boot anyway.
@@ -50,4 +50,4 @@ _None._
 - [Spec](feature-spec:mq5e9i2q-0005-2in5ln)
 
 ## Commits
-_None._
+- `382cee198caf08df6255af99bf76cb7509836c70` feat(wiki-mcp): runtime-configurable Markdown emitters (per-project disk mirrors)
