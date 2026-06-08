@@ -13,16 +13,16 @@ A workspace is the aggregate and the unit of atomic consistency — one Durable 
 ## Decision
 Default rule: content and agent operations are workspace-scoped. Such a tool takes an explicit workspaceId argument and never fans out across the namespace.
 
-Cross-workspace fan-out is reserved for admin/system affordances — namespace discovery/catalog (listWorkspaces) and global search (search), where enumerating every workspace is the purpose. Anything else that wants to go cross-workspace must justify itself as admin or system, not slip in as a convenience.
+Cross-workspace fan-out is reserved for namespace discovery/catalog only — listWorkspaces — where enumerating every workspace is the whole purpose. Everything else, including full-text content search, is workspace-scoped. Anything that wants to go cross-workspace must justify itself as admin or system, not slip in as a convenience.
 
-Applied here: attention now requires a workspaceId (single workspace), and nextActions is already subtree-scoped — so the per-workspace handle fan-out is gone for routine self-direction reads.
+Applied here: attention and search both require a workspaceId, and nextActions is subtree-scoped. The only cross-workspace read left is listWorkspaces, the namespace catalog.
 
 ## Consequences
 Routine reads stay cheap and stay inside one aggregate's consistency boundary — no per-workspace fold or handle churn, and no accidental cross-aggregate coupling.
 
 The workspace boundary stays meaningful as the unit of atomic consistency; read-your-writes and consistency tokens remain per-workspace.
 
-Audit item: search is cross-workspace today, classified here as a system/discovery affordance. If content search should default to a single workspace, that is a separate, deliberate change under this rule.
+No content read fans out: full-text search is per-workspace alongside attention and nextActions, leaving listWorkspaces as the sole cross-workspace (catalog) read.
 
 ## Relations
 _None._
