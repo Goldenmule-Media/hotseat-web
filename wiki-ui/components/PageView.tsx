@@ -17,6 +17,7 @@ import type { PageId, WorkspaceId } from "wiki";
 import { fsmOf } from "../lib/host-client";
 import { useLiveWorkspace, usePage, usePageMutations, useStructuralMutator } from "../lib/live";
 import { renderMarkdown } from "../lib/markdown";
+import { typesRenderingOwnChildren } from "../lib/models";
 import { pageHref } from "../lib/routes";
 import { clearScrollTarget, scrollToTerms, useScrollTarget } from "../lib/search-scroll";
 import { findNode } from "../lib/tree";
@@ -72,9 +73,15 @@ export function PageView({
   }, [scrollTarget, workspaceId, pageId, html, mode]);
 
   const node = findNode(ws.tree, pageId);
-  const children = node?.children ?? [];
   const pageType = node?.type;
   const archived = node?.archived === true;
+  // The page renders its own curated child list in the body (e.g. a TOC's "Contents"), so
+  // suppress the generic child-pages strip rather than shadow it with a raw duplicate. This
+  // reads the model-declared `graphSections:false` signal — no type name is hardcoded.
+  const rendersOwnChildren = pageType !== undefined && typesRenderingOwnChildren.has(pageType);
+  // Never list archived children in the strip (they live in the sidebar's "Archived" section,
+  // matching TreeNav); for a self-rendering type the strip is dropped entirely.
+  const children = rendersOwnChildren ? [] : (node?.children ?? []).filter((c) => c.archived !== true);
 
   // The page TYPE's status FSM, from the worker handshake cache (synchronous). Null before
   // the handshake, on server render, or for an unknown type — the model toggle is then simply

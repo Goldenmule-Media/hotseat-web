@@ -16,3 +16,14 @@ export const pageTypes: readonly IPageType[] = [
   ...architecturePageTypes,
   ...adrPageTypes,
 ];
+
+/**
+ * Types whose render config opts OUT of the engine's auto-appended child-pages section
+ * (`render.graphSections === false`) — i.e. they render their own curated child list in
+ * the body (the `toc` type's "Contents"). The UI reads this model-declared signal
+ * generically and suppresses its own "Child pages" navigation strip for such pages, so a
+ * curated TOC isn't shadowed by a raw, duplicate list. No type name is hardcoded.
+ */
+export const typesRenderingOwnChildren: ReadonlySet<string> = new Set(
+  pageTypes.filter((t) => t.__def.render.graphSections === false).map((t) => t.__def.type),
+);

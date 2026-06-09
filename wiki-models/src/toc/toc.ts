@@ -10,8 +10,8 @@
  *  - `groups` — named buckets with an optional blurb, in display order;
  *  - `placement` — a child→group assignment + within-group order, keyed by child id.
  * Both are reconciled against the LIVE child set at render time, so a placement whose child
- * was reparented away (or whose group was removed) is silently ignored, and a brand-new
- * child appears under "Ungrouped" until curated. Presentation-local ordering: reordering the
+ * was reparented away (or whose group was removed) is silently ignored, an archived child
+ * drops out entirely, and a brand-new child appears under "Ungrouped" until curated. Presentation-local ordering: reordering the
  * TOC never touches the actual page tree.
  */
 import type {
@@ -47,7 +47,9 @@ function fieldStr(el: DeepReadonly<IItem>, key: string): string {
  */
 const contents: DerivedList = (page, ctx: IRenderCtx) => {
   const selfId = page.id as unknown as PageId;
-  const children = ctx.childrenOf(selfId);
+  // Live children, minus any that are archived — an archived page is hidden from default
+  // views, so the TOC must not surface it (it would otherwise render a dead link).
+  const children = ctx.childrenOf(selfId).filter((c) => !ctx.archivedOf(c));
   const childSet = new Set<string>(children.map((c) => String(c)));
   const titleOf = (id: PageId | string): string => ctx.titleOf(id as PageId) ?? String(id);
   // A child entry is a Markdown link to the child page (href = its stable page id; label is

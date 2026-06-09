@@ -158,4 +158,26 @@ describe("toc: group ordering and empty state", () => {
     await ws.mutate(toc, "moveGroup", { groupId: ids[0], toIndex: 0 }); // A back to front
     expect(await contentsOf(toc)).toBe("- **A**\n- **D**\n- **B**\n- **C**");
   });
+
+  it("excludes an archived child from the contents (flat and grouped), and restores it on unarchive", async () => {
+    const toc = (await ws.createPage("toc", { title: "Archiving", parentId: null })).value;
+    const one = (await ws.createPage("toc", { title: "One", parentId: toc })).value;
+    const two = (await ws.createPage("toc", { title: "Two", parentId: toc })).value;
+    const entry = (id: PageId, title: string): string => `[${title}](${id})`;
+    expect(await contentsOf(toc)).toBe(`- ${entry(one, "One")}\n- ${entry(two, "Two")}`);
+
+    // Archiving a child drops it from the flat list entirely (no dead link).
+    await ws.archivePage(two);
+    expect(await contentsOf(toc)).toBe(`- ${entry(one, "One")}`);
+
+    // It also drops from a curated group placement — and doesn't reappear under Ungrouped.
+    const groupId = ((await ws.mutate(toc, "addGroup", { title: "G" })).value as { groupId: string }).groupId;
+    await ws.mutate(toc, "assignChild", { childId: String(one), groupId });
+    await ws.mutate(toc, "assignChild", { childId: String(two), groupId });
+    expect(await contentsOf(toc)).toBe(`- **G**\n  - ${entry(one, "One")}`);
+
+    // Unarchiving brings it back, still honouring its stored placement.
+    await ws.unarchivePage(two);
+    expect(await contentsOf(toc)).toBe(`- **G**\n  - ${entry(one, "One")}\n  - ${entry(two, "Two")}`);
+  });
 });
