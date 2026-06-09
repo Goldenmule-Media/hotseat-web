@@ -1,6 +1,6 @@
 "use client";
 
-/** Workspace shell: sidebar (switcher + live tree) and a header live indicator.
+/** Workspace shell: sidebar (workspace title + live tree) and a header live indicator.
  *  The tree + indicator are driven by the shared live session (plan step 4-5). */
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -9,7 +9,7 @@ import type { WorkspaceId } from "wiki";
 import { LiveIndicator } from "../../components/LiveIndicator";
 import { TreeNav } from "../../components/TreeNav";
 import { WorkspaceError } from "../../components/WorkspaceError";
-import { WorkspaceSwitcher } from "../../components/WorkspaceSwitcher";
+import { WorkspaceTitle } from "../../components/WorkspaceTitle";
 import { useLiveWorkspace } from "../../lib/live";
 
 export default function WorkspaceLayout({ children }: { children: ReactNode }): React.JSX.Element {
@@ -28,7 +28,7 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }): 
           </Link>
           <LiveIndicator connection={ws.connection} lastEventAt={ws.lastEventAt} error={ws.error} />
         </div>
-        <WorkspaceSwitcher current={workspaceId} />
+        <WorkspaceTitle id={workspaceId} />
         <nav className="tree-nav" aria-label="Pages">
           {ws.tree === null && ws.error !== null ? (
             <WorkspaceError error={ws.error} compact />

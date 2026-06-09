@@ -102,29 +102,20 @@ code {
   max-width: 920px;
 }
 
-/* ── switcher ────────────────────────────────────────────────────────────── */
-.switcher {
-  margin-bottom: 16px;
-}
-.switcher-row {
+/* ── workspace title ─────────────────────────────────────────────────────── */
+.ws-title {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 16px;
 }
-.switcher label {
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--muted);
-}
-.switcher select {
-  width: 100%;
-  margin-top: 6px;
-  padding: 7px 8px;
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+.ws-name {
+  font-size: 15px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .icon-btn {
   background: transparent;
