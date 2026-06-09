@@ -28,6 +28,7 @@ every page renders **deterministically** to Markdown. Agents reach it over **MCP
 | `wiki-models` | The schema layer — the only home for concrete page types (e.g. the `feature` bundle). Loaded at runtime. |
 | `wiki-mcp` | Long-lived host: embeds the engine, maintains a SQL read model (PGlite/pg), exposes MCP tools + resources. |
 | `wiki-server` | Thin process that runs the durable stream host **and** hosts `wiki-mcp` in one process. |
+| `wiki-ui` | Standalone Next.js browser for a running server — embeds the engine client-side, tails the stream live, drives FSM transitions. **Not** a workspace member (own install/build). |
 
 Architecture, boundaries, and conventions live in [`CLAUDE.md`](./CLAUDE.md); per-package design intent,
 the content model, ADRs, and feature specs live in the wiki's own rendered mirror under
