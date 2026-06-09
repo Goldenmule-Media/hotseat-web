@@ -167,6 +167,17 @@ function TreeItem({
           className={`tree-link${isActive ? " active" : ""}`}
           title={node.type !== undefined ? `${node.type} · ${node.status ?? ""}` : undefined}
           draggable={false}
+          onClick={(e) => {
+            // Clicking the row (not the tiny caret) is the primary affordance: a row that
+            // isn't the current page just SELECTS it (default link navigation); a row that
+            // is ALREADY selected toggles its expand/collapse instead of re-navigating.
+            // Modified / non-primary clicks fall through so open-in-new-tab still works.
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+            if (isActive) {
+              e.preventDefault();
+              if (hasChildren) ctx.collapse.toggle(id);
+            }
+          }}
         >
           <span className="tree-title">{node.displayTitle ?? node.title}</span>
           <StatusChip node={node} />
