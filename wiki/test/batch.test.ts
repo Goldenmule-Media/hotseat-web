@@ -119,18 +119,16 @@ describe("mutateMany — atomic, order-dependent single-page batch", () => {
     const brief = (await ws.createPage("feature-brief", { title: "Cascade", parentId: null })).value;
     const kids = await (await ws.page(brief)).children();
     const plan = kids.find((k) => k.type === "implementation-plan")!.id;
-    const checklist = kids.find((k) => k.type === "implementation-checklist")!.id;
     const testPlan = kids.find((k) => k.type === "testing-plan")!.id;
     const spec = kids.find((k) => k.type === "feature-spec")!.id;
     const q1 = ((await ws.mutate(brief, "askQuestion", { text: "Which formats?" })).value as { questionId: string }).questionId;
     await ws.mutate(brief, "answerQuestion", { questionId: q1, answer: "CSV/JSON." });
     await ws.mutate(brief, "beginPlanning", {});
-    await ws.mutate(plan, "addStep", { text: "Stream it" });
+    const step = ((await ws.mutate(plan, "addStep", { text: "Stream it" })).value as { stepId: string }).stepId;
     await ws.mutate(plan, "addDataModel", { language: "ts", source: "interface E {}" });
     const cs = ((await ws.mutate(testPlan, "addCase", { text: "fast" })).value as { caseId: string }).caseId;
     await ws.mutate(brief, "beginImplementation", {});
-    const task = ((await ws.mutate(checklist, "addTask", { text: "Build" })).value as { taskId: string }).taskId;
-    await ws.mutate(checklist, "checkTask", { taskId: task });
+    await ws.mutate(plan, "markStepDone", { stepId: step });
     await ws.mutate(testPlan, "markCasePassed", { caseId: cs });
     await ws.mutate(brief, "submitForReview", {});
     await ws.mutate(spec, "addDecision", { questionId: q1, text: "v1 ships CSV and JSON." });
@@ -142,11 +140,10 @@ describe("mutateMany — atomic, order-dependent single-page batch", () => {
     const at = { consistentWith: token };
     expect(await (await ws.page(brief, at)).status()).toBe("shipped");
     expect(await (await ws.page(plan, at)).status()).toBe("ready");
-    expect(await (await ws.page(checklist, at)).status()).toBe("complete");
     expect(await (await ws.page(testPlan, at)).status()).toBe("ready");
     expect(await (await ws.page(spec, at)).status()).toBe("sealed");
-    // One brief ship + four child finalize events, all in one commit.
-    expect((await ws.history()).length).toBe(before + 5);
+    // One brief ship + three child finalize events, all in one commit.
+    expect((await ws.history()).length).toBe(before + 4);
   });
 
   it("populates a real feature-brief bundle page in one commit (the motivating case)", async () => {

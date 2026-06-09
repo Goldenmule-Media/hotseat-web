@@ -214,6 +214,17 @@ function requireNode(state: IWorkspaceState, id: PageId): IPageNode {
   return node;
 }
 
+/**
+ * A page type the registry NO LONGER declares, in a LOADED registry (≥1 type), is RETIRED:
+ * its instances fold as ABSENT (skipped), so removing a page type can never brick a
+ * workspace whose history still holds that type's events. An unknown type in an EMPTY
+ * registry is "models not loaded yet" (the boot race) — the caller throws so the projection
+ * halts and retries once the bundles land, rather than silently dropping every page.
+ */
+function isRetiredType(registry: Registry, type: string): boolean {
+  return registry.types().length > 0 && !registry.has(type);
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // applyWorkspace — the router
 // ────────────────────────────────────────────────────────────────────────────
@@ -222,22 +233,29 @@ function requireNode(state: IWorkspaceState, id: PageId): IPageNode {
  * Fold one envelope into `state` (mutating in place) and return it. Structural
  * events are handled here; content events are upcast and routed to the owning
  * page type's `apply`. Unknown page/event types → {@link UnknownPageTypeError}.
+ *
+ * `skipped` accumulates the ids of pages whose type was RETIRED (see {@link isRetiredType});
+ * every later event targeting such a page is folded as a no-op. Full folds
+ * ({@link foldWorkspace}) thread one set across the whole history; the incremental tail
+ * caller passes none (new commits never carry a retired type — the command bus rejects them).
  */
 export function applyWorkspace(
   state: IWorkspaceState,
   event: IEventEnvelope,
   registry: Registry,
+  skipped: Set<PageId> = new Set(),
 ): IWorkspaceState {
   if (isStructuralEvent(event.type)) {
-    return applyStructural(state, event, registry);
+    return applyStructural(state, event, registry, skipped);
   }
-  return applyContent(state, event, registry);
+  return applyContent(state, event, registry, skipped);
 }
 
 function applyStructural(
   state: IWorkspaceState,
   event: IEventEnvelope,
   registry: Registry,
+  skipped: Set<PageId>,
 ): IWorkspaceState {
   switch (event.type as StructuralEventType) {
     case "WorkspaceCreated": {
@@ -252,6 +270,15 @@ function applyStructural(
     case "PageCreated": {
       const p = event.payload as PageCreatedPayload;
       const id = event.pageId as PageId;
+      if (!registry.has(p.type)) {
+        // Retired type → fold the page as absent (and remember it, so its later content/
+        // structural events skip too). An unknown type in an empty registry throws (boot race).
+        if (isRetiredType(registry, p.type)) {
+          skipped.add(id);
+          return state;
+        }
+        throw new UnknownPageTypeError([p.type]);
+      }
       const def = registry.page(p.type);
       const parentKey: PageId | RootId = p.parentId ?? ROOT;
 
@@ -305,6 +332,7 @@ function applyStructural(
 
     case "PageReparented": {
       const p = event.payload as PageReparentedPayload;
+      if (skipped.has(p.pageId)) return state;
       const node = requireNode(state, p.pageId);
       const oldKey: PageId | RootId = node.parentId ?? ROOT;
       removeFromChildren(state, oldKey, p.pageId);
@@ -325,12 +353,15 @@ function applyStructural(
     case "ChildrenReordered": {
       const p = event.payload as ChildrenReorderedPayload;
       const key: PageId | RootId = p.parentId ?? ROOT;
-      state.children.set(key, [...p.orderedChildIds]);
+      if (key !== ROOT && skipped.has(key)) return state;
+      // Drop any retired-page ids from the order so they don't linger as dangling children.
+      state.children.set(key, p.orderedChildIds.filter((c) => !skipped.has(c)));
       return state;
     }
 
     case "PageTitleSet": {
       const p = event.payload as PageTitleSetPayload;
+      if (skipped.has(p.pageId)) return state;
       const node = requireNode(state, p.pageId);
       node.title = p.title;
       node.updatedAt = event.meta.occurredAt;
@@ -339,6 +370,7 @@ function applyStructural(
 
     case "PageArchived": {
       const p = event.payload as PageArchivedPayload;
+      if (skipped.has(p.pageId)) return state;
       const node = requireNode(state, p.pageId);
       node.archived = true;
       node.updatedAt = event.meta.occurredAt;
@@ -347,6 +379,7 @@ function applyStructural(
 
     case "PageUnarchived": {
       const p = event.payload as PageArchivedPayload;
+      if (skipped.has(p.pageId)) return state;
       const node = requireNode(state, p.pageId);
       node.archived = undefined;
       node.updatedAt = event.meta.occurredAt;
@@ -355,6 +388,7 @@ function applyStructural(
 
     case "LinkAdded": {
       const p = event.payload as LinkPayload;
+      if (skipped.has(p.from) || skipped.has(p.to)) return state;
       const exists = state.links.some(
         (l) => l.from === p.from && l.to === p.to && l.role === p.role,
       );
@@ -364,6 +398,7 @@ function applyStructural(
 
     case "LinkRemoved": {
       const p = event.payload as LinkPayload;
+      if (skipped.has(p.from) || skipped.has(p.to)) return state;
       state.links = state.links.filter(
         (l) => !(l.from === p.from && l.to === p.to && l.role === p.role),
       );
@@ -391,12 +426,15 @@ function applyContent(
   state: IWorkspaceState,
   event: IEventEnvelope,
   registry: Registry,
+  skipped: Set<PageId>,
 ): IWorkspaceState {
   const pageId = event.pageId;
   if (pageId === undefined) {
     // A non-structural event must target a page to be routable.
     throw new UnknownPageTypeError([event.type]);
   }
+  // A content event for a retired-type page (its creation was skipped) folds as a no-op.
+  if (skipped.has(pageId)) return state;
   if (event.type !== SECTION_OPS_EVENT) {
     throw new UnknownPageTypeError([event.type]);
   }
@@ -441,6 +479,10 @@ export function foldWorkspace(
   let lastVersion = state !== undefined ? state.version - 1 : -1;
   let seeded = state !== undefined;
 
+  // Ids of pages whose type was retired (folded as absent); threaded across the whole
+  // history so a retired page's later content/structural events skip too.
+  const skipped = new Set<PageId>();
+
   for (const event of events) {
     // Snapshot skip: events already baked into the `from` state.
     if (event.version <= fromVersion) {
@@ -463,7 +505,7 @@ export function foldWorkspace(
       );
     }
 
-    state = applyWorkspace(state as IWorkspaceState, event, registry);
+    state = applyWorkspace(state as IWorkspaceState, event, registry, skipped);
     (state as IWorkspaceState).version = event.version + 1;
     lastVersion = event.version;
   }

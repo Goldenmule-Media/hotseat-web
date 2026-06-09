@@ -103,13 +103,13 @@ describe("self-direction: nextActions roll-up + generic attention scan", () => {
 
     await drain();
     const summary = await nextActions(wsId, briefId, session);
-    // Regression (review finding): child finalize edges (markReady/markComplete/seal) must NOT
+    // Regression (review finding): child finalize edges (markReady/seal) must NOT
     // surface as `do` — they are cascade-driven by ship, not agent-driven. Surfacing them would
     // tell a self-directing agent to seal EMPTY children. The only ready action on a fresh
     // bundle is the brief's beginPlanning.
     expect(summary.do).toHaveLength(1);
     expect(summary.do[0]).toMatchObject({ command: "beginPlanning", pageId: briefId });
-    expect(summary.do.concat(summary.blocked).some((a) => ["markReady", "markComplete", "seal"].includes(a.command))).toBe(false);
+    expect(summary.do.concat(summary.blocked).some((a) => ["markReady", "seal"].includes(a.command))).toBe(false);
     expect(summary.blocked).toHaveLength(0);
     expect(summary.humanGates).toHaveLength(0);
   });
@@ -118,7 +118,6 @@ describe("self-direction: nextActions roll-up + generic attention scan", () => {
     const session = "s2";
     const { wsId, briefId, kids } = await createBrief(session);
     const plan = kids.get("implementation-plan")!;
-    const checklist = kids.get("implementation-checklist")!;
     const testPlan = kids.get("testing-plan")!;
 
     const mut = (pageId: string, command: string, args: Record<string, unknown> = {}) =>
@@ -129,7 +128,6 @@ describe("self-direction: nextActions roll-up + generic attention scan", () => {
     await mut(plan, "addDataModel", { language: "ts", source: "interface X {}" });
     await mut(testPlan, "addCase", { text: "covers it" });
     await mut(briefId, "beginImplementation");
-    await mut(checklist, "addTask", { text: "build" });
     const submitted = await mut(briefId, "submitForReview");
 
     // The mutatePage echo already reflects the new state: ship is now a human gate.
@@ -141,7 +139,7 @@ describe("self-direction: nextActions roll-up + generic attention scan", () => {
     const ship = summary.humanGates.find((a) => a.command === "ship");
     expect(ship).toBeDefined();
     expect(ship!.pageId).toBe(briefId);
-    expect(typeof ship!.reason).toBe("string"); // blocked: checklist/cases not done yet
+    expect(typeof ship!.reason).toBe("string"); // blocked: steps/cases not done yet
     // The agent never auto-fires ship — it's not in `do`.
     expect(summary.do.some((a) => a.command === "ship")).toBe(false);
   });

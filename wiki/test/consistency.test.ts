@@ -61,7 +61,6 @@ describe("handle: a token-gated read reflects a prior write", () => {
     const children = await view.children();
     expect(children.map((c) => c.type)).toEqual([
       "implementation-plan",
-      "implementation-checklist",
       "testing-plan",
       "feature-spec",
     ]);

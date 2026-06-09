@@ -33,7 +33,7 @@ describe("schemaToFields", () => {
         ratio: { type: "number" },
         toIndex: { type: "integer", minimum: 0 },
         force: { type: "boolean" },
-        computed: { type: "string", enum: ["all-cases-passed"] },
+        mode: { type: "string", enum: ["fast", "slow"] },
         ids: { type: "array", items: { type: "string" } },
       },
       required: ["toIndex"],
@@ -42,8 +42,8 @@ describe("schemaToFields", () => {
     expect(byKey(fields, "ratio").kind).toBe("number");
     expect(byKey(fields, "toIndex").kind).toBe("integer");
     expect(byKey(fields, "force").kind).toBe("boolean");
-    expect(byKey(fields, "computed").kind).toBe("enum");
-    expect(byKey(fields, "computed").enumValues).toEqual(["all-cases-passed"]);
+    expect(byKey(fields, "mode").kind).toBe("enum");
+    expect(byKey(fields, "mode").enumValues).toEqual(["fast", "slow"]);
     expect(byKey(fields, "ids").kind).toBe("array");
   });
 

@@ -24,7 +24,7 @@ import { createTestWiki, type ITestWiki } from "../src/testing";
  */
 async function buildBuildingBrief(
   ws: IWorkspaceHandle,
-): Promise<{ brief: PageId; plan: PageId; checklist: PageId; testPlan: PageId; token: string }> {
+): Promise<{ brief: PageId; plan: PageId; testPlan: PageId; token: string }> {
   // A sibling brief to reference (the "Access control (RBAC)").
   const { value: rbac } = await ws.createPage("feature-brief", {
     title: "Access control (RBAC)",
@@ -36,11 +36,10 @@ async function buildBuildingBrief(
     parentId: null,
   });
   const briefView = await ws.page(brief, { consistentWith: briefToken });
-  const [plan, checklist, testPlan] = (await briefView.children()).map((c) => c.id);
+  const [plan, testPlan] = (await briefView.children()).map((c) => c.id);
 
   // Give the mandated children the display titles used in the worked example.
   await ws.setPageTitle(plan, "Implementation plan");
-  await ws.setPageTitle(checklist, "Implementation checklist");
   await ws.setPageTitle(testPlan, "Testing plan");
 
   // ── fill the brief (draft) ──
@@ -87,7 +86,7 @@ async function buildBuildingBrief(
     message: "feat(cli): wiki export",
   });
 
-  return { brief, plan, checklist, testPlan, token };
+  return { brief, plan, testPlan, token };
 }
 
 const EXPECTED_BRIEF = `# Feature: Bulk export
@@ -114,10 +113,9 @@ _None._
 - depends-on → [Access control (RBAC)](feature-brief:id-3)
 
 ## Child pages
-- [Implementation plan](implementation-plan:id-14)
-- [Implementation checklist](implementation-checklist:id-15)
-- [Testing plan](testing-plan:id-16)
-- [Spec](feature-spec:id-17)
+- [Implementation plan](implementation-plan:id-12)
+- [Testing plan](testing-plan:id-13)
+- [Spec](feature-spec:id-14)
 
 ## Commits
 - \`a1b2c3d\` feat(api): streaming export endpoint
@@ -216,44 +214,40 @@ describe("workspace render — deterministic tree", () => {
     const a = await ws.toMarkdown(undefined, { consistentWith: token });
     const b = await ws.toMarkdown();
     expect(b).toBe(a);
-    // The H1 is the workspace name; the building brief and its four children appear.
+    // The H1 is the workspace name; the building brief and its three children appear.
     expect(a.startsWith("# Acme platform\n")).toBe(true);
     expect(a).toContain("Bulk export (feature-brief, building)");
     expect(a).toContain("Implementation plan (implementation-plan, draft)");
-    expect(a).toContain("Implementation checklist (implementation-checklist, building)");
     expect(a).toContain("Testing plan (testing-plan, draft)");
     expect(a).toContain("Spec (feature-spec, drafting)");
   });
 });
 
-describe("implementation-checklist render — GitHub-style task checkboxes", () => {
+describe("implementation-plan render — GitHub-style step checkboxes", () => {
   let tw: ITestWiki;
   let ws: IWorkspaceHandle;
-  let checklist: PageId;
+  let plan: PageId;
   let token: string;
 
   beforeAll(async () => {
     tw = await createTestWiki(featurePageTypes);
     ws = await tw.wiki.createWorkspace({ name: "Acme platform" });
-    ({ checklist } = await buildBuildingBrief(ws));
-    const a = (await ws.mutate(checklist, "addTask", { text: "Wire the export endpoint" })).value as {
-      taskId: string;
+    ({ plan } = await buildBuildingBrief(ws));
+    const a = (await ws.mutate(plan, "addStep", { text: "Wire the export endpoint" })).value as {
+      stepId: string;
     };
-    await ws.mutate(checklist, "addTask", { text: "Add the CLI flag" });
-    ({ token } = await ws.mutate(checklist, "checkTask", { taskId: a.taskId }));
+    await ws.mutate(plan, "addStep", { text: "Add the CLI flag" });
+    ({ token } = await ws.mutate(plan, "markStepDone", { stepId: a.stepId }));
   });
 
   afterAll(async () => {
     await tw.stop();
   });
 
-  it("renders tasks as `- [x]` / `- [ ]` under ## Tasks, with no graph sections", async () => {
-    const md = await ws.toMarkdown(checklist, { consistentWith: token });
-    expect(md).toContain("## Tasks");
+  it("renders steps as `- [x]` / `- [ ]` under ## Steps", async () => {
+    const md = await ws.toMarkdown(plan, { consistentWith: token });
+    expect(md).toContain("## Steps");
     expect(md).toContain("- [x] Wire the export endpoint");
     expect(md).toContain("- [ ] Add the CLI flag");
-    // graphSections: false ⇒ no References / Child pages on a checklist page.
-    expect(md).not.toContain("## References");
-    expect(md).not.toContain("## Child pages");
   });
 });

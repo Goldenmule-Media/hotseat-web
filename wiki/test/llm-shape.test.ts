@@ -66,11 +66,11 @@ afterAll(async () => {
   await tw.stop();
 });
 
-async function freshBrief(title: string): Promise<{ brief: PageId; plan: PageId; checklist: PageId; testPlan: PageId }> {
+async function freshBrief(title: string): Promise<{ brief: PageId; plan: PageId; testPlan: PageId }> {
   const { value: brief, token } = await ws.createPage("feature-brief", { title, parentId: null });
   const view = await ws.page(brief, { consistentWith: token });
-  const [plan, checklist, testPlan] = (await view.children()).map((c) => c.id);
-  return { brief, plan, checklist, testPlan };
+  const [plan, testPlan] = (await view.children()).map((c) => c.id);
+  return { brief, plan, testPlan };
 }
 
 describe("describeMutations() — declared + generated, with targets", () => {

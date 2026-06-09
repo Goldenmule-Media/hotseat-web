@@ -1,6 +1,6 @@
 {
   "ws:mpzncs2z-0001-2wgv51": {
-    "version": 1529,
+    "version": 1567,
     "files": {
       "wiki/architecture/index.md": "fea57d534a3aa7ca70deabb6089650bb28b9562fa7bd01d010cae03f89ebf5cc",
       "wiki/feature-specs/index.md": "b5f1158ac1a2897fc7777f096a8f5d699b15ce833a93a02d6606a97059199a0e",
@@ -58,11 +58,6 @@
       "wiki/decision-records/remote-auth-via-an-engine-istreamconfig-headers-hook.md": "6771a3f74f71447d54e2e3c15752d2cf7ca9188f30c54578385f4496ddaa37e9",
       "wiki/decision-records/generic-mutations-in-v1-generated-subcommands-later.md": "15570a69d3895532f73d70bbe72b77b8a5a152f0f0f57da7e5427e900b62d54c",
       "wiki/decision-records/cross-workspace-operations-are-an-admin-system-affordance-not-a-content-read.md": "78afba5243c32da742cc005bed0b1d707a3d9f046e81c6966d7dcf807e69e9f7",
-      "wiki/feature-specs/shared-engine-in-a-sharedworker-one-engine-pglite-across-all-tabs/index.md": "10c5e7aaa49598d16eb84d367fa7ccccc6ffbe119f8d58798eeff484535a04e0",
-      "wiki/feature-specs/shared-engine-in-a-sharedworker-one-engine-pglite-across-all-tabs/implementation-plan.md": "57b2d7e873f23f4b700fcdaa69d5d57a0acc6f36dc7e133675b4c705604cd84a",
-      "wiki/feature-specs/shared-engine-in-a-sharedworker-one-engine-pglite-across-all-tabs/implementation-checklist.md": "62dc59686a5c6398914928e5e7e5c7473e5cfdb1381ec4bd3e52c4058df15921",
-      "wiki/feature-specs/shared-engine-in-a-sharedworker-one-engine-pglite-across-all-tabs/testing-plan.md": "f5fbd537c7c2fad078814abb10e9fe797745e04db3089f62ceaa866fa71c6b21",
-      "wiki/feature-specs/shared-engine-in-a-sharedworker-one-engine-pglite-across-all-tabs/spec.md": "4b6df6f5124cf4be4b1df27167efff93d8a167cd4adb687324fa2b6c0ec201b7",
       "wiki/architecture/content-model.md": "08dfe6a7750444b24ac27668b18f048e594dc4b1a6f646805452d69c67772f3c",
       "wiki/architecture/wiki-ui.md": "a4299e545b178677e0f0473a29658ca810cc8957b9bba10c2726500ea9f46ad4"
     },
@@ -123,11 +118,6 @@
       "decision-record:mq110xwb-009c-h64sj5": "wiki/decision-records/remote-auth-via-an-engine-istreamconfig-headers-hook.md",
       "decision-record:mq110ye5-009p-4evl6w": "wiki/decision-records/generic-mutations-in-v1-generated-subcommands-later.md",
       "decision-record:mq5hnpu9-001m-c9yfrl": "wiki/decision-records/cross-workspace-operations-are-an-admin-system-affordance-not-a-content-read.md",
-      "feature-brief:mq5mpdpu-0001-7z2iva": "wiki/feature-specs/shared-engine-in-a-sharedworker-one-engine-pglite-across-all-tabs/index.md",
-      "implementation-plan:mq5mpdpu-0002-xwbiww": "wiki/feature-specs/shared-engine-in-a-sharedworker-one-engine-pglite-across-all-tabs/implementation-plan.md",
-      "implementation-checklist:mq5mpdpu-0003-olx9iz": "wiki/feature-specs/shared-engine-in-a-sharedworker-one-engine-pglite-across-all-tabs/implementation-checklist.md",
-      "testing-plan:mq5mpdpu-0004-c5lssy": "wiki/feature-specs/shared-engine-in-a-sharedworker-one-engine-pglite-across-all-tabs/testing-plan.md",
-      "feature-spec:mq5mpdpu-0005-muprnl": "wiki/feature-specs/shared-engine-in-a-sharedworker-one-engine-pglite-across-all-tabs/spec.md",
       "architecture:mq5nej50-0026-edazv6": "wiki/architecture/content-model.md",
       "architecture:mq6p8be5-001t-rjcytt": "wiki/architecture/wiki-ui.md"
     }

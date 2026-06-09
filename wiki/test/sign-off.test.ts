@@ -18,7 +18,6 @@ describe("feature bundle: ship signs off and aligns every child atomically", () 
   let ws: IWorkspaceHandle;
   let brief: PageId;
   let plan: PageId;
-  let checklist: PageId;
   let testPlan: PageId;
   let spec: PageId;
   let q1: string;
@@ -34,7 +33,6 @@ describe("feature bundle: ship signs off and aligns every child atomically", () 
     brief = c.value;
     const kids = await (await ws.page(brief, { consistentWith: c.token })).children();
     plan = kids.find((k) => k.type === "implementation-plan")!.id;
-    checklist = kids.find((k) => k.type === "implementation-checklist")!.id;
     testPlan = kids.find((k) => k.type === "testing-plan")!.id;
     spec = kids.find((k) => k.type === "feature-spec")!.id;
 
@@ -44,12 +42,11 @@ describe("feature bundle: ship signs off and aligns every child atomically", () 
 
     // Plan → buildable, then build → review with all CONTENT gates satisfied.
     await ws.mutate(brief, "beginPlanning", {});
-    await ws.mutate(plan, "addStep", { text: "Stream the endpoint" });
+    const step = ((await ws.mutate(plan, "addStep", { text: "Stream the endpoint" })).value as { stepId: string }).stepId;
     await ws.mutate(plan, "addDataModel", { language: "ts", source: "interface E {}" });
     const cs = ((await ws.mutate(testPlan, "addCase", { text: "fast export" })).value as { caseId: string }).caseId;
     await ws.mutate(brief, "beginImplementation", {});
-    const task = ((await ws.mutate(checklist, "addTask", { text: "Build it" })).value as { taskId: string }).taskId;
-    await ws.mutate(checklist, "checkTask", { taskId: task });
+    await ws.mutate(plan, "markStepDone", { stepId: step });
     await ws.mutate(testPlan, "markCasePassed", { caseId: cs });
     await ws.mutate(brief, "submitForReview", {});
   });
@@ -65,7 +62,6 @@ describe("feature bundle: ship signs off and aligns every child atomically", () 
     // The whole commit was rejected: brief and every child are untouched.
     expect(await statusOf(brief)).toBe("review");
     expect(await statusOf(plan)).toBe("draft");
-    expect(await statusOf(checklist)).toBe("building");
     expect(await statusOf(testPlan)).toBe("draft");
     expect(await statusOf(spec)).toBe("drafting");
   });
@@ -78,7 +74,6 @@ describe("feature bundle: ship signs off and aligns every child atomically", () 
     const at = { consistentWith: shipped.token };
     expect(await (await ws.page(brief, at)).status()).toBe("shipped");
     expect(await (await ws.page(plan, at)).status()).toBe("ready");
-    expect(await (await ws.page(checklist, at)).status()).toBe("complete");
     expect(await (await ws.page(testPlan, at)).status()).toBe("ready");
     expect(await (await ws.page(spec, at)).status()).toBe("sealed");
   });

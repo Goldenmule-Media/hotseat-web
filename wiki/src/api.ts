@@ -714,9 +714,8 @@ export interface IRenderCtx {
   backlinksOf(id: PageId): readonly { readonly from: PageId; readonly role: string }[];
   /**
    * Read another page's full folded state — the render-side twin of
-   * {@link IRelatedReader.page}. Lets a {@link ComputedFlag} derive a value from a
-   * sibling's ELEMENT-level state (e.g. "all testing-plan cases passed"), the same
-   * cross-page read preconditions already do.
+   * {@link IRelatedReader.page}. Lets a {@link DerivedList} project a value from a
+   * sibling's ELEMENT-level state, the same way cross-page read preconditions already do.
    */
   pageState(id: PageId): DeepReadonly<PageState> | undefined;
 }
@@ -849,7 +848,7 @@ export interface ElementDecl {
   /**
    * Optional PURE per-instance predicate flagging an element of this type as awaiting a
    * human (sign-off / decision). Evaluated per element instance over its folded state —
-   * same flavor as a {@link Precondition}/`ComputedFlag` (pure, deterministic, no clock/
+   * same flavor as a {@link Precondition} (pure, deterministic, no clock/
    * RNG). Surfaced generically via {@link IPageView.attentionItems}; the engine never
    * inspects an element-type literal — only whether this predicate is declared and true.
    */
@@ -935,16 +934,6 @@ export interface RenderConfig {
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
- * A model-declared, PURE boolean a renderer computes from folded state — possibly
- * cross-page via {@link IRenderCtx}. A checklist element binds
- * to one by name via `meta.computed = "<key>"`: its checkbox is then COMPUTED from this
- * flag (a projection of the real fact, e.g. "all testing-plan cases passed") rather than
- * a stored, hand-toggled status — so it cannot lie, and the engine refuses to drive such
- * an element's FSM by hand. Must be deterministic (no clock/RNG) like every renderer.
- */
-export type ComputedFlag = (page: DeepReadonly<PageState>, ctx: IRenderCtx) => boolean;
-
-/**
  * One row of a {@link DerivedList}: a stable `id` and display `text`, plus optional
  * presentation hints so a derived section can render either a CHECKLIST or a (possibly
  * nested) plain list such as a table of contents:
@@ -994,9 +983,6 @@ export interface IPageTypeDef<Status extends string = string> {
    *  status, applied when an ancestor's {@link DeclarativeCommand.cascadeFinalize} command
    *  signs the bundle off. */
   readonly finalize?: string;
-  /** Named pure flags a renderer computes from folded state; an element binds via
-   *  `meta.computed = "<key>"` to derive its checkbox. */
-  readonly computed?: Readonly<Record<string, ComputedFlag>>;
   /** Named pure projections a render section materializes via `derived: "<key>"` —
    *  e.g. a checklist DERIVED from a sibling's list + local progress. */
   readonly derived?: Readonly<Record<string, DerivedList>>;

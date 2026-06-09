@@ -44,11 +44,11 @@ export const ImplementationPlan = definePageType({
     },
   },
   elements: {
-    // Each step owns its done-state (todo ⇄ done). markStepDone/markStepTodo are element-FSM
-    // transitions carrying no content op, so — like the testing-plan's markCasePassed — they
-    // stay legal after the step SET is frozen (`steps` is `mutableIn: ["draft"]`) and after the
-    // plan is sealed (`ready`): progress is recorded as work ships. The checklist's "Plan steps"
-    // view is a pure projection of these statuses, so it can never drift from the plan.
+    // Each step owns its done-state (todo ⇄ done) and renders as a checkbox. markStepDone/
+    // markStepTodo are element-FSM transitions carrying no content op, so — like the
+    // testing-plan's markCasePassed — they stay legal after the step SET is frozen (`steps` is
+    // `mutableIn: ["draft"]`) and after the plan is sealed (`ready`): progress is checked off as
+    // work ships, and the brief's `ship` gate reads these statuses directly.
     step: {
       fields: { text: { kind: "prose", required: true } },
       status: { initial: "todo", transitions: [t("todo", "markDone", "done"), t("done", "reopen", "todo")] },
@@ -86,8 +86,8 @@ export const ImplementationPlan = definePageType({
       },
     },
     // Per-step progress — element-FSM transitions (no content op), so they remain legal after
-    // `markReady` seals the plan, exactly like the testing-plan's markCasePassed. The checklist
-    // projects these statuses as its derived "Plan steps" checklist.
+    // `markReady` seals the plan, exactly like the testing-plan's markCasePassed. These check
+    // off the step's box and feed the brief's `ship` gate.
     markStepDone: {
       args: zodSchema(z.object({ stepId: z.string() })),
       target: { section: "steps", field: "items", element: { idArg: "stepId" } },
@@ -153,7 +153,7 @@ export const ImplementationPlan = definePageType({
   render: {
     title: "{title}",
     sections: [
-      { section: "steps", heading: "Steps", field: "items", as: "numbered", item: "{text}" },
+      { section: "steps", heading: "Steps", field: "items", as: "checklist", checkedWhen: "done", item: "{text}" },
       { section: "dataModels", heading: "Data models & interfaces", field: "models", as: "blocks", placeholder: "_None yet._" },
       {
         section: "questions",

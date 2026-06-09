@@ -2,14 +2,14 @@
  * FSM guard unit tests (new declarative model).
  *
  * The page FSM is now lifecycle-ONLY (content-edit legality lives in `mutableIn`).
- * Element FSMs (question/task/case) live inline in each type's `elements` and are
+ * Element FSMs (question/step/case) live inline in each type's `elements` and are
  * exposed via the registry's element guards.
  */
 import { describe, expect, it } from "vitest";
 
 import { makeGuard, t } from "../src/core/guard";
 import { Registry } from "../src/core/registry";
-import { FeatureBrief, ImplementationChecklist, TestingPlan } from "wiki-models/feature";
+import { FeatureBrief, ImplementationPlan, TestingPlan } from "wiki-models/feature";
 
 const briefTransitions = FeatureBrief.__def.statusTransitions;
 const guard = makeGuard<string, string>([...briefTransitions]);
@@ -77,8 +77,8 @@ describe("makeGuard — property: no command is legal without a declared transit
   });
 });
 
-describe("element FSMs via the registry (question / task / case)", () => {
-  const registry = new Registry([FeatureBrief, ImplementationChecklist, TestingPlan]);
+describe("element FSMs via the registry (question / step / case)", () => {
+  const registry = new Registry([FeatureBrief, ImplementationPlan, TestingPlan]);
 
   it("question: open → resolved only (answer), never twice", () => {
     const g = registry.elementGuard("feature-brief", "question")!;
@@ -88,11 +88,11 @@ describe("element FSMs via the registry (question / task / case)", () => {
     expect(g.available("resolved")).toEqual([]);
   });
 
-  it("task: todo ⇄ done via check / uncheck", () => {
-    const g = registry.elementGuard("implementation-checklist", "task")!;
-    expect(g.next("todo", "check")).toBe("done");
-    expect(g.next("done", "uncheck")).toBe("todo");
-    expect(g.can("done", "check")).toBe(false);
+  it("step: todo ⇄ done via markDone / reopen", () => {
+    const g = registry.elementGuard("implementation-plan", "step")!;
+    expect(g.next("todo", "markDone")).toBe("done");
+    expect(g.next("done", "reopen")).toBe("todo");
+    expect(g.can("done", "markDone")).toBe(false);
   });
 
   it("case: planned → passed/failed, failed can recover to passed", () => {

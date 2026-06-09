@@ -75,7 +75,6 @@ describe("IWiki.describeType / pageTypes — instance-free authoring surface", (
         "feature-brief",
         "feature-spec",
         "implementation-plan",
-        "implementation-checklist",
         "testing-plan",
       ]),
     );
@@ -138,10 +137,10 @@ describe("describeMutations — precondition-aware availability + unmet reason",
   let wiki: IWiki;
   let ws: IWorkspaceHandle;
   let brief: PageId;
-  let checklist: PageId;
+  let plan: PageId;
   let testPlan: PageId;
   let caseId: string;
-  let taskId: string;
+  let stepId: string;
 
   const shipDescriptor = async (token?: string) => {
     const view = await ws.page(brief, token !== undefined ? { consistentWith: token } : undefined);
@@ -156,18 +155,16 @@ describe("describeMutations — precondition-aware availability + unmet reason",
     const created = await ws.createPage("feature-brief", { title: "Inspector", parentId: null });
     brief = created.value;
     const kids = await (await ws.page(brief, { consistentWith: created.token })).children();
-    const plan = kids.find((k) => k.type === "implementation-plan")!.id;
-    checklist = kids.find((k) => k.type === "implementation-checklist")!.id;
+    plan = kids.find((k) => k.type === "implementation-plan")!.id;
     testPlan = kids.find((k) => k.type === "testing-plan")!.id;
 
     // Walk to `review` with the beginImplementation content gates satisfied, but the
-    // ship gates (checklist task done, case passed) deliberately NOT yet satisfied.
+    // ship gates (all plan steps done, case passed) deliberately NOT yet satisfied.
     await ws.mutate(brief, "beginPlanning", {});
-    await ws.mutate(plan, "addStep", { text: "Do the thing" });
+    stepId = ((await ws.mutate(plan, "addStep", { text: "Do the thing" })).value as { stepId: string }).stepId;
     await ws.mutate(plan, "addDataModel", { language: "ts", source: "interface X {}" });
     caseId = ((await ws.mutate(testPlan, "addCase", { text: "covers it" })).value as { caseId: string }).caseId;
     await ws.mutate(brief, "beginImplementation", {});
-    taskId = ((await ws.mutate(checklist, "addTask", { text: "build" })).value as { taskId: string }).taskId;
     await ws.mutate(brief, "submitForReview", {});
   });
   afterAll(async () => {
@@ -206,11 +203,11 @@ describe("describeMutations — precondition-aware availability + unmet reason",
     expect(by("ship").agency).toBeUndefined();
   });
 
-  // NOTE: must run last in this block — it mutates the suite-shared checklist/testPlan to
+  // NOTE: must run last in this block — it mutates the suite-shared plan/testPlan to
   // satisfy the ship gates the earlier tests rely on being UNMET (declaration order is
   // load-bearing; do not enable sequence.shuffle for this file).
   it("flips ship to available (no unmet) once every ship precondition holds", async () => {
-    await ws.mutate(checklist, "checkTask", { taskId });
+    await ws.mutate(plan, "markStepDone", { stepId });
     const passed = await ws.mutate(testPlan, "markCasePassed", { caseId });
     const ship = await shipDescriptor(passed.token);
     expect(ship.available).toBe(true);

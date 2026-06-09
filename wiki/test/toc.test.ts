@@ -1,6 +1,6 @@
 /**
  * The `toc` page type renders a generated, curatable table of contents of its CHILDREN.
- * The entry list is a DERIVED view of the live child set (like the checklist's plan-steps):
+ * The entry list is a DERIVED view of the live child set:
  * adding / renaming / removing a child reflows the TOC with no write to the TOC page. The
  * page stores only the curation — groups (title + blurb + order) and a child→group placement
  * — which is reconciled against the live children at render, so it never drifts.

@@ -49,14 +49,11 @@ const planHasDataModel: Precondition = (page, related) => {
   return n >= 1 ? true : { unmet: "needs ≥1 implementation-plan data-model/interface code block" };
 };
 
-const checklistComplete: Precondition = (page, related) => {
-  const checklist = childOfType(related, related.self, "implementation-checklist");
-  // Only MANUAL tasks gate ship; gate-tasks (`meta.computed`) are computed visibility
-  // whose underlying fact is gated directly (e.g. `allCasesPassed`), so counting them
-  // here would double-gate and could deadlock if their stored status never moves.
-  const tasks = listElements(checklist, "tasks", "items").filter((tk) => tk.meta?.["computed"] === undefined);
-  if (tasks.length < 1) return { unmet: "needs ≥1 implementation-checklist task" };
-  if (tasks.some((tk) => tk.status !== "done")) return { unmet: "all implementation-checklist tasks must be done" };
+const allStepsDone: Precondition = (page, related) => {
+  const plan = childOfType(related, related.self, "implementation-plan");
+  const steps = listElements(plan, "steps", "items");
+  if (steps.length < 1) return { unmet: "needs ≥1 implementation-plan step" };
+  if (steps.some((s) => s.status !== "done")) return { unmet: "all implementation-plan steps must be done" };
   return true;
 };
 
@@ -152,7 +149,7 @@ export const FeatureBrief = definePageType({
     },
   },
   sectionSet: { mode: "closed" },
-  requiredChildren: ["implementation-plan", "implementation-checklist", "testing-plan", "feature-spec"],
+  requiredChildren: ["implementation-plan", "testing-plan", "feature-spec"],
   commands: {
     setSummary: {
       args: zodSchema(z.object({ text: z.string() })),
@@ -224,11 +221,11 @@ export const FeatureBrief = definePageType({
     ship: {
       args: zodSchema(empty),
       transition: { level: "page", event: "ship" },
-      preconditions: [checklistComplete, allCasesPassed, noOpenQuestions],
+      preconditions: [allStepsDone, allCasesPassed, noOpenQuestions],
       // Sign-off: shipping the brief also drives every pinned child to its terminal status
-      // (plan→ready, checklist→complete, testing-plan→ready, spec→sealed) in one atomic
-      // commit — so the whole bundle lands aligned, and a child that isn't ready (e.g. a
-      // spec whose decisions aren't all referenced) rejects the ship.
+      // (plan→ready, testing-plan→ready, spec→sealed) in one atomic commit — so the whole
+      // bundle lands aligned, and a child that isn't ready (e.g. a spec whose decisions
+      // aren't all referenced) rejects the ship.
       cascadeFinalize: true,
     },
     abandon: { args: zodSchema(empty), transition: { level: "page", event: "abandon" } },

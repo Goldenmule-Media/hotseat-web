@@ -67,7 +67,7 @@ describe("concurrency: two handles on one workspace", () => {
   });
 
   it("lands different-page commands from a stale head via rebase-and-retry", async () => {
-    // wikiA seeds a workspace with a feature-brief (→ plan, checklist, testing-plan).
+    // wikiA seeds a workspace with a feature-brief (→ plan, testing-plan, spec).
     const a = await wikiA.createWorkspace({ name: "shared" });
     wsId = a.id;
     const { value: brief, token: briefToken } = await a.createPage("feature-brief", {
@@ -75,7 +75,7 @@ describe("concurrency: two handles on one workspace", () => {
       parentId: null,
     });
     const aBriefView = await a.page(brief, { consistentWith: briefToken });
-    const [plan, , testPlan] = (await aBriefView.children()).map((c) => c.id);
+    const [plan, testPlan] = (await aBriefView.children()).map((c) => c.id);
 
     // wikiB opens the SAME workspace and folds the same head.
     const b = await wikiB.openWorkspace(wsId);
@@ -179,8 +179,8 @@ describe("concurrency: two handles on one workspace", () => {
       parentId: null,
     });
     const aBriefView = await a.page(brief, { consistentWith: briefToken });
-    const checklist = (await aBriefView.children()).find(
-      (c) => c.type === "implementation-checklist",
+    const plan = (await aBriefView.children()).find(
+      (c) => c.type === "implementation-plan",
     )!.id as PageId;
 
     await a.mutate(brief, "beginPlanning", {});
@@ -190,9 +190,9 @@ describe("concurrency: two handles on one workspace", () => {
     // Interleave several different-page writes from both handles concurrently.
     await Promise.all([
       a.mutate(brief, "addConstraint", { text: "constraint one" }),
-      b.mutate(checklist, "addTask", { text: "task one" }),
+      b.mutate(plan, "addStep", { text: "step one" }),
       a.mutate(brief, "askQuestion", { text: "q one" }),
-      b.mutate(checklist, "addTask", { text: "task two" }),
+      b.mutate(plan, "addStep", { text: "step two" }),
     ]);
 
     const fresh = await wikiC.openWorkspace(wsId);
@@ -205,6 +205,6 @@ describe("concurrency: two handles on one workspace", () => {
     const history = await fresh.history();
     expect(countOps(history, (op) => op.op === "addElement" && op.section === "constraints")).toBe(1);
     expect(countOps(history, (op) => op.op === "addElement" && op.section === "questions")).toBe(1);
-    expect(countOps(history, (op) => op.op === "addElement" && op.section === "tasks")).toBe(2);
+    expect(countOps(history, (op) => op.op === "addElement" && op.section === "steps")).toBe(2);
   });
 });

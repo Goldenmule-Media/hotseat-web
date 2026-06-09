@@ -115,18 +115,17 @@ describe("createPage — parent existence + unique sibling title", () => {
       makeServices(),
       registry,
     );
-    // 1 brief + 4 mandated children = 5 PageCreated events.
-    expect(events).toHaveLength(5);
+    // 1 brief + 3 mandated children = 4 PageCreated events.
+    expect(events).toHaveLength(4);
     expect(events.every((e) => e.type === "PageCreated")).toBe(true);
     const types = events.map((e) => (e.payload as { type: string }).type);
     expect(types).toEqual([
       "feature-brief",
       "implementation-plan",
-      "implementation-checklist",
       "testing-plan",
       "feature-spec",
     ]);
-    // The four children are pinned and parented under the new brief.
+    // The three children are pinned and parented under the new brief.
     const briefId = events[0].pageId;
     for (const child of events.slice(1)) {
       expect((child.payload as { pinned?: boolean }).pinned).toBe(true);

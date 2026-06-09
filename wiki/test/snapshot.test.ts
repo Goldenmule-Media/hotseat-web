@@ -50,7 +50,7 @@ describe("snapshot round-trip & fold equivalence", () => {
     });
     const { value: other } = await ws.createPage("feature-brief", { title: "RBAC", parentId: null });
     const briefView = await ws.page(brief, { consistentWith: briefToken });
-    const [plan, checklist, testPlan] = (await briefView.children()).map((c) => c.id);
+    const [plan, testPlan] = (await briefView.children()).map((c) => c.id);
 
     await ws.mutate(brief, "setSummary", { text: "Export as CSV/JSON." });
     await ws.mutate(brief, "addComponent", { name: "web-app" });
@@ -62,7 +62,7 @@ describe("snapshot round-trip & fold equivalence", () => {
     await ws.link(brief, other, "depends-on");
 
     await ws.mutate(brief, "beginPlanning", {});
-    await ws.mutate(plan, "addStep", { text: "Stream from /export." });
+    const { stepId } = (await ws.mutate(plan, "addStep", { text: "Stream from /export." })).value as { stepId: string };
     const { caseId } = (await ws.mutate(testPlan, "addCase", {
       text: "10k rows < 2s.",
     })).value as { caseId: string };
@@ -75,10 +75,7 @@ describe("snapshot round-trip & fold equivalence", () => {
 
     await ws.mutate(plan, "addDataModel", { language: "ts", source: "export interface Snapshotted {}" });
     await ws.mutate(brief, "beginImplementation", {});
-    const { taskId } = (await ws.mutate(checklist, "addTask", {
-      text: "Endpoint",
-    })).value as { taskId: string };
-    await ws.mutate(checklist, "checkTask", { taskId });
+    await ws.mutate(plan, "markStepDone", { stepId });
     const { token: lastToken } = await ws.mutate(testPlan, "markCasePassed", { caseId });
 
     // History is a read; gate it on the last write's token so it reflects every

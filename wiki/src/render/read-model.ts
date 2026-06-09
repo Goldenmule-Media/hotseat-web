@@ -5,7 +5,6 @@
  * so equal state renders byte-identically. The per-type `render` is retired.
  */
 import type {
-  ComputedFlag,
   DeepReadonly,
   DerivedItem,
   IField,
@@ -146,19 +145,10 @@ function fillTitleTemplate(template: string, node: IPageNode): string {
   });
 }
 
-/** Context for COMPUTED checkboxes: the page being rendered, the
- *  render ctx (cross-page reads), and the page type's named {@link ComputedFlag}s. */
-interface ComputedCtx {
-  readonly page: DeepReadonly<PageState>;
-  readonly ctx: IRenderCtx;
-  readonly flags?: Readonly<Record<string, ComputedFlag>>;
-}
-
 function renderListField(
   f: { kind: "list"; elementType: string; elements: IItem[] },
   sr: SectionRender,
   label: LabelResolver,
-  computed?: ComputedCtx,
 ): string {
   // `as: "numbered"` → ordered list (`1.`), so items stay referenceable; bullets otherwise.
   // Applies to grouped and flat lists alike (the checklist path below stays unordered).
@@ -176,16 +166,10 @@ function renderListField(
   const template = sr.item ?? "{text}";
   if (f.elements.length === 0) return placeholder();
   if (sr.as === "checklist") {
-    // A box is checked when the element status === checkedWhen — UNLESS the element binds
-    // to a computed flag (`meta.computed`), in which case the box is COMPUTED from that
-    // flag (a projection of the real fact, possibly cross-page) and cannot be hand-driven.
-    const isChecked = (el: IItem): boolean => {
-      const key = typeof el.meta?.["computed"] === "string" ? (el.meta["computed"] as string) : undefined;
-      const flag = key !== undefined ? computed?.flags?.[key] : undefined;
-      if (flag !== undefined && computed !== undefined) return flag(computed.page, computed.ctx);
-      return el.status === sr.checkedWhen;
-    };
-    return bulletList(f.elements.map((el) => `[${isChecked(el) ? "x" : " "}] ${fillTemplate(template, el, label)}`));
+    // A box is checked when the element status === checkedWhen.
+    return bulletList(
+      f.elements.map((el) => `[${el.status === sr.checkedWhen ? "x" : " "}] ${fillTemplate(template, el, label)}`),
+    );
   }
   return asList(f.elements.map((el) => fillTemplate(template, el, label)));
 }
@@ -194,7 +178,6 @@ function renderFieldBody(
   f: IField,
   sr: SectionRender,
   label: LabelResolver,
-  computed?: ComputedCtx,
 ): string {
   switch (f.kind) {
     case "scalar":
@@ -210,7 +193,7 @@ function renderFieldBody(
     case "blocks":
       return f.blocks.length === 0 ? placeholder() : renderBlocks(f.blocks, label);
     case "list":
-      return renderListField(f, sr, label, computed);
+      return renderListField(f, sr, label);
   }
 }
 
@@ -227,7 +210,7 @@ export function renderPage(state: IWorkspaceState, pageId: PageId, registry: Reg
   const def = registry.page(node.type);
   const config: RenderConfig = def.render;
   const label = makeLabelResolver(state, node, ctx);
-  const computed: ComputedCtx = { page: pageStateView(node) as DeepReadonly<PageState>, ctx, flags: def.computed };
+  const pageView = pageStateView(node) as DeepReadonly<PageState>;
 
   const blocks: string[] = [];
   blocks.push(heading(1, displayTitle(node, registry)));
@@ -237,7 +220,7 @@ export function renderPage(state: IWorkspaceState, pageId: PageId, registry: Reg
     // A DERIVED checklist: a model projection of folded state (e.g. the plan's steps +
     // local progress), not a page field. Rendered byte-stably.
     if (sr.derived !== undefined) {
-      const items = def.derived?.[sr.derived]?.(computed.page, ctx) ?? [];
+      const items = def.derived?.[sr.derived]?.(pageView, ctx) ?? [];
       const body = items.length === 0 ? (sr.placeholder ?? placeholder()) : renderDerivedList(items);
       blocks.push(section(heading(2, sr.heading ?? sr.derived), body));
       continue;
@@ -269,7 +252,7 @@ export function renderPage(state: IWorkspaceState, pageId: PageId, registry: Reg
     } else {
       const fieldKey = sr.field ?? Object.keys(sec.fields)[0];
       const f = fieldKey !== undefined ? sec.fields[fieldKey] : undefined;
-      body = f === undefined ? (sr.placeholder ?? placeholder()) : renderFieldBody(f, sr, label, computed);
+      body = f === undefined ? (sr.placeholder ?? placeholder()) : renderFieldBody(f, sr, label);
       if (body.length === 0) body = sr.placeholder ?? placeholder();
     }
     blocks.push(section(heading(2, headingText), body));
