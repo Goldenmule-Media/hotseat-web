@@ -9,7 +9,7 @@
  *      opened or unarchived. Archiving itself lives on the page content (see PageView).
  */
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import type { ITreeNode, PageId, WorkspaceId } from "wiki";
 import { pageHref } from "../lib/routes";
@@ -109,18 +109,52 @@ function TreeItem({
   reorder: (draggedId: string, targetId: string) => void;
   ctx: TreeCtx;
 }): React.JSX.Element {
+  const router = useRouter();
   const id = String(node.id);
   const isActive = id === ctx.activePageId;
   const hasChildren = node.children.length > 0;
   const collapsed = hasChildren && ctx.collapse.isCollapsed(id);
   const isDragging = ctx.drag?.id === id;
   const isOver = ctx.overId === id && ctx.drag !== null && ctx.drag.parentKey === parentKey && ctx.drag.id !== id;
+  const href = pageHref(ctx.workspaceId, node.id);
+
+  // The WHOLE row is one click target (no separate caret hit area): a row that isn't the
+  // current page just SELECTS it; a row that already is toggles its expand/collapse.
+  const activate = (): void => {
+    if (!isActive) router.push(href);
+    else if (hasChildren) ctx.collapse.toggle(id);
+  };
 
   return (
     <li>
       <div
-        className={`tree-row${isDragging ? " dragging" : ""}${isOver ? " drag-over" : ""}`}
+        className={`tree-row${isActive ? " active" : ""}${isDragging ? " dragging" : ""}${isOver ? " drag-over" : ""}`}
+        role="link"
+        tabIndex={0}
+        aria-current={isActive ? "page" : undefined}
+        aria-expanded={hasChildren ? !collapsed : undefined}
+        title={node.type !== undefined ? `${node.type} · ${node.status ?? ""}` : undefined}
         draggable
+        onClick={(e) => {
+          // Modified / middle clicks open in a new tab, mirroring an anchor.
+          if (e.metaKey || e.ctrlKey || e.shiftKey) {
+            window.open(href, "_blank", "noopener");
+            return;
+          }
+          activate();
+        }}
+        onAuxClick={(e) => {
+          if (e.button === 1) {
+            e.preventDefault();
+            window.open(href, "_blank", "noopener");
+          }
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            activate();
+          }
+        }}
         onDragStart={(e) => {
           ctx.setDrag({ id, parentKey });
           e.dataTransfer.effectAllowed = "move";
@@ -147,41 +181,15 @@ function TreeItem({
           ctx.setOverId(null);
         }}
       >
-        {hasChildren ? (
-          <button
-            type="button"
-            className="tree-caret"
-            aria-label={collapsed ? "Expand" : "Collapse"}
-            aria-expanded={!collapsed}
-            onClick={() => ctx.collapse.toggle(id)}
-          >
-            <span className={`caret${collapsed ? "" : " open"}`} aria-hidden="true">
-              ▶
-            </span>
-          </button>
-        ) : (
-          <span className="tree-caret tree-caret-empty" aria-hidden="true" />
-        )}
-        <Link
-          href={pageHref(ctx.workspaceId, node.id)}
-          className={`tree-link${isActive ? " active" : ""}`}
-          title={node.type !== undefined ? `${node.type} · ${node.status ?? ""}` : undefined}
-          draggable={false}
-          onClick={(e) => {
-            // Clicking the row (not the tiny caret) is the primary affordance: a row that
-            // isn't the current page just SELECTS it (default link navigation); a row that
-            // is ALREADY selected toggles its expand/collapse instead of re-navigating.
-            // Modified / non-primary clicks fall through so open-in-new-tab still works.
-            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-            if (isActive) {
-              e.preventDefault();
-              if (hasChildren) ctx.collapse.toggle(id);
-            }
-          }}
-        >
+        <span className="tree-caret" aria-hidden="true">
+          {hasChildren && (
+            <span className={`caret${collapsed ? "" : " open"}`}>▶</span>
+          )}
+        </span>
+        <span className="tree-link">
           <span className="tree-title">{node.displayTitle ?? node.title}</span>
           <StatusChip node={node} />
-        </Link>
+        </span>
       </div>
       {hasChildren && !collapsed && <TreeChildren parentKey={id} siblings={node.children} ctx={ctx} />}
     </li>
