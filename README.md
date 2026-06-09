@@ -163,6 +163,21 @@ human sign-off gates. It's branch/worktree-agnostic, so you can run several in p
 the one shared wiki. Invoke it with `/build-feature <workspaceId> "<intent>"`; design and caveats are in
 [`.claude/skills/build-feature/README.md`](./.claude/skills/build-feature/README.md).
 
+**Using it from other repos.** The skill also ships as the `hotseat` Claude Code plugin
+([`plugins/hotseat/`](./plugins/hotseat/)), which bundles the `wiki` MCP wiring alongside it; this repo's
+root is the plugin marketplace. In the other repo's Claude Code session:
+
+```
+/plugin marketplace add /Users/you/path/to/hotseat-web   # local checkout (repo root, not plugins/hotseat)
+/plugin marketplace add Goldenmule-Media/hotseat-web     # …or straight from GitHub
+/plugin install hotseat@hotseat
+```
+
+After editing the plugin here, run `/plugin marketplace update hotseat` in the consuming session to pick
+up the changes. The plugin carries only the client side — it still needs a running `wiki-server` with the
+`feature` model loaded (`npm start` here; override the endpoint with `WIKI_MCP_URL` if not
+`127.0.0.1:4439`). Details and prerequisites: [`plugins/hotseat/README.md`](./plugins/hotseat/README.md).
+
 ### Where to read more
 
 - [`CLAUDE.md`](./CLAUDE.md) — architecture, package boundaries, and the full conventions list.
