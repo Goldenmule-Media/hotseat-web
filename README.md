@@ -66,9 +66,43 @@ This repo already ships [`.mcp.json`](./.mcp.json) pointing the `wiki` MCP serve
 `http://127.0.0.1:4439/mcp` — so **in Claude Code, the `wiki` tools light up as soon as the server is
 running** (with a model loaded). Any other MCP client can connect to the same URL.
 
-### 3. Create and evolve a page
+### 3. Build a feature with `/build-feature`
 
-The tools mirror the engine. A typical first flow (tool → key arguments):
+The bundled Claude Code skill drives a feature through the `feature` bundle's FSM end-to-end:
+
+```
+/build-feature <workspaceId> "<one-line intent>"
+/build-feature <workspaceId> feature-brief:<id>      # drive an existing brief
+```
+
+(No workspace yet? One MCP call — `createWorkspace → { name: "My project" }` — returns the `workspaceId`.)
+
+It seeds (or picks up) a feature-brief, grounds the implementation plan in the real repo, writes the
+code, and **verifies** with real typecheck/tests plus a `/code-review` pass before flipping any FSM gate —
+stopping at the human sign-off gates (`submitForReview` / `ship`). It delegates *what's next* to the
+wiki's own `nextActions` rather than hardcoding the lifecycle, and it's branch/worktree-agnostic, so
+several can run in parallel worktrees against the one shared wiki. Design and caveats:
+[`.claude/skills/build-feature/README.md`](./.claude/skills/build-feature/README.md).
+
+**Using it from other repos.** The skill also ships as the `hotseat` Claude Code plugin
+([`plugins/hotseat/`](./plugins/hotseat/)), which bundles the `wiki` MCP wiring alongside it; this repo's
+root is the plugin marketplace. In the other repo's Claude Code session:
+
+```
+/plugin marketplace add /Users/you/path/to/hotseat-web   # local checkout (repo root, not plugins/hotseat)
+/plugin marketplace add Goldenmule-Media/hotseat-web     # …or straight from GitHub
+/plugin install hotseat@hotseat
+```
+
+After editing the plugin here, run `/plugin marketplace update hotseat` in the consuming session to pick
+up the changes. The plugin carries only the client side — it still needs a running `wiki-server` with the
+`feature` model loaded (step 1; override the endpoint with `WIKI_MCP_URL` if not `127.0.0.1:4439`).
+Details and prerequisites: [`plugins/hotseat/README.md`](./plugins/hotseat/README.md).
+
+### Driving the tools by hand
+
+The MCP tools mirror the engine — any MCP client can do what the skill does. A typical first flow
+(tool → key arguments):
 
 1. `createWorkspace` → `{ name: "My project" }` → returns a `workspaceId`.
 2. `createPage` → `{ workspaceId, type: "feature-brief", title: "Dark mode" }` → returns a `pageId`.
@@ -152,31 +186,6 @@ The server re-imports the rebuilt bundle, rebinds the engine, and reprojects the
   imports use **`.js`**.
 - **tsdown bundling:** `deps.alwaysBundle` must use a **regex** (`/^wiki(\/|$)/`), not the bare string
   `"wiki"`, or subpath exports (`wiki/registry`, `wiki/authoring`) stay external and Node fails at runtime.
-
-### Building features with Claude Code (`/build-feature`)
-
-This repo bundles a Claude Code skill that drives a feature through the `feature` bundle's FSM
-end-to-end. It delegates *what's next* to the wiki's own `nextActions` (never hardcoding the lifecycle),
-and adds only what the self-directing wiki can't: grounding the plan in the real repo, doing and
-**verifying** real code + tests before flipping any gate, and a `/code-review` pass — stopping at the
-human sign-off gates. It's branch/worktree-agnostic, so you can run several in parallel worktrees against
-the one shared wiki. Invoke it with `/build-feature <workspaceId> "<intent>"`; design and caveats are in
-[`.claude/skills/build-feature/README.md`](./.claude/skills/build-feature/README.md).
-
-**Using it from other repos.** The skill also ships as the `hotseat` Claude Code plugin
-([`plugins/hotseat/`](./plugins/hotseat/)), which bundles the `wiki` MCP wiring alongside it; this repo's
-root is the plugin marketplace. In the other repo's Claude Code session:
-
-```
-/plugin marketplace add /Users/you/path/to/hotseat-web   # local checkout (repo root, not plugins/hotseat)
-/plugin marketplace add Goldenmule-Media/hotseat-web     # …or straight from GitHub
-/plugin install hotseat@hotseat
-```
-
-After editing the plugin here, run `/plugin marketplace update hotseat` in the consuming session to pick
-up the changes. The plugin carries only the client side — it still needs a running `wiki-server` with the
-`feature` model loaded (`npm start` here; override the endpoint with `WIKI_MCP_URL` if not
-`127.0.0.1:4439`). Details and prerequisites: [`plugins/hotseat/README.md`](./plugins/hotseat/README.md).
 
 ### Where to read more
 
