@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "wiki": {
+      "type": "http",
+      "url": "${WIKI_MCP_URL:-http://127.0.0.1:4439/mcp}"
+    }
+  }
+}

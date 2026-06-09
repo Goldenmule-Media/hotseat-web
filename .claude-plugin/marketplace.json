@@ -1,0 +1,15 @@
+{
+  "name": "hotseat",
+  "description": "Claude Code tooling for the hotseat structured wiki — FSM-gated feature-build skills and wiki MCP wiring.",
+  "owner": {
+    "name": "Benjamin Jordan",
+    "email": "benjamin@thegoldenmule.com"
+  },
+  "plugins": [
+    {
+      "name": "hotseat",
+      "source": "./plugins/hotseat",
+      "description": "Agentic, FSM-gated feature builds driven by the hotseat structured wiki (/build-feature + wiki MCP wiring)."
+    }
+  ]
+}
