@@ -126,6 +126,8 @@ export interface WikiHostApi {
   mutate(ws: WorkspaceId, page: PageId, command: string, args: Record<string, unknown>): Promise<void>;
   archivePage(ws: WorkspaceId, page: PageId): Promise<void>;
   unarchivePage(ws: WorkspaceId, page: PageId): Promise<void>;
+  /** Rename the workspace (its display name; the id never changes). */
+  renameWorkspace(ws: WorkspaceId, name: string): Promise<void>;
 
   /** Register a (Comlink-proxied) snapshot callback; resolves to a subscription id. The
    *  current snapshot is delivered immediately, then on every change. */

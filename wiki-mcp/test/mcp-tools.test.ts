@@ -187,6 +187,27 @@ describe("MCP tools + token manager + resources", () => {
     expect(await statusNow()).toBe("active");
   });
 
+  it("renameWorkspace is reachable from MCP and changes the listed name (id unchanged)", async () => {
+    const session = "ws-rename";
+    const created = await tools.get("createWorkspace")!.handle({ name: "Old name" }, ctx(session));
+    const wsId = (created.data as { workspaceId: string }).workspaceId;
+    await drain();
+    const nameNow = async (): Promise<string | undefined> => {
+      const list = (await tools.get("listWorkspaces")!.handle({}, ctx(session))).data as { id: string; name: string }[];
+      return list.find((w) => w.id === wsId)?.name;
+    };
+    expect(await nameNow()).toBe("Old name");
+
+    await tools.get("renameWorkspace")!.handle({ workspaceId: wsId, name: "New name" }, ctx(session));
+    await drain();
+    expect(await nameNow()).toBe("New name");
+
+    // An empty name is rejected by the engine's invariant.
+    await expect(
+      tools.get("renameWorkspace")!.handle({ workspaceId: wsId, name: "   " }, ctx(session)),
+    ).rejects.toThrow(/non-empty/);
+  });
+
   it("mutate then describeMutations reflects status; render shows the body", async () => {
     const session = "s2";
     const created = await tools.get("createWorkspace")!.handle({ name: "W" }, ctx(session));

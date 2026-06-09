@@ -507,6 +507,24 @@ export const moveItem: StructureHandler = (state, args) => {
 };
 
 // ────────────────────────────────────────────────────────────────────────────
+// renameWorkspace
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Rename the whole workspace. The name must be non-empty; renaming to the current
+ *  name is a no-op (emits nothing — a rename moves the entire on-disk mirror, so an
+ *  idle commit is not free). */
+export const renameWorkspace: StructureHandler = (state, args) => {
+  const { name } = args as { name: string };
+  const trimmed = name.trim();
+  if (trimmed === "") {
+    throw new InvariantViolationError("A workspace name must be non-empty.");
+  }
+  if (trimmed === state.name) return { events: [] };
+
+  return { events: [{ type: "WorkspaceRenamed", payload: { name: trimmed } }] };
+};
+
+// ────────────────────────────────────────────────────────────────────────────
 // archiveWorkspace
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -575,10 +593,12 @@ export const STRUCTURAL_HANDLERS: Readonly<Record<string, StructureHandler>> = {
   link,
   unlink,
   moveItem,
+  renameWorkspace,
   archiveWorkspace,
   unarchiveWorkspace,
   assignSerials,
-  // The IWorkspaceHandle exposes `archive()` / `unarchive()` for workspace archival.
+  // The IWorkspaceHandle exposes `rename()` / `archive()` / `unarchive()` for workspace verbs.
+  rename: renameWorkspace,
   archive: archiveWorkspace,
   unarchive: unarchiveWorkspace,
 };

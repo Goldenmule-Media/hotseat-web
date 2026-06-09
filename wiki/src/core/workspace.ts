@@ -42,6 +42,7 @@ export const STRUCTURAL_EVENT_TYPES = [
   "PageUnarchived",
   "LinkAdded",
   "LinkRemoved",
+  "WorkspaceRenamed",
   "WorkspaceArchived",
   "WorkspaceUnarchived",
 ] as const;
@@ -64,6 +65,9 @@ export function isStructuralEvent(type: string): type is StructuralEventType {
 // ────────────────────────────────────────────────────────────────────────────
 
 interface WorkspaceCreatedPayload {
+  readonly name: string;
+}
+interface WorkspaceRenamedPayload {
   readonly name: string;
 }
 interface PageCreatedPayload {
@@ -402,6 +406,12 @@ function applyStructural(
       state.links = state.links.filter(
         (l) => !(l.from === p.from && l.to === p.to && l.role === p.role),
       );
+      return state;
+    }
+
+    case "WorkspaceRenamed": {
+      const p = event.payload as WorkspaceRenamedPayload;
+      state.name = p.name;
       return state;
     }
 

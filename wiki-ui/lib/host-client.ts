@@ -52,6 +52,7 @@ export interface WikiHost {
   mutate(ws: WorkspaceId, page: PageId, command: string, args: Record<string, unknown>): Promise<void>;
   archivePage(ws: WorkspaceId, page: PageId): Promise<void>;
   unarchivePage(ws: WorkspaceId, page: PageId): Promise<void>;
+  renameWorkspace(ws: WorkspaceId, name: string): Promise<void>;
   subscribe(ws: WorkspaceId, onSnapshot: SnapshotCallback): Promise<() => void>;
 }
 
@@ -117,6 +118,7 @@ async function connect(): Promise<WikiHost> {
     mutate: (ws, page, command, args) => remote.mutate(ws, page, command, args),
     archivePage: (ws, page) => remote.archivePage(ws, page),
     unarchivePage: (ws, page) => remote.unarchivePage(ws, page),
+    renameWorkspace: (ws, name) => remote.renameWorkspace(ws, name),
     subscribe: async (ws, onSnapshot) => {
       // Comlink.proxy lets the worker invoke this tab-side callback across the port.
       const subId = await remote.subscribe(ws, Comlink.proxy(onSnapshot));

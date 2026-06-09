@@ -524,6 +524,25 @@ const createWorkspaceTool: WikiTool = {
   },
 };
 
+const renameWorkspaceTool: WikiTool = {
+  name: "renameWorkspace",
+  description:
+    "Rename a workspace — set the display name shown by listWorkspaces and used for its " +
+    "Markdown-mirror directory (the mirrored tree moves to the new name's slug). The workspace " +
+    "id never changes, so existing references stay valid. The name must be non-empty; renaming " +
+    "to the current name is a no-op.",
+  inputSchema: obj({ workspaceId: STR, name: str("The new workspace name.") }, ["workspaceId", "name"]),
+  write: true,
+  async handle(args, ctx) {
+    const ws = asWorkspaceId(reqStr(args, "workspaceId"));
+    const name = reqStr(args, "name");
+    const handle = await ctx.engine.open(ws);
+    const { token } = await handle.rename(name);
+    ctx.tokens.recordWrite(ctx.sessionId, token);
+    return { text: `Workspace ${ws} renamed to "${name.trim()}".`, data: { token } };
+  },
+};
+
 const archiveWorkspaceTool: WikiTool = {
   name: "archiveWorkspace",
   description:
@@ -1474,6 +1493,7 @@ export function wikiTools(): readonly WikiTool[] {
   return [
     // writes
     createWorkspaceTool,
+    renameWorkspaceTool,
     archiveWorkspaceTool,
     unarchiveWorkspaceTool,
     assignSerialsTool,

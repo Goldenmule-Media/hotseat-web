@@ -127,6 +127,7 @@ export function affectedPageIds(
         addPageId(touched, p["to"]);
         break;
       case "WorkspaceCreated":
+      case "WorkspaceRenamed":
       case "WorkspaceArchived":
       case "WorkspaceUnarchived":
         break; // workspace-level events have no page render impact
@@ -174,6 +175,10 @@ export function isStructuralCommit(newEvents: readonly IEventEnvelope[]): boolea
       case "PageTitleSet":
       case "PageArchived":
       case "PageUnarchived":
+        return true;
+      case "WorkspaceRenamed":
+        // No page renders change, but a path-mapping sink derives the WORKSPACE directory from
+        // the workspace name — a rename moves every mirrored file, so it must take a rebuild.
         return true;
       case "LinkAdded":
       case "LinkRemoved":

@@ -390,6 +390,15 @@ function makeApi(conn: PortConn): WikiHostApi {
         throw toWikiErrorDTO(e);
       }
     },
+    async renameWorkspace(ws: WorkspaceId, name: string) {
+      const host = await ensureHost(ws);
+      try {
+        const h = await host.handle();
+        await h.rename(name);
+      } catch (e) {
+        throw toWikiErrorDTO(e);
+      }
+    },
     async subscribe(ws: WorkspaceId, onSnapshot: SnapshotCallback) {
       const host = await ensureHost(ws);
       const subId = subIdSeq++;

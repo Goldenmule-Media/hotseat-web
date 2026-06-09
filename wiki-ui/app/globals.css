@@ -116,6 +116,11 @@ code {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: text;
+  border-radius: 6px;
+}
+.ws-name:hover {
+  background: var(--accent-dim);
 }
 .icon-btn {
   background: transparent;
@@ -128,6 +133,26 @@ code {
 }
 .icon-btn:hover {
   color: var(--text);
+}
+.ws-rename-input {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+.ws-rename-input:focus {
+  outline: none;
+  border-color: var(--muted);
+}
+.ws-rename-input[aria-invalid="true"] {
+  border-color: var(--red);
 }
 
 /* ── tree ────────────────────────────────────────────────────────────────── */

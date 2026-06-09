@@ -432,6 +432,9 @@ export interface IWorkspaceHandle {
     field: string;
     itemId: string;
   }): Promise<Committed<void>>;
+  /** Rename the whole workspace (the display name in listings — the id never changes). The
+   *  name must be non-empty; renaming to the current name is a no-op. */
+  rename(name: string): Promise<Committed<void>>;
   /** Archive the whole workspace (hidden from default listings; reversible via {@link unarchive}). */
   archive(): Promise<Committed<void>>;
   /** Unarchive the whole workspace — the inverse of {@link archive}, runnable while archived. */

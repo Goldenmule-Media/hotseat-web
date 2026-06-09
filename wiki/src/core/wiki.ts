@@ -582,15 +582,22 @@ class WorkspaceHandle implements IWorkspaceHandle {
     return this.structural("moveItem", input) as Promise<Committed<void>>;
   }
 
+  async rename(name: string): Promise<Committed<void>> {
+    const trimmed = name.trim();
+    const committed = (await this.structural("rename", { name: trimmed })) as Committed<void>;
+    await this.syncCatalog({ type: "WorkspaceRenamed", id: this.id, name: trimmed, at: this.config.clock?.() ?? "" });
+    return committed;
+  }
+
   async archive(): Promise<Committed<void>> {
     const committed = (await this.structural("archive", {})) as Committed<void>;
-    await this.syncCatalogStatus("WorkspaceArchived");
+    await this.syncCatalog({ type: "WorkspaceArchived", id: this.id, at: this.config.clock?.() ?? "" });
     return committed;
   }
 
   async unarchive(): Promise<Committed<void>> {
     const committed = (await this.structural("unarchive", {})) as Committed<void>;
-    await this.syncCatalogStatus("WorkspaceUnarchived");
+    await this.syncCatalog({ type: "WorkspaceUnarchived", id: this.id, at: this.config.clock?.() ?? "" });
     return committed;
   }
 
@@ -598,12 +605,12 @@ class WorkspaceHandle implements IWorkspaceHandle {
     return this.structural("assignSerials", {}) as Promise<Committed<void>>;
   }
 
-  /** Mirror an archive/unarchive into the namespace catalog (the secondary index `listWorkspaces`
-   *  folds) so the workspace's status is consistent there too — best-effort, like registration:
-   *  the workspace stream stays the source of truth. */
-  private async syncCatalogStatus(type: "WorkspaceArchived" | "WorkspaceUnarchived"): Promise<void> {
+  /** Mirror a rename/archive/unarchive into the namespace catalog (the secondary index
+   *  `listWorkspaces` folds) so the workspace's name/status is consistent there too —
+   *  best-effort, like registration: the workspace stream stays the source of truth. */
+  private async syncCatalog(event: CatalogEvent): Promise<void> {
     try {
-      await this.eventLog.appendCatalog({ type, id: this.id, at: this.config.clock?.() ?? "" });
+      await this.eventLog.appendCatalog(event);
     } catch {
       /* catalog is a secondary index; the workspace stream remains the source of truth */
     }
