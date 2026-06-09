@@ -351,14 +351,33 @@ code {
   }
 }
 
-/* Persistent page header: title stays on the left in both views; the view toggle is
-   right-aligned, plain white text with an underline on the active tab. */
+/* Persistent page header: a compact eyebrow row (meta chips on the left, actions on the
+   right) sits above the page title, so the H1 gets its own line and never competes with
+   the badges or controls. Kept in both Content and Model views. */
 .page-header {
   display: flex;
-  align-items: baseline;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.page-header-meta {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 18px;
+  min-height: 24px;
+}
+.page-meta-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.page-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
 }
 .page-title {
   margin: 0;
@@ -374,6 +393,12 @@ code {
   cursor: pointer;
   flex-shrink: 0;
   align-self: center;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.page-title-row:hover .page-id-copy,
+.page-id-copy:focus-visible {
+  opacity: 1;
 }
 .page-id-copy:hover {
   color: #fff;
@@ -399,17 +424,22 @@ code {
   color: #fff;
   border-bottom-color: #fff;
 }
-.page-header-main {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  min-width: 0;
-}
 .page-header-actions {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 16px;
   flex-shrink: 0;
+}
+/* Page-type chip in the eyebrow row — subtle, accent-tinted so it reads as a category. */
+.page-type-chip {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  background: var(--accent-dim);
+  border-radius: 4px;
+  padding: 1px 6px;
 }
 .page-archive-btn {
   background: transparent;

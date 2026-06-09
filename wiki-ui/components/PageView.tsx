@@ -125,7 +125,59 @@ export function PageView({
   return (
     <div className="page">
       <header className="page-header">
-        <div className="page-header-main">
+        <div className="page-header-meta">
+          <div className="page-meta-chips">
+            {pageType !== undefined && <span className="page-type-chip">{pageType}</span>}
+            {currentStatus !== "" && (
+              <span
+                className={`page-status-badge${isTerminal ? " page-terminal-badge" : ""}`}
+                title={isTerminal ? "Terminal status — no further transitions" : "Current status"}
+              >
+                {currentStatus}
+              </span>
+            )}
+            {archived && <span className="page-archived-badge">archived</span>}
+          </div>
+          <div className="page-header-actions">
+            {node !== undefined && (
+              <button
+                type="button"
+                className="page-archive-btn"
+                disabled={structural.pending}
+                title={archived ? "Restore this page to the sidebar" : "Hide this page from the sidebar"}
+                onClick={() => {
+                  if (archived) void structural.unarchive(pageId);
+                  else void structural.archive(pageId);
+                }}
+              >
+                {archived ? "Unarchive" : "Archive"}
+              </button>
+            )}
+            {fsm !== null && (
+              <div className="view-toggle" role="tablist" aria-label="Page view">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === "content"}
+                  className={`view-tab ${mode === "content" ? "active" : ""}`}
+                  onClick={() => setViewMode("content")}
+                >
+                  Content
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === "model"}
+                  className={`view-tab ${mode === "model" ? "active" : ""}`}
+                  onClick={() => setViewMode("model")}
+                >
+                  Model
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="page-title-row">
           {headerTitle !== null && <h1 className="page-title">{headerTitle}</h1>}
           <button
             type="button"
@@ -146,53 +198,6 @@ export function PageView({
           >
             {copied ? "✓" : "🔗"}
           </button>
-          {currentStatus !== "" && (
-            <span
-              className={`page-status-badge${isTerminal ? " page-terminal-badge" : ""}`}
-              title={isTerminal ? "Terminal status — no further transitions" : "Current status"}
-            >
-              {currentStatus}
-            </span>
-          )}
-          {archived && <span className="page-archived-badge">archived</span>}
-        </div>
-        <div className="page-header-actions">
-          {node !== undefined && (
-            <button
-              type="button"
-              className="page-archive-btn"
-              disabled={structural.pending}
-              title={archived ? "Restore this page to the sidebar" : "Hide this page from the sidebar"}
-              onClick={() => {
-                if (archived) void structural.unarchive(pageId);
-                else void structural.archive(pageId);
-              }}
-            >
-              {archived ? "Unarchive" : "Archive"}
-            </button>
-          )}
-          {fsm !== null && (
-            <div className="view-toggle" role="tablist" aria-label="Page view">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={mode === "content"}
-                className={`view-tab ${mode === "content" ? "active" : ""}`}
-                onClick={() => setViewMode("content")}
-              >
-                Content
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={mode === "model"}
-                className={`view-tab ${mode === "model" ? "active" : ""}`}
-                onClick={() => setViewMode("model")}
-              >
-                Model
-              </button>
-            </div>
-          )}
         </div>
       </header>
       {structural.error !== null && (
