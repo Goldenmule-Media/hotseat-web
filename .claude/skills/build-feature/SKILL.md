@@ -50,7 +50,7 @@ Drive one feature from intent to a human sign-off gate. The wiki's `feature` bun
 - **Stop at human gates.** `humanGates` (`submitForReview`, `ship`) and `attention` items are not yours to cross. Drive up to them, then stop and hand back with a summary. Never call `submitForReview` or `ship`.
 - **Gates must reflect reality.** `markStepDone` only after the step's code landed; `markCasePassed` only when a test genuinely passed (see Implementation); `checkTask` only when the work is truly done. Default to *not* advancing when unsure.
 - **Branch/worktree-agnostic.** Operate in the current worktree on its current branch. Never `checkout`, assume a base branch, or require `main`.
-- **Do NOT** create workspaces, configure emitters, or stage/commit `docs/wiki/**`. The Markdown mirror is emitted to the main checkout automatically and reconciled at merge time. You commit *code only*, on the current feature branch (stage specific code paths, never `git add -A`).
+- **Do NOT** create workspaces, configure emitters, or stage/commit `docs/hotseat-wiki/**`. The Markdown mirror is emitted to the main checkout automatically and reconciled at merge time. You commit *code only*, on the current feature branch (stage specific code paths, never `git add -A`).
 
 ## Planning (draft → planning → building)
 Ground the plan in the real repo first — the wiki's preconditions read only sibling pages, never the codebase, so an ungrounded plan invents plausible-but-wrong steps.

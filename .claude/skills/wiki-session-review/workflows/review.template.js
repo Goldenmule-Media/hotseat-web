@@ -53,7 +53,7 @@ The wiki MODEL you are evaluating lives in this repo (root: ${repoRoot}):
   - SELF-DIRECTION (the 'next' echo + nextActions/attention roll-up that is supposed to tell the agent
     what to do next): grep wiki-mcp/src for nextActions / "next" / attention.
   - CONTENT-MODEL RULES (e.g. the "blocks text run may not contain Markdown" rule, ref resolution,
-    structural invariants like unique-sibling-title / acyclic): docs/wiki/architecture/content-model.md
+    structural invariants like unique-sibling-title / acyclic): docs/hotseat-wiki/architecture/content-model.md
     and the engine in wiki/src. The CLAUDE.md at the repo root is the boundary map.
 LOAD-BEARING CONSTRAINTS any recommendation MUST respect (do not propose violating these):
   - The engine (wiki) and host (wiki-mcp) are SCHEMA-AGNOSTIC: concrete page types live ONLY in

@@ -68,7 +68,7 @@ the *structure* of each call survives without the bulk. Resolves a session id ac
 Recommendations are grounded against the **source** in this repo (always present), not a live server:
 page types in `wiki-models/src/{feature/*,architecture,adr,toc}.ts`, the MCP tool surface in
 `wiki-mcp/src/mcp/{tools,server,resources}.ts` + `tokens.ts`, self-direction (`nextActions`/`next`) in
-`wiki-mcp/src`, and the content-model rules in `docs/wiki/architecture/content-model.md`.
+`wiki-mcp/src`, and the content-model rules in `docs/hotseat-wiki/architecture/content-model.md`.
 
 ## Status
 

@@ -32,7 +32,7 @@ every page renders **deterministically** to Markdown. Agents reach it over **MCP
 
 Architecture, boundaries, and conventions live in [`CLAUDE.md`](./CLAUDE.md); per-package design intent,
 the content model, ADRs, and feature specs live in the wiki's own rendered mirror under
-[`docs/wiki/`](./docs/wiki/).
+[`docs/hotseat-wiki/`](./docs/hotseat-wiki/).
 
 ---
 
@@ -130,7 +130,7 @@ return `Committed<T>`, reads are async and token-gated. It needs a Durable Strea
 `wiki-server`, or use the in-process server from `wiki/testing` for embedded/test use). Page types come
 from `wiki-models` (e.g. `import { featurePageTypes } from "wiki-models/feature"`). The API surface is
 canonical in the types — start at `wiki/src/index.ts` (and `wiki/src/api.ts`); see
-[`docs/wiki/architecture/wiki/`](./docs/wiki/architecture/wiki/) for the prose walkthrough.
+[`docs/hotseat-wiki/architecture/wiki/`](./docs/hotseat-wiki/architecture/wiki/) for the prose walkthrough.
 
 ---
 
@@ -192,6 +192,6 @@ The server re-imports the rebuilt bundle, rebinds the engine, and reprojects the
 - [`CLAUDE.md`](./CLAUDE.md) — architecture, package boundaries, and the full conventions list.
 - [`.claude/skills/build-feature/README.md`](./.claude/skills/build-feature/README.md) — the bundled
   `/build-feature` Claude Code skill (agentic, FSM-gated feature builds).
-- [`docs/wiki/architecture/`](./docs/wiki/architecture/) — per-package design intent + the engine's
-  content model. [`docs/wiki/decision-records/`](./docs/wiki/decision-records/) — every ADR.
-  [`docs/wiki/feature-specs/`](./docs/wiki/feature-specs/) — feature/product documents.
+- [`docs/hotseat-wiki/architecture/`](./docs/hotseat-wiki/architecture/) — per-package design intent + the engine's
+  content model. [`docs/hotseat-wiki/decision-records/`](./docs/hotseat-wiki/decision-records/) — every ADR.
+  [`docs/hotseat-wiki/feature-specs/`](./docs/hotseat-wiki/feature-specs/) — feature/product documents.

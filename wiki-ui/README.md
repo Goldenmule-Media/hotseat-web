@@ -11,13 +11,13 @@ monorepo (its own `node_modules`/lockfile; the root `npm run *` scripts don't to
 It consumes `wiki` and `wiki-models` as source via `transpilePackages`.
 
 > **Related docs.** wiki-ui has a typed node in the project's self-documenting wiki:
-> [`docs/wiki/architecture/wiki-ui.md`](../docs/wiki/architecture/wiki-ui.md) (a rendered
+> [`docs/hotseat-wiki/architecture/wiki-ui.md`](../docs/hotseat-wiki/architecture/wiki-ui.md) (a rendered
 > mirror — the wiki itself is the source of truth). See also the architecture map
-> [`docs/wiki/architecture/`](../docs/wiki/architecture/) — in particular the engine it
-> embeds, [`wiki/`](../docs/wiki/architecture/wiki/), and the schema it imports,
-> [`wiki-models/`](../docs/wiki/architecture/wiki-models/) — the repo-root
+> [`docs/hotseat-wiki/architecture/`](../docs/hotseat-wiki/architecture/) — in particular the engine it
+> embeds, [`wiki/`](../docs/hotseat-wiki/architecture/wiki/), and the schema it imports,
+> [`wiki-models/`](../docs/hotseat-wiki/architecture/wiki-models/) — the repo-root
 > [`CLAUDE.md`](../CLAUDE.md), and the planned
-> [shared-engine-in-a-SharedWorker](../docs/wiki/feature-specs/shared-engine-in-a-sharedworker-one-engine-pglite-across-all-tabs/index.md)
+> [shared-engine-in-a-SharedWorker](../docs/hotseat-wiki/feature-specs/shared-engine-in-a-sharedworker-one-engine-pglite-across-all-tabs/index.md)
 > feature spec.
 
 ## How it works

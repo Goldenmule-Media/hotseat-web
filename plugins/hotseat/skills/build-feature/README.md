@@ -58,7 +58,7 @@ Both are parameterized by `args`, so the common case runs them as-is via `Workfl
 - **Branch/worktree-agnostic.** Operate in the current worktree on its current branch; never `checkout`,
   assume a base branch, or require `main`.
 - **Stays out of shared state.** Does **not** create workspaces, configure emitters, or stage/commit
-  `docs/wiki/**`. Commits *code only*, on the current feature branch.
+  `docs/hotseat-wiki/**`. Commits *code only*, on the current feature branch.
 
 ## `/code-review`
 
@@ -73,7 +73,7 @@ Designed to run as N independent Claude sessions, one per git worktree (e.g. und
 parallel. Worktrees isolate the **code**; the **wiki is shared** (one `wiki-server`, one MCP endpoint), so:
 
 - No per-feature workspace — concurrent commits ride the engine's OCC (`Stream-Seq` 409 → rebase-retry).
-- A single Markdown emitter points at the **primary `main` checkout**, so `docs/wiki/` is mirrored on
+- A single Markdown emitter points at the **primary `main` checkout**, so `docs/hotseat-wiki/` is mirrored on
   `main` live regardless of which worktree drove the change (one writer, no race). Worktree branches carry
   code only.
 - At merge time the feature branch merges its code into `main`; the markdown is already on `main` (emitted

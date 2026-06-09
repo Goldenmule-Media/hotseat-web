@@ -12,12 +12,12 @@ deterministically to Markdown. An **npm-workspaces monorepo of four packages** (
 Next.js browser for a running server — its own install/build, **not** a workspace member. ESM, TypeScript,
 Node ≥20.
 
-**The codebase documents itself.** Design intent lives in the wiki and is mirrored to [`docs/wiki/`](docs/wiki/):
-per-package architecture plus the cross-cutting [Content model](docs/wiki/architecture/content-model.md)
+**The codebase documents itself.** Design intent lives in the wiki and is mirrored to [`docs/hotseat-wiki/`](docs/hotseat-wiki/):
+per-package architecture plus the cross-cutting [Content model](docs/hotseat-wiki/architecture/content-model.md)
 page (sections, field-kinds, the section-operation reducer, render) in
-[`docs/wiki/architecture/`](docs/wiki/architecture/); every Architecture Decision Record in
-[`docs/wiki/decision-records/`](docs/wiki/decision-records/); feature/product documents in
-[`docs/wiki/feature-specs/`](docs/wiki/feature-specs/). **The wiki is the source of truth; `docs/wiki/**` is
+[`docs/hotseat-wiki/architecture/`](docs/hotseat-wiki/architecture/); every Architecture Decision Record in
+[`docs/hotseat-wiki/decision-records/`](docs/hotseat-wiki/decision-records/); feature/product documents in
+[`docs/hotseat-wiki/feature-specs/`](docs/hotseat-wiki/feature-specs/). **The wiki is the source of truth; `docs/hotseat-wiki/**` is
 its always-current rendered mirror** (a configured emitter back-fills it — see "Running locally"). This
 file is the **boundary map + the gotchas**; the depth is in those pages. **Before changing a package's
 behavior, read its architecture page and the ADRs it links.**
@@ -68,11 +68,11 @@ wiki-models   The schema layer — the ONLY home for concrete page types (e.g. t
 ```
 
 **Per-package design intent (read before changing behavior):**
-[wiki](docs/wiki/architecture/wiki/) ·
-[wiki-models](docs/wiki/architecture/wiki-models/) ·
-[wiki-mcp](docs/wiki/architecture/wiki-mcp/) ·
-[wiki-server](docs/wiki/architecture/wiki-server.md) ·
-[Content model](docs/wiki/architecture/content-model.md).
+[wiki](docs/hotseat-wiki/architecture/wiki/) ·
+[wiki-models](docs/hotseat-wiki/architecture/wiki-models/) ·
+[wiki-mcp](docs/hotseat-wiki/architecture/wiki-mcp/) ·
+[wiki-server](docs/hotseat-wiki/architecture/wiki-server.md) ·
+[Content model](docs/hotseat-wiki/architecture/content-model.md).
 
 **`wiki-ui`** — a standalone **Next.js (App Router) app**, *not* a workspace member (own lockfile,
 `transpilePackages`). A **live-updating** browser for a running `wiki-server`: it **embeds the engine in the
@@ -90,8 +90,8 @@ mechanics → `wiki`; page types/schema → `wiki-models`; read model / projecti
 
 ## Core engine model (`wiki`) — orientation
 
-The load-bearing mental model; full detail in [`architecture/wiki/`](docs/wiki/architecture/wiki/), the
-[Content model](docs/wiki/architecture/content-model.md) page, and the ADRs.
+The load-bearing mental model; full detail in [`architecture/wiki/`](docs/hotseat-wiki/architecture/wiki/), the
+[Content model](docs/hotseat-wiki/architecture/content-model.md) page, and the ADRs.
 
 - **Workspace = aggregate = one Durable Stream.** A command's events are written as ONE atomic
   array-message ("commit"); reads flatten array-messages back to a flat event list.
@@ -143,7 +143,7 @@ and the embedded **wiki-mcp** streamable-HTTP MCP endpoint (`:4439/mcp`). File s
 `./.wiki-data`. Config is `flags → env → defaults`: `wiki-server` reads `WIKI_SERVER_*` (host/port/storage/
 data-dir/control-port/mcp-port/models/models-dir) **and** resolves the embedded `wiki-mcp`'s `WIKI_MCP_*`
 (namespace, `WIKI_MCP_DB` = `pglite`|`pg`, `WIKI_MCP_PG_URL`, data-dir), overriding the MCP's stream URL to
-its own. Full surface: [`architecture/wiki-server.md`](docs/wiki/architecture/wiki-server.md).
+its own. Full surface: [`architecture/wiki-server.md`](docs/hotseat-wiki/architecture/wiki-server.md).
 
 - **The server loads NO page types by default.** Provide the schema explicitly:
   `npm run start -w wiki-server -- --models wiki-models/feature` (or `WIKI_SERVER_MODELS=wiki-models/feature`).
@@ -164,7 +164,7 @@ its own. Full surface: [`architecture/wiki-server.md`](docs/wiki/architecture/wi
   tail** as the SQL read model + search index (one render per commit, fanned out). Layout
   `<root>/<workspace>/<page tree>` (folder + `index.md` per page-with-children), content-hashed so the git
   diff stays honest, atomic temp+rename writes, `archive` = `drop` (default) | `mirror` (under `_archive/`),
-  with a boot back-fill that self-heals a wiped output dir. **This repo's own [`docs/wiki/`](docs/wiki/) is
+  with a boot back-fill that self-heals a wiped output dir. **This repo's own [`docs/hotseat-wiki/`](docs/hotseat-wiki/) is
   one such mirror.** Local-only trust (v1, roots written verbatim, no sandboxing); single-writer per root
   (documented, not enforced).
 - **`.mcp.json`** wires this Claude Code session's `wiki` MCP server to `http://127.0.0.1:4439/mcp` — i.e. a
