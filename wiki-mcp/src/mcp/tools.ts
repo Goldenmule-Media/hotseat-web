@@ -250,14 +250,15 @@ async function rollupSubtree(
   return summary;
 }
 
-/** Best-effort single-page roll-up for a just-committed write — never throws (advisory). */
+/** Best-effort roll-up (one page or a set) for a just-committed write — never throws (advisory). */
 async function summarizeNext(
   handle: IWorkspaceHandle,
-  pageId: string,
+  pageId: string | readonly string[],
   token: ConsistencyToken,
 ): Promise<NextSummary | undefined> {
   try {
-    return await rollupSubtree(handle, [pageId], { consistentWith: token });
+    const ids = typeof pageId === "string" ? [pageId] : pageId;
+    return await rollupSubtree(handle, ids, { consistentWith: token });
   } catch {
     return undefined; // the write already committed; the hint is best-effort
   }
@@ -333,7 +334,10 @@ function visibleSubtreeIds(
 const createPageTool: WikiTool = {
   name: "createPage",
   description:
-    "Create a new page of a registered type in a workspace, optionally under a parent. Returns the new page id.",
+    "Create a new page of a registered type in a workspace, optionally under a parent. Returns the new " +
+    "page id. If the type declares required children (see describePageType), they are auto-created as " +
+    "pinned children in the SAME commit and returned in `data.children` — author into those, do not " +
+    "create your own.",
   inputSchema: obj(
     {
       workspaceId: str("The workspace to create the page in."),
@@ -352,10 +356,34 @@ const createPageTool: WikiTool = {
       parentId: optStrOrNull(args, "parentId") as never,
     });
     ctx.tokens.recordWrite(ctx.sessionId, token);
-    const next = await summarizeNext(handle, value, token);
+
+    // Required children are materialized in the SAME commit. Surface them directly (ids + types)
+    // so the agent gets their canonical ids and never re-creates them by hand. Best-effort: the
+    // page already committed, so a read hiccup must not fail the tool.
+    let children: { id: string; type: string; title: string }[] = [];
+    try {
+      const view = await handle.page(asPageId(value), { consistentWith: token });
+      const kids = await view.children({ consistentWith: token });
+      children = await Promise.all(
+        kids.map(async (k) => ({ id: k.id, type: k.type, title: await k.title({ consistentWith: token }) })),
+      );
+    } catch {
+      // advisory only
+    }
+
+    // Roll up the created page PLUS its auto-created children so each child's own pending actions
+    // surface too (agency partitioning unchanged — we don't force child edges into do/blocked).
+    const next = await summarizeNext(handle, [value, ...children.map((c) => c.id)], token);
+
+    const childLine =
+      children.length > 0
+        ? `\nAuto-created ${children.length} required child page(s): ` +
+          children.map((c) => `${c.id} (${c.type})`).join(", ") +
+          " — populate these; do not create your own siblings."
+        : "";
     return {
-      text: `Created page ${value}.` + nextLine(next),
-      data: { pageId: value, token, ...(next !== undefined ? { next } : {}) },
+      text: `Created page ${value}.${childLine}` + nextLine(next),
+      data: { pageId: value, token, ...(children.length > 0 ? { children } : {}), ...(next !== undefined ? { next } : {}) },
     };
   },
 };
@@ -408,7 +436,9 @@ const archivePageTool: WikiTool = {
   name: "archivePage",
   description:
     "Archive a page — hide it from default tree views (it and its subtree drop out). Reversible via " +
-    "unarchivePage; the page's lifecycle status is preserved, and it cannot be mutated while archived.",
+    "unarchivePage; the page's lifecycle status is preserved, and it cannot be mutated while archived. " +
+    "Note: an archived page still reserves its title among its siblings (archiving does NOT free the name), " +
+    "and it cannot be renamed while archived — so rename before archiving if you intend to reuse the title.",
   inputSchema: obj({ workspaceId: STR, pageId: STR }, ["workspaceId", "pageId"]),
   write: true,
   async handle(args, ctx) {
@@ -851,8 +881,13 @@ const describePageTypeTool: WikiTool = {
     const desc = wiki.describeType(type);
     const fsmLine =
       desc.fsm.transitions.map((tr) => `${tr.from} —${tr.event}→ ${tr.to}`).join("; ") || "(no transitions)";
+    let anyBlocks = false;
     const cmdLines = desc.commands.map((c) => {
-      const tgt = c.target !== undefined ? ` →${c.target.section}${c.target.field !== undefined ? `.${c.target.field}` : ""}` : "";
+      // The target field-kind (e.g. "(blocks)") is part of the target so authoring constraints
+      // that differ by kind are visible before the call.
+      if (c.targetKind === "blocks") anyBlocks = true;
+      const kind = c.targetKind !== undefined ? ` (${c.targetKind})` : "";
+      const tgt = c.target !== undefined ? ` →${c.target.section}${c.target.field !== undefined ? `.${c.target.field}` : ""}${kind}` : "";
       const ev = c.transition !== undefined ? ` [fires ${c.transition.event}]` : "";
       const gen = c.generated ? " (generated)" : "";
       const why = c.description !== undefined ? ` — ${c.description}` : "";
@@ -862,8 +897,17 @@ const describePageTypeTool: WikiTool = {
       const argHint = c.generated ? "(implied by target)" : summarizeArgs(c.argsSchema);
       return `- ${c.name}${tgt}${ev}${gen}  args ${argHint}${why}`;
     });
-    const head = `${desc.type}${desc.label !== undefined ? ` — ${desc.label}` : ""}\nStatus FSM (initial: ${desc.fsm.initial}): ${fsmLine}\nCommands:`;
-    return { text: `${head}\n${cmdLines.join("\n")}`, data: desc };
+    // One presentational line about the kind distinction (not copied per-command; the canonical
+    // rule lives in the engine's ingestion). Only shown when a blocks field is actually present.
+    const blocksNote = anyBlocks
+      ? "\nNote: (blocks) fields hold structured blocks — their prose runs reject inline Markdown; add code/refs/marks via the targeted commands, unlike (prose) fields which accept inline emphasis."
+      : "";
+    const reqChildren =
+      desc.requiredChildren !== undefined && desc.requiredChildren.length > 0
+        ? `\nAuto-creates pinned children on create: ${desc.requiredChildren.join(", ")} — author INTO those, do not create your own.`
+        : "";
+    const head = `${desc.type}${desc.label !== undefined ? ` — ${desc.label}` : ""}\nStatus FSM (initial: ${desc.fsm.initial}): ${fsmLine}${reqChildren}\nCommands:`;
+    return { text: `${head}\n${cmdLines.join("\n")}${blocksNote}`, data: desc };
   },
 };
 

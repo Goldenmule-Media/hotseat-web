@@ -155,6 +155,7 @@ export {
   ParentNotFoundError,
   CycleError,
   DuplicateTitleError,
+  DuplicateRequiredChildError,
   LinkTargetNotFoundError,
   ConcurrencyError,
   InvariantViolationError,

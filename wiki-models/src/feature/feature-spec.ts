@@ -170,6 +170,12 @@ export const FeatureSpec = definePageType({
     },
     // ── the load-bearing command: thread a decision in with an inline ref to its question ──
     addDecision: {
+      description:
+        "Record a design decision and link it to the brief question it addresses. `questionId` MUST be the " +
+        "ELEMENT ID of an existing question on the parent feature-brief (mint it via the brief's askQuestion, " +
+        "or read it from the brief's questions list) — NOT a slug, title, or free text. The id need only " +
+        "EXIST (it may still be open; this does not change the question's status); an id that resolves to no " +
+        "question element aborts the whole batch with a ref-integrity error.",
       args: zodSchema(z.object({ questionId: z.string(), text: z.string() })),
       result: zodSchema(z.object({ blockId: z.string() })),
       target: { section: "decisions", field: "body" },

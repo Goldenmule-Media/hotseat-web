@@ -115,7 +115,7 @@ _None._
 ## Child pages
 - [Implementation plan](implementation-plan:id-12)
 - [Testing plan](testing-plan:id-13)
-- [Spec](feature-spec:id-14)
+- [Spec — Bulk export](feature-spec:id-14)
 
 ## Commits
 - \`a1b2c3d\` feat(api): streaming export endpoint
@@ -219,7 +219,7 @@ describe("workspace render — deterministic tree", () => {
     expect(a).toContain("Bulk export (feature-brief, building)");
     expect(a).toContain("Implementation plan (implementation-plan, draft)");
     expect(a).toContain("Testing plan (testing-plan, draft)");
-    expect(a).toContain("Spec (feature-spec, drafting)");
+    expect(a).toContain("Spec — Bulk export (feature-spec, drafting)");
   });
 });
 

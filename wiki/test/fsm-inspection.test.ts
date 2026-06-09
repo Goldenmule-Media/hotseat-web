@@ -122,6 +122,25 @@ describe("IWiki.describeType / pageTypes — instance-free authoring surface", (
     expect(gen.target?.section).toBeTruthy();
   });
 
+  it("surfaces requiredChildren (the pinned children createPage auto-materializes)", () => {
+    const desc = wiki.describeType("feature-brief");
+    expect(desc.requiredChildren).toEqual(["implementation-plan", "testing-plan", "feature-spec"]);
+    // A leaf type declares none → the field is omitted.
+    expect(wiki.describeType("testing-plan").requiredChildren).toBeUndefined();
+  });
+
+  it("surfaces the target field-KIND on field-targeting commands (blocks vs prose)", () => {
+    const desc = wiki.describeType("feature-spec");
+    // design.body is a `blocks` field (its prose runs reject inline Markdown) ...
+    expect(
+      desc.commands.some(
+        (c) => c.target?.section === "design" && c.target?.field === "body" && c.targetKind === "blocks",
+      ),
+    ).toBe(true);
+    // ... while overview.body is `prose`.
+    expect(desc.commands.some((c) => c.target?.section === "overview" && c.targetKind === "prose")).toBe(true);
+  });
+
   it("is JSON-serializable — crosses the engine→UI/MCP boundary cleanly", () => {
     const desc = wiki.describeType("feature-brief");
     expect(JSON.parse(JSON.stringify(desc))).toEqual(desc);

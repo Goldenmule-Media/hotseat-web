@@ -644,6 +644,12 @@ export interface TypeCommandDescriptor {
   readonly description?: string;
   /** The section/field this command edits, when it targets one. */
   readonly target?: { readonly section: string; readonly field?: string };
+  /**
+   * The field-KIND of `target.field` (e.g. "blocks", "prose", "list", "scalar"), when the command
+   * targets a field. Surfaces authoring constraints that differ by kind — notably that a `blocks`
+   * field's prose runs reject inline Markdown while a `prose` field does not.
+   */
+  readonly targetKind?: string;
   /** The FSM event this command fires, when it is a page/element transition. */
   readonly transition?: { readonly level: "page" | "element"; readonly event: string };
   /**
@@ -665,6 +671,12 @@ export interface TypeDescriptor {
   readonly fsm: FsmDescriptor;
   /** Every command the type can run — declared commands first, then generated. */
   readonly commands: readonly TypeCommandDescriptor[];
+  /**
+   * Page-type ids that `createPage` auto-materializes as pinned children (recursively) in the
+   * same commit as a page of this type — mirrors {@link IPageTypeDef.requiredChildren}. A caller
+   * should author INTO these rather than create its own. Absent/empty when the type has none.
+   */
+  readonly requiredChildren?: readonly string[];
 }
 
 // ────────────────────────────────────────────────────────────────────────────

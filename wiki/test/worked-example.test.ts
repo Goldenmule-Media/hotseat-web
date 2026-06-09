@@ -310,7 +310,7 @@ describe("worked example: plan → build → ship a feature", () => {
       "## Open questions\n_None._",
       "## Resolved questions\n1. **Which formats in v1?** — _CSV and JSON; Parquet later._",
       "## References\n- depends-on → [Access control (RBAC)](feature-brief:id-3)",
-      "## Child pages\n- [Implementation plan](implementation-plan:id-12)\n- [Testing plan](testing-plan:id-13)\n- [Spec](feature-spec:id-14)",
+      "## Child pages\n- [Implementation plan — Bulk export](implementation-plan:id-12)\n- [Testing plan — Bulk export](testing-plan:id-13)\n- [Spec — Bulk export](feature-spec:id-14)",
       "## Commits\n- `a1b2c3d` feat(api): streaming export endpoint\n- `e4f5g6h` feat(cli): wiki export",
     ];
     const expected = blocks.join("\n\n") + "\n";

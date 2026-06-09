@@ -100,10 +100,47 @@ export class CycleError extends WikiError {
 export class DuplicateTitleError extends WikiError {
   readonly parentId: string | null;
   readonly title: string;
-  constructor(parentId: string | null, title: string) {
-    super("DUPLICATE_TITLE", `A sibling under "${parentId ?? "@root"}" already has the title "${title}".`);
+  /** The id of the conflicting sibling, when known. */
+  readonly conflictId?: string;
+  /** Whether that conflicting sibling is archived (it still reserves its title). */
+  readonly conflictArchived: boolean;
+  constructor(parentId: string | null, title: string, conflictId?: string, conflictArchived = false) {
+    const which = conflictId !== undefined ? ` (${conflictId}${conflictArchived ? ", archived" : ""})` : "";
+    // Archived siblings still occupy the namespace (they remain in the tree, rendered with an
+    // "archived" annotation), so archiving never frees a title — and an archived page cannot
+    // itself be renamed (setPageTitle requires an active page). Name the safe recovery paths.
+    const archivedHint = conflictArchived
+      ? " That sibling is ARCHIVED but still reserves its title; archiving does not free it, and an archived" +
+        " page cannot be renamed. Either rename before archiving, or unarchive → rename → re-archive."
+      : "";
+    super("DUPLICATE_TITLE", `A sibling under "${parentId ?? "@root"}" already has the title "${title}"${which}.${archivedHint}`);
     this.parentId = parentId;
     this.title = title;
+    this.conflictId = conflictId;
+    this.conflictArchived = conflictArchived;
+  }
+}
+
+/**
+ * Thrown when createPage is asked to create a page whose type is one of the PARENT type's
+ * declared {@link IPageTypeDef.requiredChildren} and such a child already exists under that
+ * parent. Those children are auto-materialized (pinned) in the parent's create commit, so a
+ * manual second one would be an unmanaged duplicate. Names the existing child so the caller
+ * authors into it instead.
+ */
+export class DuplicateRequiredChildError extends WikiError {
+  readonly parentId: string;
+  readonly childType: string;
+  readonly existingId: string;
+  constructor(parentId: string, childType: string, existingId: string) {
+    super(
+      "DUPLICATE_REQUIRED_CHILD",
+      `Page type "${childType}" is an auto-created required child of "${parentId}" and already exists as ` +
+        `${existingId}. Author into that page instead of creating another — a manual one is an unmanaged duplicate.`,
+    );
+    this.parentId = parentId;
+    this.childType = childType;
+    this.existingId = existingId;
   }
 }
 
@@ -242,12 +279,25 @@ export class StaleEditError extends WikiError {
 export class BatchCommandError extends WikiError {
   readonly index: number;
   readonly command: string;
+  /**
+   * How many earlier commands (indices `[0..index-1]`) validated and would have applied before
+   * this one failed — equal to `index`. The whole batch is atomic, so NOTHING was committed; this
+   * tells a caller the failure is isolated to `command`, so it can fix just that command and resend
+   * rather than re-reasoning the entire payload.
+   */
+  readonly validatedCount: number;
   /** The underlying typed rejection (narrows the standard `Error.cause`). */
   override readonly cause: WikiError;
   constructor(index: number, command: string, cause: WikiError) {
-    super("BATCH_COMMAND_FAILED", `Batch aborted at command [${index}] "${command}": ${cause.message}`);
+    const validated =
+      index === 0 ? "no earlier commands ran" : `commands [0..${index - 1}] validated; only this one failed`;
+    super(
+      "BATCH_COMMAND_FAILED",
+      `Batch aborted at command [${index}] "${command}" (${validated}; nothing was committed): ${cause.message}`,
+    );
     this.index = index;
     this.command = command;
+    this.validatedCount = index;
     this.cause = cause;
   }
 }

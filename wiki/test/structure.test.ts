@@ -23,6 +23,7 @@ import type {
 } from "../src/api";
 import {
   CycleError,
+  DuplicateRequiredChildError,
   DuplicateTitleError,
   InvariantViolationError,
   ItemNotFoundError,
@@ -168,6 +169,102 @@ describe("createPage — parent existence + unique sibling title", () => {
         registry,
       ),
     ).toThrow(InvariantViolationError);
+  });
+
+  it("rejects re-creating one of the parent type's required children, naming the existing one", () => {
+    const state = baseState();
+    // feature-brief:parent already has its implementation-plan child (an auto-materialized
+    // required child of feature-brief). A manual second one would be an unmanaged duplicate.
+    let err: unknown;
+    try {
+      createPage(
+        state,
+        { type: "implementation-plan", title: "Duplicate plan", parentId },
+        makeServices(),
+        registry,
+      );
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(DuplicateRequiredChildError);
+    expect((err as DuplicateRequiredChildError).existingId).toBe(childId);
+    expect((err as DuplicateRequiredChildError).childType).toBe("implementation-plan");
+  });
+
+  it("still allows a non-required child type under a parent that declares required children", () => {
+    const state = baseState();
+    // testing-plan IS a required child of feature-brief and already exists? No — baseState's
+    // parent only has an implementation-plan child, so a testing-plan is a fresh required child
+    // and is allowed (there isn't already one). It must NOT trip the duplicate guard.
+    const { events } = createPage(
+      state,
+      { type: "testing-plan", title: "Plan tests", parentId },
+      makeServices(),
+      registry,
+    );
+    expect(events[0].type).toBe("PageCreated");
+  });
+
+  it("allows re-creating a required child when the only existing one is ARCHIVED (recovery)", () => {
+    // An archived child no longer satisfies the parent's required-child contract, so the guard
+    // must let a fresh active one be created rather than dead-ending on the archived duplicate.
+    const state = foldWorkspace(
+      [
+        env(0, "WorkspaceCreated", { name: "WS" }),
+        env(1, "PageCreated", { type: "feature-brief", parentId: null, title: "Parent" }, parentId),
+        env(2, "PageCreated", { type: "implementation-plan", parentId, title: "Child" }, childId),
+        env(3, "PageArchived", { pageId: childId }, childId),
+      ],
+      registry,
+    );
+    const { events } = createPage(
+      state,
+      { type: "implementation-plan", title: "Fresh plan", parentId },
+      makeServices(),
+      registry,
+    );
+    expect(events[0].type).toBe("PageCreated");
+  });
+});
+
+describe("DuplicateTitleError — names the conflict and discloses archived siblings", () => {
+  // Two root siblings, one of them archived — its title is still reserved.
+  function stateWithArchivedSibling(): IWorkspaceState {
+    const events: IEventEnvelope[] = [
+      env(0, "WorkspaceCreated", { name: "WS" }),
+      env(1, "PageCreated", { type: "feature-brief", parentId: null, title: "Parent" }, parentId),
+      env(2, "PageCreated", { type: "feature-brief", parentId: null, title: "Sibling" }, siblingId),
+      env(3, "PageArchived", { pageId: siblingId }, siblingId),
+    ];
+    return foldWorkspace(events, registry);
+  }
+
+  it("flags conflictArchived + names the sibling when the clash is an ARCHIVED page", () => {
+    // Renaming the active "Parent" to "Sibling" collides with the archived "Sibling".
+    let err: unknown;
+    try {
+      setPageTitle(stateWithArchivedSibling(), { pageId: parentId, title: "Sibling" }, makeServices(), registry);
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(DuplicateTitleError);
+    const dup = err as DuplicateTitleError;
+    expect(dup.conflictId).toBe(siblingId);
+    expect(dup.conflictArchived).toBe(true);
+    expect(dup.message).toMatch(/archived/i);
+  });
+
+  it("does NOT flag archived for an active clash, but still names the sibling", () => {
+    // baseState has active "Parent" and active "Sibling" at root.
+    let err: unknown;
+    try {
+      setPageTitle(baseState(), { pageId: parentId, title: "Sibling" }, makeServices(), registry);
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(DuplicateTitleError);
+    expect((err as DuplicateTitleError).conflictArchived).toBe(false);
+    expect((err as DuplicateTitleError).conflictId).toBe(siblingId);
   });
 });
 

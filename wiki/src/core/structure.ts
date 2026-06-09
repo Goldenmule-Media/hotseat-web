@@ -25,6 +25,7 @@ import {
 } from "../api";
 import {
   CycleError,
+  DuplicateRequiredChildError,
   DuplicateTitleError,
   InvariantViolationError,
   ItemNotFoundError,
@@ -145,7 +146,7 @@ function assertUniqueSiblingTitle(
     if (childId === excludeId) continue;
     const child = state.pages.get(childId);
     if (child !== undefined && child.title === title) {
-      throw new DuplicateTitleError(parentId, title);
+      throw new DuplicateTitleError(parentId, title, child.id, child.archived === true);
     }
   }
 }
@@ -194,6 +195,21 @@ export const createPage: StructureHandler = (state, args, services, registry) =>
     if (parent.archived === true) {
       throw new ParentNotFoundError(normalizedParent);
     }
+    // Reject re-creating one of the parent type's auto-materialized required children: those are
+    // spawned (pinned) in the parent's own create commit, so a manual second one is an unmanaged
+    // duplicate. Catch it HERE (at the second create) rather than letting the duplicate linger.
+    const parentDef = registry.page(parent.type);
+    if ((parentDef.requiredChildren ?? []).includes(type)) {
+      // Only an ACTIVE same-typed child blocks: an archived one no longer satisfies the
+      // parent's required-child contract, so re-creating is legitimate recovery (and the
+      // "author into that page" guidance would be wrong for an archived, unmutatable page).
+      const existing = childrenOf(state, normalizedParent)
+        .map((cid) => state.pages.get(cid))
+        .find((c) => c !== undefined && c.type === type && c.archived !== true);
+      if (existing !== undefined) {
+        throw new DuplicateRequiredChildError(normalizedParent, type, existing.id);
+      }
+    }
   }
 
   // Unique sibling title under the parent.
@@ -228,13 +244,16 @@ export const createPage: StructureHandler = (state, args, services, registry) =>
       },
     });
 
-    // Required children are created atomically as pinned children, recursively. Each
-    // gets a FRIENDLY default title (the child def's `label`, else a title-cased type
-    // id) instead of the raw slug — so the tree / breadcrumb / rendered H1 read
-    // "Implementation plan" rather than "implementation-plan".
+    // Required children are created atomically as pinned children, recursively. Each gets a
+    // FRIENDLY default title derived from its parent: the child def's `label` (else a title-cased
+    // type id) suffixed with the parent's title — e.g. "Implementation plan — App Shell" rather
+    // than a bare "Implementation plan". This keeps the child recognizable in the global tree /
+    // search / rendered H1 and makes it read as a real page, not a placeholder. Deterministic
+    // (parent title is known at decide time); no page-type knowledge in the engine.
     for (const childType of def.requiredChildren ?? []) {
       const childDef = registry.page(childType);
-      emitPage(childType, childDef.label ?? titleCase(childType), id, true);
+      const childLabel = childDef.label ?? titleCase(childType);
+      emitPage(childType, `${childLabel} — ${pageTitle}`, id, true);
     }
     return id;
   };

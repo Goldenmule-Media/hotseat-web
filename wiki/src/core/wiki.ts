@@ -36,6 +36,7 @@ import type {
   PageId,
   PageState,
   RootId,
+  SectionDecl,
   TypeCommandDescriptor,
   TypeDescriptor,
   Unsubscribe,
@@ -307,6 +308,24 @@ class Wiki implements IWiki {
    */
   describeType(type: string): TypeDescriptor {
     const def = this.registry.page(type);
+    // The declared field-kind of a (section, field) target, when both are known — lets the
+    // descriptor surface kind-specific authoring rules (e.g. blocks vs prose) generically.
+    // A target's `section` may be a NESTED subsection key (generated commands record the
+    // immediate subsection key), so resolve it recursively, not just at the top level.
+    const findSection = (
+      sections: Readonly<Record<string, SectionDecl>> | undefined,
+      key: string,
+    ): SectionDecl | undefined => {
+      if (sections === undefined) return undefined;
+      if (sections[key] !== undefined) return sections[key];
+      for (const sd of Object.values(sections)) {
+        const found = findSection(sd.sections, key);
+        if (found !== undefined) return found;
+      }
+      return undefined;
+    };
+    const fieldKind = (section?: string, field?: string): string | undefined =>
+      section !== undefined && field !== undefined ? findSection(def.sections, section)?.fields[field]?.kind : undefined;
     const commands: TypeCommandDescriptor[] = [];
     for (const [name, cmd] of Object.entries(def.commands)) {
       // Instance-free: read the edge's agency off the static transition table by event
@@ -324,18 +343,32 @@ class Wiki implements IWiki {
         ...(cmd.target !== undefined
           ? { target: { section: cmd.target.section, ...(cmd.target.field !== undefined ? { field: cmd.target.field } : {}) } }
           : {}),
+        ...(() => {
+          const k = fieldKind(cmd.target?.section, cmd.target?.field);
+          return k !== undefined ? { targetKind: k } : {};
+        })(),
         ...(cmd.transition !== undefined ? { transition: { level: cmd.transition.level, event: cmd.transition.event } } : {}),
         ...(agency !== undefined ? { agency } : {}),
       });
     }
     for (const [name, gen] of this.registry.generatedCommands(type)) {
-      commands.push({ name, generated: true, argsSchema: {}, target: { section: gen.section, field: gen.field } });
+      const k = fieldKind(gen.section, gen.field);
+      commands.push({
+        name,
+        generated: true,
+        argsSchema: {},
+        target: { section: gen.section, field: gen.field },
+        ...(k !== undefined ? { targetKind: k } : {}),
+      });
     }
     return {
       type,
       ...(def.label !== undefined ? { label: def.label } : {}),
       fsm: this.fsmOf(type),
       commands,
+      ...(def.requiredChildren !== undefined && def.requiredChildren.length > 0
+        ? { requiredChildren: def.requiredChildren }
+        : {}),
     };
   }
 

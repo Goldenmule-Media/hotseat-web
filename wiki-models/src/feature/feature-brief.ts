@@ -32,36 +32,46 @@ function listElements(
   return [];
 }
 
+// Name the child page in an unmet reason so a wrong-target mistake (authored into a duplicate /
+// the wrong page) reads differently from a genuinely empty canonical page. The id is type-prefixed
+// (e.g. "implementation-plan:abc1"), so it already identifies which child to author into.
+const inPage = (p: DeepReadonly<PageState> | undefined): string => (p !== undefined ? ` in ${p.id}` : "");
+
 const planHasStep: Precondition = (page, related) => {
   const plan = childOfType(related, related.self, "implementation-plan");
-  return listElements(plan, "steps", "items").length >= 1 ? true : { unmet: "needs ≥1 implementation-plan step" };
+  if (plan === undefined) return { unmet: "no implementation-plan child found under this brief" };
+  return listElements(plan, "steps", "items").length >= 1 ? true : { unmet: `needs ≥1 step${inPage(plan)}` };
 };
 
 const testPlanHasCase: Precondition = (page, related) => {
   const testPlan = childOfType(related, related.self, "testing-plan");
-  return listElements(testPlan, "cases", "items").length >= 1 ? true : { unmet: "needs ≥1 testing-plan case" };
+  if (testPlan === undefined) return { unmet: "no testing-plan child found under this brief" };
+  return listElements(testPlan, "cases", "items").length >= 1 ? true : { unmet: `needs ≥1 case${inPage(testPlan)}` };
 };
 
 const planHasDataModel: Precondition = (page, related) => {
   const plan = childOfType(related, related.self, "implementation-plan");
-  const f = plan?.sections.find((s) => s.key === "dataModels")?.fields["models"];
+  if (plan === undefined) return { unmet: "no implementation-plan child found under this brief" };
+  const f = plan.sections.find((s) => s.key === "dataModels")?.fields["models"];
   const n = f !== undefined && f.kind === "blocks" ? f.blocks.filter((b) => b.kind === "code").length : 0;
-  return n >= 1 ? true : { unmet: "needs ≥1 implementation-plan data-model/interface code block" };
+  return n >= 1 ? true : { unmet: `needs ≥1 data-model/interface code block${inPage(plan)}` };
 };
 
 const allStepsDone: Precondition = (page, related) => {
   const plan = childOfType(related, related.self, "implementation-plan");
+  if (plan === undefined) return { unmet: "no implementation-plan child found under this brief" };
   const steps = listElements(plan, "steps", "items");
-  if (steps.length < 1) return { unmet: "needs ≥1 implementation-plan step" };
-  if (steps.some((s) => s.status !== "done")) return { unmet: "all implementation-plan steps must be done" };
+  if (steps.length < 1) return { unmet: `needs ≥1 step${inPage(plan)}` };
+  if (steps.some((s) => s.status !== "done")) return { unmet: `all steps${inPage(plan)} must be done` };
   return true;
 };
 
 const allCasesPassed: Precondition = (page, related) => {
   const testPlan = childOfType(related, related.self, "testing-plan");
+  if (testPlan === undefined) return { unmet: "no testing-plan child found under this brief" };
   const cases = listElements(testPlan, "cases", "items");
-  if (cases.length < 1) return { unmet: "needs ≥1 testing-plan case" };
-  if (cases.some((c) => c.status !== "passed")) return { unmet: "all testing-plan cases must be passed" };
+  if (cases.length < 1) return { unmet: `needs ≥1 case${inPage(testPlan)}` };
+  if (cases.some((c) => c.status !== "passed")) return { unmet: `all cases${inPage(testPlan)} must be passed` };
   return true;
 };
 
