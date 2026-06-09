@@ -153,9 +153,21 @@ The server re-imports the rebuilt bundle, rebinds the engine, and reprojects the
 - **tsdown bundling:** `deps.alwaysBundle` must use a **regex** (`/^wiki(\/|$)/`), not the bare string
   `"wiki"`, or subpath exports (`wiki/registry`, `wiki/authoring`) stay external and Node fails at runtime.
 
+### Building features with Claude Code (`/build-feature`)
+
+This repo bundles a Claude Code skill that drives a feature through the `feature` bundle's FSM
+end-to-end. It delegates *what's next* to the wiki's own `nextActions` (never hardcoding the lifecycle),
+and adds only what the self-directing wiki can't: grounding the plan in the real repo, doing and
+**verifying** real code + tests before flipping any gate, and a `/code-review` pass — stopping at the
+human sign-off gates. It's branch/worktree-agnostic, so you can run several in parallel worktrees against
+the one shared wiki. Invoke it with `/build-feature <workspaceId> "<intent>"`; design and caveats are in
+[`.claude/skills/build-feature/README.md`](./.claude/skills/build-feature/README.md).
+
 ### Where to read more
 
 - [`CLAUDE.md`](./CLAUDE.md) — architecture, package boundaries, and the full conventions list.
+- [`.claude/skills/build-feature/README.md`](./.claude/skills/build-feature/README.md) — the bundled
+  `/build-feature` Claude Code skill (agentic, FSM-gated feature builds).
 - [`docs/wiki/architecture/`](./docs/wiki/architecture/) — per-package design intent + the engine's
   content model. [`docs/wiki/decision-records/`](./docs/wiki/decision-records/) — every ADR.
   [`docs/wiki/feature-specs/`](./docs/wiki/feature-specs/) — feature/product documents.
