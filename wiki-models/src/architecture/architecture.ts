@@ -92,10 +92,14 @@ const dependencyRows: DerivedList = (page, ctx: IRenderCtx) =>
  *  to the child page. The href is the stable page id — the address an agent feeds back into
  *  getPage/renderPage (the host `wiki://{ns}/page/…` URI isn't available at render time, since
  *  the engine is namespace/workspace-agnostic). The label is render-derived, so renames reflow.
- *  Surfaces the package→component hierarchy on the node page, the way a toc lists its children. */
+ *  Surfaces the package→component hierarchy on the node page, the way a toc lists its children.
+ *  Archived children are dropped — a node hidden from default views must not linger here. */
 const componentRows: DerivedList = (page, ctx: IRenderCtx) => {
   const self = page.id as unknown as PageId;
-  return ctx.childrenOf(self).map((id) => ({ id: String(id), text: `[${ctx.titleOf(id) ?? String(id)}](${id})` }));
+  return ctx
+    .childrenOf(self)
+    .filter((id) => !ctx.archivedOf(id))
+    .map((id) => ({ id: String(id), text: `[${ctx.titleOf(id) ?? String(id)}](${id})` }));
 };
 
 /** A prose paragraph block carrying `text` (id minted from the injected `newId`). Mirrors adr.ts. */

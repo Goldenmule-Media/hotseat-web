@@ -15,16 +15,7 @@ FSM, so the transition machinery could never leave it), and made the model-inspe
 "current status" that is not a node in that graph.
 
 ## Decision
-Archival is a first-class, schema-agnostic archived boolean on the page node — a
-sibling of pinned, independent of status. PageArchived flips the flag (status is preserved);
-a new PageUnarchived event + unarchivePage command clears it, making archival a round-trip. While
-archived, both structural and content mutations are blocked — the freeze that was previously implicit
-in "no FSM transition leaves archived" is now an explicit guard. archived is surfaced on ITreeNode
-and via IRenderCtx.archivedOf(id); reads annotate, never filter — the engine exposes archived
-pages so consumers (the SQL read model's tree, the UI sidebar) hide them by policy with an opt-in to
-reveal. Archival does not cascade: a page is effectively hidden when it or any ancestor is
-archived, computed by readers — so archiving a feature hides its pinned plan/checklist/testing subtree
-without mutating those children, and unarchiving restores them exactly.
+Archival is a first-class, schema-agnostic archived boolean on the page node — a sibling of pinned, independent of status. PageArchived flips the flag (status is preserved); a new PageUnarchived event + unarchivePage command clears it, making archival a round-trip. While archived, both structural and content mutations are blocked — the freeze that was previously implicit in "no FSM transition leaves archived" is now an explicit guard. archived is surfaced on ITreeNode and via IRenderCtx.archivedOf(id); reads annotate, never filter — the engine exposes archived pages so consumers (the SQL read model's tree, the UI sidebar) hide them by policy with an opt-in to reveal. Archival does not cascade: a page is effectively hidden when it or any ancestor is archived, computed by readers — so archiving a feature hides its pinned plan/testing-plan subtree without mutating those children, and unarchiving restores them exactly.
 
 ## Consequences
 archivePage is no longer terminal — it is reversible and status-preserving. Models

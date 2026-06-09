@@ -9,7 +9,7 @@ component
 The test cases and results for a feature: a list of cases, each carrying a pass/fail result state.
 
 ## Purpose
-Records the verification surface and supplies the brief's `allCasesPassed` ship gate and the checklist's `all-cases-passed` computed flag.
+Records the verification surface and supplies the brief's `allCasesPassed` ship gate.
 
 ## Design notes
 _None._
@@ -32,7 +32,7 @@ _No dependencies._
 ## Invariants & constraints
 - `cases` is `mutableIn: ["draft"]` (the case SET freezes once ready), but `markCasePassed` / `markCaseFailed` are element-FSM transitions with no content op, so result-recording stays legal in `ready` and keeps the brief's `allCasesPassed` gate reachable.
 - `sectionSet` closed; the single `cases` section is `required`; `markReady` has no preconditions (unlike the plan).
-- Case statuses are read by TWO other models — the brief's `allCasesPassed` / `testPlanHasCase` gates and the checklist's `all-cases-passed` computed flag — making it a shared fact source.
+- Case statuses are read by the brief's `allCasesPassed` / `testPlanHasCase` gates, making the testing-plan a shared fact source.
 
 ## Synced commit
 e357aa7

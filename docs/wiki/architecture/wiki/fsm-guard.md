@@ -33,7 +33,6 @@ The `Registry` memoizes one guard per page type and per element type; the comman
 
 ## Invariants & constraints
 - Pure lookups over the table — a command is legal from a status iff a matching transition exists; self-transitions are allowed (content edits that don't change status).
-- A computed element (status derived from a rendered flag) may never be hand-driven — the bus rejects any element transition on it.
 - The MISSING transition is the safety property — e.g. no transition out of `resolved` makes "answer a question twice" unrepresentable.
 
 ## Synced commit

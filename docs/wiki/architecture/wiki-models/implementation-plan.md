@@ -9,7 +9,7 @@ component
 The ordered plan of attack for a feature — a reorderable list of steps (each with its own done-state), a "Data models & interfaces" document, and a questions list.
 
 ## Purpose
-The canonical work breakdown the checklist projects from, and a precondition source for the brief's `beginImplementation` gate.
+The canonical work breakdown for a feature; its steps are individually checked off as the work ships. Feeds the brief's `beginImplementation` precondition and its `ship` gate (all steps done).
 
 ## Design notes
 _None._
