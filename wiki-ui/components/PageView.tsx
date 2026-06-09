@@ -14,7 +14,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import type { PageId, WorkspaceId } from "wiki";
-import { getWiki } from "../lib/engine";
+import { fsmOf } from "../lib/host-client";
 import { useLiveWorkspace, usePage, usePageMutations, useStructuralMutator } from "../lib/live";
 import { renderMarkdown } from "../lib/markdown";
 import { pageHref } from "../lib/routes";
@@ -76,17 +76,11 @@ export function PageView({
   const pageType = node?.type;
   const archived = node?.archived === true;
 
-  // The page TYPE's status FSM, from the in-browser engine (Q2). Null on server render
-  // or for an unknown type — the model toggle is then simply not offered.
-  const fsm = useMemo(() => {
-    const wiki = getWiki();
-    if (wiki === null || pageType === undefined) return null;
-    try {
-      return wiki.fsmOf(pageType);
-    } catch {
-      return null;
-    }
-  }, [pageType]);
+  // The page TYPE's status FSM, from the worker handshake cache (synchronous). Null before
+  // the handshake, on server render, or for an unknown type — the model toggle is then simply
+  // not offered. `pageType` only becomes defined once the workspace snapshot arrives (after
+  // the handshake), so the descriptor is cached by the time this resolves.
+  const fsm = useMemo(() => fsmOf(pageType), [pageType]);
 
   const currentStatus = node?.status ?? fsm?.initial ?? "";
   // The header always shows the current status; a terminal (sealed/final) status gets the

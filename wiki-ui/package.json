@@ -5,7 +5,10 @@
   "description": "Read-only, live-updating browser for a wiki-server. Embeds the wiki engine in the browser and tails the Durable Stream directly.",
   "type": "module",
   "scripts": {
+    "copy-pglite-assets": "node ./scripts/copy-pglite-assets.mjs",
+    "predev": "npm run copy-pglite-assets",
     "dev": "next dev",
+    "prebuild": "npm run copy-pglite-assets",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
@@ -14,6 +17,7 @@
   "dependencies": {
     "@electric-sql/pglite": "^0.2.17",
     "@xyflow/react": "^12.11.0",
+    "comlink": "^4.4.2",
     "dagre": "^0.8.5",
     "kysely": "^0.27.5",
     "marked": "^14.1.4",

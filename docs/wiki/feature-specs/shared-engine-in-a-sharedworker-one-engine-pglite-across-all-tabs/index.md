@@ -1,6 +1,6 @@
 # Feature: Shared engine in a SharedWorker (one engine + PGlite across all tabs)
 
-**Status:** planning
+**Status:** building
 
 ## Summary
 Today wiki-ui runs the full `wiki` engine — and its own PGlite-on-IndexedDB — once **per tab**. `lib/engine.ts` creates one `IWiki` per tab via `createWiki({ stream, pageTypes, search:{ db } })`, and `lib/search-db.ts` opens `new PGlite("idb://wiki-ui-search")` per tab as the engine's full-text-search read model. So N tabs means N engines, N Durable-Stream tails, N folds, N reachability probes — and, the real hazard, N PGlite instances all writing the SAME IndexedDB store. PGlite's `idb://` FS is single-connection/single-writer (it loads the data dir into memory and flushes changed files back after each query), so concurrent tabs are diverging private snapshots racing to last-flush-wins. The blast radius is bounded to *search* (the index is a derived projection with a per-workspace `applied_version` cursor that self-heals on the next clean fold; page content comes from the stream, and the UI never queries PGlite directly) — but cross-tab search flakiness is a real, latent bug.

@@ -5,13 +5,10 @@
  * in-process connection, reusing Kysely's Postgres adapter/compiler/introspector.
  *
  * One addition over the server copy: an optional `gate` promise the driver awaits in
- * `init()`. The engine's search index starts reconciling a workspace the moment its
- * handle folds, but the `idb://` PGlite has to be migrated first (the `search_doc`
- * table must exist). Kysely calls `driver.init()` once, lazily, before the first query
- * and awaits it — so gating it on "migrations are done" guarantees no engine query ever
- * races ahead of the schema, without making {@link getWiki} async. The migrator itself
- * runs on a SEPARATE, ungated Kysely handle over the same PGlite, so it isn't blocked by
- * its own gate.
+ * `init()`, so a caller can block the first query until migrations land. The host worker
+ * (lib/search-db.ts) no longer needs it — it boots asynchronously and simply awaits
+ * `migrateSearchToLatest` before handing the handle to `createWiki` — so the gate is left
+ * optional/unused here, kept for the seam.
  */
 import type { PGlite } from "@electric-sql/pglite";
 import {

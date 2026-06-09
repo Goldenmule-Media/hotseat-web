@@ -1,8 +1,8 @@
 {
   "ws:mpzncs2z-0001-2wgv51": {
-    "version": 1492,
+    "version": 1529,
     "files": {
-      "wiki/architecture/index.md": "f0861979ab4d565e8a3c62ac0a8adb536637203b01d08ba5edfd64fc3409605a",
+      "wiki/architecture/index.md": "fea57d534a3aa7ca70deabb6089650bb28b9562fa7bd01d010cae03f89ebf5cc",
       "wiki/feature-specs/index.md": "b5f1158ac1a2897fc7777f096a8f5d699b15ce833a93a02d6606a97059199a0e",
       "wiki/architecture/wiki/index.md": "94ca34f518bb6285056f3520fb5ca9173c66a10f4491cabe96a682cc0ef6bea1",
       "wiki/architecture/wiki-models/index.md": "b59000d81a3d502fae80e8a4377dc5aa5fcf6ac510aa1461be30c7f843a26ff0",
@@ -57,18 +57,14 @@
       "wiki/decision-records/logs-via-the-control-api-not-durable-streams.md": "60d72fd6cdfeb81ee2c5bf52d87d748d4a0851b6af730b804251a0eeb5a6d265",
       "wiki/decision-records/remote-auth-via-an-engine-istreamconfig-headers-hook.md": "6771a3f74f71447d54e2e3c15752d2cf7ca9188f30c54578385f4496ddaa37e9",
       "wiki/decision-records/generic-mutations-in-v1-generated-subcommands-later.md": "15570a69d3895532f73d70bbe72b77b8a5a152f0f0f57da7e5427e900b62d54c",
-      "wiki/feature-specs/runtime-configurable-markdown-emitters-per-project-disk-mirrors/index.md": "955ffebf290f4f373eee95b11a5fd8fb7a3afa5cbb441b8757ef004e756886b0",
-      "wiki/feature-specs/runtime-configurable-markdown-emitters-per-project-disk-mirrors/implementation-plan.md": "1fa38cdc0b3bf56afea520f74d0516b1331d10cc6b081646c6ced57395baa79f",
-      "wiki/feature-specs/runtime-configurable-markdown-emitters-per-project-disk-mirrors/implementation-checklist.md": "50f2e2caf62323b542e7971a155c4a07954d36488c9e2c95819ac89cc8d85375",
-      "wiki/feature-specs/runtime-configurable-markdown-emitters-per-project-disk-mirrors/testing-plan.md": "4cf67102df68e62529477bd5bcc1460fd7017b3180d0b3e07034988e7e7ff736",
-      "wiki/feature-specs/runtime-configurable-markdown-emitters-per-project-disk-mirrors/spec.md": "2d1dfa0003e09c4c14d53529b2448172cfa7bcab593031462d1d6d76dbdd1ac1",
       "wiki/decision-records/cross-workspace-operations-are-an-admin-system-affordance-not-a-content-read.md": "78afba5243c32da742cc005bed0b1d707a3d9f046e81c6966d7dcf807e69e9f7",
-      "wiki/feature-specs/shared-engine-in-a-sharedworker-one-engine-pglite-across-all-tabs/index.md": "fcaa04485282be5acc296537a4e2e1c67e1a8750bea9a25061e0ad6e566629db",
+      "wiki/feature-specs/shared-engine-in-a-sharedworker-one-engine-pglite-across-all-tabs/index.md": "10c5e7aaa49598d16eb84d367fa7ccccc6ffbe119f8d58798eeff484535a04e0",
       "wiki/feature-specs/shared-engine-in-a-sharedworker-one-engine-pglite-across-all-tabs/implementation-plan.md": "57b2d7e873f23f4b700fcdaa69d5d57a0acc6f36dc7e133675b4c705604cd84a",
-      "wiki/feature-specs/shared-engine-in-a-sharedworker-one-engine-pglite-across-all-tabs/implementation-checklist.md": "2318357fa398953f6c3bb188e2dbf4de63d7b3b3267c4181e0eeb7ac9cfc0e3d",
+      "wiki/feature-specs/shared-engine-in-a-sharedworker-one-engine-pglite-across-all-tabs/implementation-checklist.md": "62dc59686a5c6398914928e5e7e5c7473e5cfdb1381ec4bd3e52c4058df15921",
       "wiki/feature-specs/shared-engine-in-a-sharedworker-one-engine-pglite-across-all-tabs/testing-plan.md": "f5fbd537c7c2fad078814abb10e9fe797745e04db3089f62ceaa866fa71c6b21",
       "wiki/feature-specs/shared-engine-in-a-sharedworker-one-engine-pglite-across-all-tabs/spec.md": "4b6df6f5124cf4be4b1df27167efff93d8a167cd4adb687324fa2b6c0ec201b7",
-      "wiki/architecture/content-model.md": "08dfe6a7750444b24ac27668b18f048e594dc4b1a6f646805452d69c67772f3c"
+      "wiki/architecture/content-model.md": "08dfe6a7750444b24ac27668b18f048e594dc4b1a6f646805452d69c67772f3c",
+      "wiki/architecture/wiki-ui.md": "a4299e545b178677e0f0473a29658ca810cc8957b9bba10c2726500ea9f46ad4"
     },
     "pages": {
       "toc:mpznedyz-0003-pdtcmh": "wiki/architecture/index.md",
@@ -126,18 +122,14 @@
       "decision-record:mq110xdu-008z-utyvhf": "wiki/decision-records/logs-via-the-control-api-not-durable-streams.md",
       "decision-record:mq110xwb-009c-h64sj5": "wiki/decision-records/remote-auth-via-an-engine-istreamconfig-headers-hook.md",
       "decision-record:mq110ye5-009p-4evl6w": "wiki/decision-records/generic-mutations-in-v1-generated-subcommands-later.md",
-      "feature-brief:mq5e9i2q-0001-w31t6m": "wiki/feature-specs/runtime-configurable-markdown-emitters-per-project-disk-mirrors/index.md",
-      "implementation-plan:mq5e9i2q-0002-wxnsf7": "wiki/feature-specs/runtime-configurable-markdown-emitters-per-project-disk-mirrors/implementation-plan.md",
-      "implementation-checklist:mq5e9i2q-0003-fgq92c": "wiki/feature-specs/runtime-configurable-markdown-emitters-per-project-disk-mirrors/implementation-checklist.md",
-      "testing-plan:mq5e9i2q-0004-ea9cro": "wiki/feature-specs/runtime-configurable-markdown-emitters-per-project-disk-mirrors/testing-plan.md",
-      "feature-spec:mq5e9i2q-0005-2in5ln": "wiki/feature-specs/runtime-configurable-markdown-emitters-per-project-disk-mirrors/spec.md",
       "decision-record:mq5hnpu9-001m-c9yfrl": "wiki/decision-records/cross-workspace-operations-are-an-admin-system-affordance-not-a-content-read.md",
       "feature-brief:mq5mpdpu-0001-7z2iva": "wiki/feature-specs/shared-engine-in-a-sharedworker-one-engine-pglite-across-all-tabs/index.md",
       "implementation-plan:mq5mpdpu-0002-xwbiww": "wiki/feature-specs/shared-engine-in-a-sharedworker-one-engine-pglite-across-all-tabs/implementation-plan.md",
       "implementation-checklist:mq5mpdpu-0003-olx9iz": "wiki/feature-specs/shared-engine-in-a-sharedworker-one-engine-pglite-across-all-tabs/implementation-checklist.md",
       "testing-plan:mq5mpdpu-0004-c5lssy": "wiki/feature-specs/shared-engine-in-a-sharedworker-one-engine-pglite-across-all-tabs/testing-plan.md",
       "feature-spec:mq5mpdpu-0005-muprnl": "wiki/feature-specs/shared-engine-in-a-sharedworker-one-engine-pglite-across-all-tabs/spec.md",
-      "architecture:mq5nej50-0026-edazv6": "wiki/architecture/content-model.md"
+      "architecture:mq5nej50-0026-edazv6": "wiki/architecture/content-model.md",
+      "architecture:mq6p8be5-001t-rjcytt": "wiki/architecture/wiki-ui.md"
     }
   }
 }

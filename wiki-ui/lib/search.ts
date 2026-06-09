@@ -15,7 +15,7 @@
  */
 import { useSyncExternalStore } from "react";
 import type { SearchHit, WorkspaceId } from "wiki";
-import { getWiki } from "./engine";
+import { getHost } from "./host-client";
 
 export type SearchStatus = "idle" | "loading" | "ready" | "error";
 
@@ -66,10 +66,10 @@ interface WsRef {
 let workspaces: readonly WsRef[] = [];
 
 async function loadWorkspaces(): Promise<readonly WsRef[]> {
-  const wiki = getWiki();
-  if (wiki === null) return workspaces;
+  if (typeof window === "undefined") return workspaces;
   try {
-    const all = await wiki.listWorkspaces();
+    const host = await getHost();
+    const all = await host.listWorkspaces();
     // Mirror the rest of the UI: archived workspaces are hidden, so don't search them.
     workspaces = all.filter((w) => w.status === "active").map((w) => ({ id: w.id, name: w.name }));
   } catch {
@@ -81,17 +81,21 @@ async function loadWorkspaces(): Promise<readonly WsRef[]> {
 let indexedOnce = false;
 
 /**
- * Make sure every active workspace has been folded (and therefore indexed) at least once,
- * so the search spans all of them — not only the ones the user has visited this session.
- * Idempotent and best-effort: `openWorkspace` returns the cached handle when already open.
+ * Make sure every active workspace has been folded (and therefore indexed) at least once, so
+ * the search spans all of them — not only the ones visited this session. The priming now lives
+ * in the worker (it folds the ONE shared index, not a per-tab one): `host.primeSearchIndex()`
+ * is idempotent across the whole worker, so a freshly-opened tab doesn't re-fold everything.
  */
 async function ensureIndexed(): Promise<void> {
   if (indexedOnce) return;
-  const wiki = getWiki();
-  if (wiki === null) return;
+  if (typeof window === "undefined") return;
   indexedOnce = true;
-  const ws = await loadWorkspaces();
-  await Promise.allSettled(ws.map((w) => wiki.openWorkspace(w.id)));
+  try {
+    const host = await getHost();
+    await Promise.all([loadWorkspaces(), host.primeSearchIndex()]);
+  } catch {
+    indexedOnce = false; // host unavailable — allow a later retry
+  }
 }
 
 // ── open / close (state persists across both) ───────────────────────────────────
@@ -132,17 +136,13 @@ export function setSearchQuery(query: string): void {
 }
 
 async function runQuery(query: string): Promise<void> {
-  const wiki = getWiki();
-  if (wiki === null) {
-    set({ status: "error", error: "Engine not ready." });
-    return;
-  }
   const mySeq = ++seq;
   set({ status: "loading" });
   try {
+    const host = await getHost();
     const ws = workspaces.length > 0 ? workspaces : await loadWorkspaces();
     const ids = ws.map((w) => w.id);
-    const hits = await wiki.search(query, { workspaces: ids, limit: 40 });
+    const hits = await host.search(query, { workspaces: ids, limit: 40 });
     if (mySeq !== seq) return; // a newer query superseded this one
     const nameOf = new Map(ws.map((w) => [w.id, w.name] as const));
     const results: SearchResult[] = hits.map((h) => ({

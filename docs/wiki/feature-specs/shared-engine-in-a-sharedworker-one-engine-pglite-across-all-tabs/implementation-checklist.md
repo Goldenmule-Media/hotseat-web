@@ -15,14 +15,14 @@
 - [ ] **Verify.** `tsc --noEmit` (wiki-ui) + the existing vitest suites (`schema-form`, `fsm-graph`, `snippet`) + `next build` all green. Then the USER's multi-tab browser smoke check (no-browser-automation convention): two tabs open, one issues a transition, the other live-updates from the shared tail; exactly one PGlite/one connection in DevTools; a schema/unknown-type error still classifies as a schema error (not "Disconnected").
 
 ## Tasks
-- [ ] New `lib/wiki-host-api.ts` — the flat `WikiHostApi` + `CommitMsg` contract, type-only (no engine import at tab module scope).
-- [ ] New `lib/wiki-host.worker.ts` — relocate PGlite + dialect + migration + `pageTypes`; `createWiki` once; lazy per-workspace handle map; `onconnect → Comlink.expose(api, port)`.
-- [ ] New `lib/host-client.ts` — feature-detect (`SharedWorker` + module-worker) → typed `UnsupportedBrowserError`; static `new SharedWorker(new URL(…), {type:"module"})`; `Comlink.wrap`; handshake + `FsmDescriptor` cache; `getHost()` + sync `fsmOf`.
-- [ ] Error protocol — `WikiErrorDTO` + Comlink `transferHandler` registered on BOTH sides; wrap every RPC body to marshal engine throws (so `classify()` keeps the connection-vs-schema distinction).
-- [ ] Subscription fan-out + lifecycle — one `handle.subscribe` per workspace → per-port `CommitMsg` (with folded tree + affected pageIds); `ping` heartbeat reaper for dead ports; `wiki.close()` only when the last port disconnects.
-- [ ] Rewire `lib/engine.ts` — delete the in-tab `createWiki`; repoint to `getHost()`; preserve the null-on-SSR contract as a "connecting" handle. `search-db.ts`/`pglite-dialect.ts`/`models.ts` no longer execute in the tab.
-- [ ] Rewire `lib/live.tsx` — keep `WorkspaceSession` + `useSyncExternalStore`; `ensureWorkspace`+`tree` to seed, `subscribe`+`ping` for the tail; `onCommit` consumes `msg.tree`/`affectedPageIds`; collapse `usePage`/`usePageMutations` into single RPCs; `classify()` branches on the DTO `code`.
-- [ ] Rewire `lib/search.ts` + `fsmOf` call sites — `search`/`listWorkspaces` become RPCs; `ensureIndexed` priming moves into the worker; `fsmOf` in `PageView.tsx`/`terminal.ts` reads the synchronous handshake descriptor cache.
-- [ ] Unsupported-browser UI — a clear message component shown when feature-detect fails (no fallback, by decision).
+- [x] New `lib/wiki-host-api.ts` — the flat `WikiHostApi` + `CommitMsg` contract, type-only (no engine import at tab module scope).
+- [x] New `lib/wiki-host.worker.ts` — relocate PGlite + dialect + migration + `pageTypes`; `createWiki` once; lazy per-workspace handle map; `onconnect → Comlink.expose(api, port)`.
+- [x] New `lib/host-client.ts` — feature-detect (`SharedWorker` + module-worker) → typed `UnsupportedBrowserError`; static `new SharedWorker(new URL(…), {type:"module"})`; `Comlink.wrap`; handshake + `FsmDescriptor` cache; `getHost()` + sync `fsmOf`.
+- [x] Error protocol — `WikiErrorDTO` + Comlink `transferHandler` registered on BOTH sides; wrap every RPC body to marshal engine throws (so `classify()` keeps the connection-vs-schema distinction).
+- [x] Subscription fan-out + lifecycle — one `handle.subscribe` per workspace → per-port `CommitMsg` (with folded tree + affected pageIds); `ping` heartbeat reaper for dead ports; `wiki.close()` only when the last port disconnects.
+- [x] Rewire `lib/engine.ts` — delete the in-tab `createWiki`; repoint to `getHost()`; preserve the null-on-SSR contract as a "connecting" handle. `search-db.ts`/`pglite-dialect.ts`/`models.ts` no longer execute in the tab.
+- [x] Rewire `lib/live.tsx` — keep `WorkspaceSession` + `useSyncExternalStore`; `ensureWorkspace`+`tree` to seed, `subscribe`+`ping` for the tail; `onCommit` consumes `msg.tree`/`affectedPageIds`; collapse `usePage`/`usePageMutations` into single RPCs; `classify()` branches on the DTO `code`.
+- [x] Rewire `lib/search.ts` + `fsmOf` call sites — `search`/`listWorkspaces` become RPCs; `ensureIndexed` priming moves into the worker; `fsmOf` in `PageView.tsx`/`terminal.ts` reads the synchronous handshake descriptor cache.
+- [x] Unsupported-browser UI — a clear message component shown when feature-detect fails (no fallback, by decision).
 - [ ] Green gate — `tsc --noEmit` (wiki-ui) + vitest (`schema-form`, `fsm-graph`, `snippet`) + `next build` all pass; then the user's two-tab live-update + single-PGlite browser smoke check.
 - [ ] All testing-plan cases pass.

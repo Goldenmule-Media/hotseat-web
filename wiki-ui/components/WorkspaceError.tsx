@@ -25,6 +25,11 @@ function describe(error: LoadError): { title: string; detail: string } {
         title: "Disconnected",
         detail: "Can't reach the wiki-server. Retrying automatically…",
       };
+    case "unsupported":
+      return {
+        title: "Unsupported browser",
+        detail: "wiki-ui needs a module SharedWorker (Chrome/Edge, Firefox 114+, or Safari 16+).",
+      };
   }
 }
 
