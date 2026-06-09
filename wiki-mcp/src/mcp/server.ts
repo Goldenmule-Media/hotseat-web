@@ -110,7 +110,13 @@ export class WikiMcpServer {
       this.stdioServer = undefined;
     }
     if (this.httpServer !== undefined) {
-      await new Promise<void>((resolve) => this.httpServer?.close(() => resolve()));
+      const http = this.httpServer;
+      await new Promise<void>((resolve) => {
+        http.close(() => resolve());
+        // `close()` only stops NEW connections and waits forever for existing keep-alive
+        // sockets (e.g. an attached MCP client) to drain — destroy them so it resolves.
+        http.closeAllConnections();
+      });
       this.httpServer = undefined;
     }
   }

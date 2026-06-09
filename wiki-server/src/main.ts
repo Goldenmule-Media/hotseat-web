@@ -237,6 +237,14 @@ async function main(): Promise<void> {
     if (stopping) return;
     stopping = true;
     running.logger.forSource("server").info("shutting down", { signal });
+    // Backstop: if a subsystem's stop() never resolves (e.g. an external listener waiting
+    // on a socket that won't drain), force-exit rather than hang the terminal forever.
+    // `unref()` so it never keeps the loop alive when a clean stop DOES finish first.
+    const watchdog = setTimeout(() => {
+      console.error(`[wiki-server] shutdown timed out after 5s — forcing exit`);
+      process.exit(1);
+    }, 5000);
+    watchdog.unref();
     running
       .stop()
       .then(() => process.exit(0))

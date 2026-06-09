@@ -124,7 +124,13 @@ export function startControlServer(options: ControlServerOptions): Promise<Contr
         stop(): Promise<void> {
           for (const tail of openTails) tail.end();
           openTails.clear();
-          return new Promise((res2, rej) => server.close((err) => (err ? rej(err) : res2())));
+          return new Promise((res2, rej) => {
+            server.close((err) => (err ? rej(err) : res2()));
+            // `server.close()` only stops NEW connections; it waits forever for existing
+            // keep-alive sockets (idle log-tail clients, browsers) to drain. Destroy them
+            // so the callback actually fires on shutdown.
+            server.closeAllConnections();
+          });
         },
       });
     });
