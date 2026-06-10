@@ -18,6 +18,7 @@ export default defineConfig({
     toc: "src/toc/index.ts",
     architecture: "src/architecture/index.ts",
     adr: "src/adr/index.ts",
+    document: "src/document/index.ts",
   },
   format: ["esm"],
   platform: "node",
