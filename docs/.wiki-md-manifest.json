@@ -1,9 +1,9 @@
 {
   "ws:mpzncs2z-0001-2wgv51": {
-    "version": 1793,
+    "version": 1794,
     "files": {
       "hotseat-wiki/architecture/index.md": "fea57d534a3aa7ca70deabb6089650bb28b9562fa7bd01d010cae03f89ebf5cc",
-      "hotseat-wiki/feature-specs/index.md": "59f346697e12906b0e8b076722747975b09618878bc84026867c701a1522046c",
+      "hotseat-wiki/feature-specs/index.md": "f39d08db07e0ed57f225cb9f5c595b09681c1f99fbc6753333f70742a6cb5dad",
       "hotseat-wiki/architecture/wiki/index.md": "c6ec4be94906f20cfa597bc55fa2374dcb2e372d75261e64d6445d2621e5cdd9",
       "hotseat-wiki/architecture/wiki-models/index.md": "784ad18a2f34cbb748e24225ff37fff99e1ec7542518604049046f6c9f2514c8",
       "hotseat-wiki/architecture/wiki-mcp/index.md": "d588057a56c0b7550e7aa4afc64a4eebecfc6cef113028ebe07bc95bdc494c4d",
@@ -58,11 +58,7 @@
       "hotseat-wiki/decision-records/generic-mutations-in-v1-generated-subcommands-later.md": "15570a69d3895532f73d70bbe72b77b8a5a152f0f0f57da7e5427e900b62d54c",
       "hotseat-wiki/decision-records/cross-workspace-operations-are-an-admin-system-affordance-not-a-content-read.md": "78afba5243c32da742cc005bed0b1d707a3d9f046e81c6966d7dcf807e69e9f7",
       "hotseat-wiki/architecture/content-model.md": "08dfe6a7750444b24ac27668b18f048e594dc4b1a6f646805452d69c67772f3c",
-      "hotseat-wiki/architecture/wiki-ui.md": "1378f0c03f5030599f838bf3c6452d4d573a937a250e9808ce33612657c3e3d0",
-      "hotseat-wiki/feature-specs/model-packaged-claude-skills/index.md": "4c0e1ed7cd4332cefc040a372152ac6c580cccfb69d1eca910a62ca6f12dd915",
-      "hotseat-wiki/feature-specs/model-packaged-claude-skills/implementation-plan-model-packaged-claude-skills.md": "f3eb994d18495a0a736563c8d6c2de3a2f73a620f20ae8c2da3fabf1f0c18aa2",
-      "hotseat-wiki/feature-specs/model-packaged-claude-skills/testing-plan-model-packaged-claude-skills.md": "5662d74c5f1d6587ac2770f209f83f13ca7518bea4bbd6691919c8b0617a7d9b",
-      "hotseat-wiki/feature-specs/model-packaged-claude-skills/spec-model-packaged-claude-skills.md": "a9865de56c482b09ab526f6a725930ab89610afa0bffed8387308255a3b36092"
+      "hotseat-wiki/architecture/wiki-ui.md": "1378f0c03f5030599f838bf3c6452d4d573a937a250e9808ce33612657c3e3d0"
     },
     "pages": {
       "toc:mpznedyz-0003-pdtcmh": "hotseat-wiki/architecture/index.md",
@@ -121,11 +117,7 @@
       "decision-record:mq110ye5-009p-4evl6w": "hotseat-wiki/decision-records/generic-mutations-in-v1-generated-subcommands-later.md",
       "decision-record:mq5hnpu9-001m-c9yfrl": "hotseat-wiki/decision-records/cross-workspace-operations-are-an-admin-system-affordance-not-a-content-read.md",
       "architecture:mq5nej50-0026-edazv6": "hotseat-wiki/architecture/content-model.md",
-      "architecture:mq6p8be5-001t-rjcytt": "hotseat-wiki/architecture/wiki-ui.md",
-      "feature-brief:mq858obw-007r-frn8ym": "hotseat-wiki/feature-specs/model-packaged-claude-skills/index.md",
-      "implementation-plan:mq858obw-007s-1jyv5l": "hotseat-wiki/feature-specs/model-packaged-claude-skills/implementation-plan-model-packaged-claude-skills.md",
-      "testing-plan:mq858obw-007t-um5okl": "hotseat-wiki/feature-specs/model-packaged-claude-skills/testing-plan-model-packaged-claude-skills.md",
-      "feature-spec:mq858obw-007u-czpbbd": "hotseat-wiki/feature-specs/model-packaged-claude-skills/spec-model-packaged-claude-skills.md"
+      "architecture:mq6p8be5-001t-rjcytt": "hotseat-wiki/architecture/wiki-ui.md"
     }
   }
 }
