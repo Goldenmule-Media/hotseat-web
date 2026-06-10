@@ -72,8 +72,8 @@ function extractSkills(mod: Record<string, unknown>, spec: string): SkillSet {
         throw new Error(`model bundle "${spec}" skills[${i}] is missing the string field "${key}"`);
       }
     }
-    if (skill.command !== undefined && typeof skill.command !== "string") {
-      throw new Error(`model bundle "${spec}" skills[${i}].command must be a string when present`);
+    if (skill.command !== undefined && (typeof skill.command !== "string" || skill.command === "")) {
+      throw new Error(`model bundle "${spec}" skills[${i}].command must be a non-empty string when present`);
     }
   }
   return candidate as SkillSet;

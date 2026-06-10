@@ -100,7 +100,10 @@ describe("model-packaged Claude skills", () => {
       /missing the string field "marketplace"/,
     );
     await expect(loadModelBundle(skillBundle({ ...SKILL, command: 7 }))).rejects.toThrow(
-      /command must be a string/,
+      /command must be a non-empty string/,
+    );
+    await expect(loadModelBundle(skillBundle({ ...SKILL, command: "" }))).rejects.toThrow(
+      /command must be a non-empty string/,
     );
   });
 
