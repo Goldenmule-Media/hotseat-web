@@ -7,4 +7,3 @@ Home for product/feature documents authored with the `feature` page-type bundle:
 
 ## Contents
 - [Model-packaged Claude skills](feature-brief:mq858obw-007r-frn8ym)
-- [General-purpose block-list page type](feature-brief:mq853dwy-007j-o0tkzw)
