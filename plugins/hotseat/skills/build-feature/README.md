@@ -39,15 +39,19 @@ lives. The **workflows** are parallel muscle only: they read/compute and return 
 ### The workflows
 
 Both are parameterized by `args`, so the common case runs them as-is via `Workflow({ scriptPath, args })`
-— no per-feature editing; adapt inline only when a feature needs a different fan-out.
+— no per-feature editing; adapt inline only when a feature needs a different fan-out. `args` must be a
+real JSON object: a caller without the Workflow schema loaded emits it as a JSON-encoded string (the
+skill body says to `ToolSearch("select:Workflow")` first), so both templates coerce a stringified `args`
+and **fail fast** — naming the missing field — rather than degrade to a placeholder run.
 
 - **`grounding.template.js`** — fans out read-only `Explore` agents over repo areas, then synthesizes one
   repo-faithful proposal: summary, components, constraints, ordered plan steps, ≥1 data-model code block,
   testing-plan cases, open questions, conflicts. The skill authors this via `mutatePageBatch`, driven by
   `nextActions`.
-- **`verification.template.js`** — runs `npm run typecheck` + `npm run test` and exercises each
-  testing-plan case in parallel, returning real pass/fail with evidence. Agents default to `false` when
-  they can't confirm. The skill flips `markCasePassed`/`markStepDone` **only** from these results.
+- **`verification.template.js`** — runs `npm run typecheck` + `npm run test`, exercises each
+  testing-plan case, and spot-checks each plan step as actually landed (file:line evidence), all in
+  parallel, returning real pass/fail. Agents default to `false` when they can't confirm. The skill flips
+  `markCasePassed`/`markStepDone` **only** from these results.
 
 ## Design rules (enforced by the skill body)
 
@@ -81,10 +85,11 @@ parallel. Worktrees isolate the **code**; the **wiki is shared** (one `wiki-serv
 
 ## Status
 
-The JS templates are syntax-checked and the `SKILL.md` frontmatter matches the documented schema. The
-skill has **not** been exercised end-to-end (that needs a running `wiki-server` with the `feature` model
-loaded and a real feature to drive) — expect to tune the grounding/verification agent prompts after the
-first live run.
+Exercised end-to-end on real features. The first live runs surfaced one wiring failure: with the
+Workflow tool's schema not loaded in the session, the `args` object was emitted as a JSON-encoded
+string, and the templates' placeholder defaults silently turned that into a useless "grounded on 'the
+feature'" run. Fixed on both ends — the skill body loads the schema before the first call, and the
+templates coerce stringified `args` and throw on missing required input instead of falling back.
 
 > **Note:** creating this `.claude/skills/` directory mid-session requires restarting Claude Code before
 > `/build-feature` appears, and accepting the workspace-trust dialog (which activates the skill's

@@ -7,10 +7,14 @@
  * skill (main loop) authors the proposal via MCP, driven by nextActions.
  *
  * args: {
- *   intent: string,       // one-line feature intent, or the current brief summary
+ *   intent: string,       // REQUIRED — one-line feature intent, or the current brief summary
  *   repoRoot?: string,    // worktree root (agents also inherit the session cwd); default "."
  *   areas?: string[],     // optional repo areas/paths to focus the scan
  * }
+ *
+ * A caller without the Workflow schema in its prompt emits `args` as a JSON-encoded STRING —
+ * coerced below. A missing/unreadable `intent` throws immediately: a placeholder grounding
+ * run costs a full agent fan-out and comes back blocked, so fail fast instead.
  */
 export const meta = {
   name: 'build-feature-grounding',
@@ -21,10 +25,23 @@ export const meta = {
   ],
 }
 
-const intent = (args && args.intent) || 'the feature'
-const repoRoot = (args && args.repoRoot) || '.'
-const areas = (args && args.areas && args.areas.length)
-  ? args.areas
+let input = args
+if (typeof input === 'string') {
+  try { input = JSON.parse(input) } catch { input = null }
+}
+if (!input || typeof input.intent !== 'string' || input.intent.trim() === '') {
+  throw new Error(
+    'grounding.template.js requires args.intent — pass args as a real JSON object ' +
+    '{ intent, repoRoot?, areas? }, not a JSON-encoded string (got ' + typeof args + '). ' +
+    'If args cannot reach the script intact, re-run with the template body inlined via the ' +
+    '`script` parameter and the values baked in.',
+  )
+}
+const intent = input.intent
+const repoRoot = input.repoRoot || '.'
+// Default areas are scan LENSES applied to the real intent above — not feature placeholders.
+const areas = (Array.isArray(input.areas) && input.areas.length)
+  ? input.areas
   : [
       'affected modules / entry points',
       'existing similar features & the patterns they follow',
