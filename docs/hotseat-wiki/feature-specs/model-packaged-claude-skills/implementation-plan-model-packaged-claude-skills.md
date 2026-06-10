@@ -1,6 +1,6 @@
 # Implementation plan — Model-packaged Claude skills
 
-**Status:** draft
+**Status:** ready
 
 ## Steps
 - [x] Add type-only IBundleSkillDecl to wiki/src/api.ts (readonly name, description, plugin, marketplace, marketplaceSource; optional command) so it flows out through wiki/authoring's type re-export — no engine runtime behavior.

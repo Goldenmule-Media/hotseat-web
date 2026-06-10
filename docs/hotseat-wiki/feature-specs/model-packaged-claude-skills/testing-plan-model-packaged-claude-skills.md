@@ -1,6 +1,6 @@
 # Testing plan — Model-packaged Claude skills
 
-**Status:** draft
+**Status:** ready
 
 ## Planned
 _None._

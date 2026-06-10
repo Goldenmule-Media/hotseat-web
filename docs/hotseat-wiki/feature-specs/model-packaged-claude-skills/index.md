@@ -1,6 +1,6 @@
 # Feature: Model-packaged Claude skills
 
-**Status:** building
+**Status:** shipped
 
 ## Summary
 Let model bundles in wiki-models declare the Claude skills they ship with, and let wiki-mcp surface that declaration plus the exact install commands a caller runs. Today a bundle's index.ts exports only a page-type array (the loader contract), BundleInfo is {id, specifier, types}, GET /_server/models mirrors that, and the one existing skill — build-feature in plugins/hotseat, installable via `/plugin marketplace add Goldenmule-Media/hotseat-web` then `/plugin install hotseat@hotseat` — is only implicitly paired with the feature bundle. This feature adds an OPTIONAL named `skills` export to the bundle contract (model-declared, host-read-generically), extends the wiki-mcp loader and ModelRegistry to carry it, derives installCommands by pure templating from the declaration, widens GET /_server/models in lockstep, and adds one read-only MCP tool `listModelSkills`. The feature bundle declares a pointer at the existing hotseat plugin; no skill files move in v1.
@@ -26,10 +26,10 @@ Let model bundles in wiki-models declare the Claude skills they ship with, and l
 9. Import styles per package (.js relative imports in wiki-mcp/wiki-server, extensionless in wiki/wiki-models); tsdown alwaysBundle stays the /^wiki(\/|$)/ regex and the new named export must survive the dist build.
 
 ## Open questions
-1. **Should skill FILES eventually move into bundle directories (e.g. wiki-models/src/feature/skills/ plus per-bundle plugin manifests and marketplace entries), or stay in plugins/hotseat with bundles declaring pointers? v1 implements the pointer approach — moving would break the documented /plugin install hotseat@hotseat flow, orphan the .claude/skills/build-feature sync copy, and decouple the plugin's .mcp.json wiring from the skill. Product-direction call, does not block v1.**
+_None._
 
 ## Resolved questions
-_None._
+1. **Should skill FILES eventually move into bundle directories (e.g. wiki-models/src/feature/skills/ plus per-bundle plugin manifests and marketplace entries), or stay in plugins/hotseat with bundles declaring pointers? v1 implements the pointer approach — moving would break the documented /plugin install hotseat@hotseat flow, orphan the .claude/skills/build-feature sync copy, and decouple the plugin's .mcp.json wiring from the skill. Product-direction call, does not block v1.** — _Decision (human, at ship): keep the pointer approach. Skill files stay in plugins/hotseat (the repo root is its own marketplace) and bundles declare pointers via the `skills` export; the hotseat plugin shipped v0.2.0 on this model. Moving skill files into bundle directories is deferred — revisit only if more bundles ship skills and the per-bundle plugin/marketplace overhead earns its keep._
 
 ## References
 _None._
