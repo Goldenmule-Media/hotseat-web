@@ -32,7 +32,7 @@ import {
  * constructed per emitter at runtime instead of once from boot config.
  */
 export function toMarkdownConfig(e: LiveEmitter): IMarkdownProjectionConfig {
-  return { enabled: true, root: e.root, workspaces: [e.workspaceId], layout: "tree", archive: e.archive };
+  return { enabled: true, root: e.root, workspaces: [e.workspaceId], layout: "tree" };
 }
 
 /** A registered emitter: its live config + the disk projector serving it. */
@@ -82,7 +82,6 @@ export class EmitterRegistry {
           emitterId: event.emitterId,
           workspaceId: event.workspaceId,
           root: event.root,
-          archive: event.archive,
         });
       } else {
         this.applyRemoved(event.emitterId);
@@ -117,7 +116,6 @@ export class EmitterRegistry {
       emitterId: emitter.emitterId,
       workspaceId: emitter.workspaceId,
       root: emitter.root,
-      archive: emitter.archive,
     });
   }
 

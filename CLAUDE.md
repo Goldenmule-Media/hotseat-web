@@ -154,7 +154,7 @@ its own. Full surface: [`architecture/wiki-server.md`](docs/hotseat-wiki/archite
   bundle of the same id (and still hard-fails if it can't load).
 - **Markdown disk mirrors — the runtime emitter registry.** A project mirrors a workspace's deterministic
   Markdown to its own checkout by registering an **emitter** over MCP at runtime (no boot-time flag).
-  `configureEmitter({ emitterId, workspaceId, root, archive? })` registers/reconfigures one workspace → one
+  `configureEmitter({ emitterId, workspaceId, root })` registers/reconfigures one workspace → one
   **absolute** on-disk root; `listEmitters()` returns the live set; `removeEmitter({ emitterId })` detaches
   it (already-mirrored files are **left on disk** — the checkout owns them). The emitter set is
   **event-sourced on its own per-namespace durable stream** (`{baseUrl}/{namespace}/_emitter-config`, owned
@@ -163,8 +163,10 @@ its own. Full surface: [`architecture/wiki-server.md`](docs/hotseat-wiki/archite
   back-fills from the workspace head). Each is a `MarkdownDiskProjector` render-sink on the **same projection
   tail** as the SQL read model + search index (one render per commit, fanned out). Layout
   `<root>/<workspace>/<page tree>` (folder + `index.md` per page-with-children), content-hashed so the git
-  diff stays honest, atomic temp+rename writes, `archive` = `drop` (default) | `mirror` (under `_archive/`),
-  with a boot back-fill that self-heals a wiped output dir. **This repo's own [`docs/hotseat-wiki/`](docs/hotseat-wiki/) is
+  diff stays honest, atomic temp+rename writes, and a boot back-fill that self-heals a wiped output dir.
+  **Archiving never deletes a mirrored file:** archiving a page (or the whole workspace) moves its file to a
+  stable id-named `<workspace>/.archived/<type>--<id>.md`, and unarchiving moves it back to the tree; only a
+  hard page delete removes a file. **This repo's own [`docs/hotseat-wiki/`](docs/hotseat-wiki/) is
   one such mirror.** Local-only trust (v1, roots written verbatim, no sandboxing); single-writer per root
   (documented, not enforced).
 - **`.mcp.json`** wires this Claude Code session's `wiki` MCP server to `http://127.0.0.1:4439/mcp` — i.e. a

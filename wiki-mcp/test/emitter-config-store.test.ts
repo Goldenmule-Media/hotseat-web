@@ -26,18 +26,18 @@ function clock(): () => string {
 describe("foldEmitters — last-writer-wins per emitterId", () => {
   it("a later EmitterConfigured for the same id replaces the earlier one", () => {
     const events: EmitterConfigEvent[] = [
-      { type: "EmitterConfigured", emitterId: "e1", workspaceId: "ws:A", root: "/rootA", archive: "drop", at: "t0" },
-      { type: "EmitterConfigured", emitterId: "e1", workspaceId: "ws:A", root: "/rootB", archive: "mirror", at: "t1" },
+      { type: "EmitterConfigured", emitterId: "e1", workspaceId: "ws:A", root: "/rootA", at: "t0" },
+      { type: "EmitterConfigured", emitterId: "e1", workspaceId: "ws:A", root: "/rootB", at: "t1" },
     ];
     const live = foldEmitters(events);
     expect(live.size).toBe(1);
-    expect(live.get("e1")).toEqual({ emitterId: "e1", workspaceId: "ws:A", root: "/rootB", archive: "mirror" });
+    expect(live.get("e1")).toEqual({ emitterId: "e1", workspaceId: "ws:A", root: "/rootB" });
   });
 
   it("EmitterRemoved deletes the entry, leaving the rest", () => {
     const events: EmitterConfigEvent[] = [
-      { type: "EmitterConfigured", emitterId: "e1", workspaceId: "ws:A", root: "/a", archive: "drop", at: "t0" },
-      { type: "EmitterConfigured", emitterId: "e2", workspaceId: "ws:B", root: "/b", archive: "drop", at: "t1" },
+      { type: "EmitterConfigured", emitterId: "e1", workspaceId: "ws:A", root: "/a", at: "t0" },
+      { type: "EmitterConfigured", emitterId: "e2", workspaceId: "ws:B", root: "/b", at: "t1" },
       { type: "EmitterRemoved", emitterId: "e1", at: "t2" },
     ];
     const live = foldEmitters(events);
@@ -59,8 +59,8 @@ describe("EmitterConfigStore — append / readAll round-trip", () => {
 
   it("appends configured + removed and reads them back in order, folding to the live set", async () => {
     const store = new EmitterConfigStore({ baseUrl: url, namespace: NAMESPACE }, clock());
-    await store.appendConfigured({ emitterId: "e1", workspaceId: "ws:A", root: "/a", archive: "drop" });
-    await store.appendConfigured({ emitterId: "e2", workspaceId: "ws:B", root: "/b", archive: "mirror" });
+    await store.appendConfigured({ emitterId: "e1", workspaceId: "ws:A", root: "/a" });
+    await store.appendConfigured({ emitterId: "e2", workspaceId: "ws:B", root: "/b" });
     await store.appendRemoved("e1");
 
     const { events } = await store.readAll();
@@ -70,7 +70,7 @@ describe("EmitterConfigStore — append / readAll round-trip", () => {
 
     const live = foldEmitters(events);
     expect([...live.keys()]).toEqual(["e2"]);
-    expect(live.get("e2")).toEqual({ emitterId: "e2", workspaceId: "ws:B", root: "/b", archive: "mirror" });
+    expect(live.get("e2")).toEqual({ emitterId: "e2", workspaceId: "ws:B", root: "/b" });
 
     await store.close();
   });

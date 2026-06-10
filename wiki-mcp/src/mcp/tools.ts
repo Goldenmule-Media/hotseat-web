@@ -41,7 +41,7 @@ import { asPageId, asWorkspaceId, type EmbeddedEngine } from "../engine.js";
 import type { SqlReadModel } from "../readmodel/readmodel.js";
 import { createLanguageRegistry } from "../models/analyzers/index.js";
 import type { LanguageRegistry, RenameTarget } from "../models/language-registry.js";
-import { foldEmitters, type EmitterArchive, type EmitterConfigStore } from "../emitters/config-store.js";
+import { foldEmitters, type EmitterConfigStore } from "../emitters/config-store.js";
 import type { ModelRegistry } from "../models/registry.js";
 import type { SessionTokenManager } from "./tokens.js";
 
@@ -605,16 +605,6 @@ const assignSerialsTool: WikiTool = {
 // Runtime Markdown emitters (per-project disk mirrors) — configure / list / remove
 // ────────────────────────────────────────────────────────────────────────────
 
-/** Read the optional `archive` arg, defaulting to `"drop"`, validating the enum. */
-function reqArchive(args: Record<string, unknown>): EmitterArchive {
-  const v = args.archive;
-  if (v === undefined || v === null) return "drop";
-  if (v !== "drop" && v !== "mirror") {
-    throw new Error('invalid "archive" (expected "drop" or "mirror")');
-  }
-  return v;
-}
-
 const configureEmitterTool: WikiTool = {
   name: "configureEmitter",
   description:
@@ -622,18 +612,15 @@ const configureEmitterTool: WikiTool = {
     "Markdown to one ABSOLUTE on-disk root, kept live. Keyed by a caller-supplied emitterId " +
     "(re-using an id replaces that emitter — e.g. to point it at a new root). The mirror takes " +
     "effect immediately (no restart) and back-fills the root from the workspace's current head. " +
-    "Config is event-sourced on the per-namespace `_emitter-config` durable stream, so it " +
-    "survives restarts. Roots are written verbatim (local, single-machine trust in v1).",
+    "Archiving a page (or the workspace) never deletes its file — it moves to a stable " +
+    "id-named file under .archived/ and moves back on unarchive. Config is event-sourced on " +
+    "the per-namespace `_emitter-config` durable stream, so it survives restarts. Roots are " +
+    "written verbatim (local, single-machine trust in v1).",
   inputSchema: obj(
     {
       emitterId: str("Caller-supplied id for this mirror (re-using it reconfigures the emitter)."),
       workspaceId: str("The workspace to mirror."),
       root: str("Absolute on-disk directory to write the Markdown tree into."),
-      archive: {
-        type: ["string", "null"],
-        enum: ["drop", "mirror", null],
-        description: "Archived-page policy: omit/\"drop\" removes their files; \"mirror\" moves them under _archive/.",
-      },
     },
     ["emitterId", "workspaceId", "root"],
   ),
@@ -645,17 +632,16 @@ const configureEmitterTool: WikiTool = {
     const workspaceId = asWorkspaceId(reqStr(args, "workspaceId"));
     const root = reqStr(args, "root");
     if (!isAbsolute(root)) throw new Error(`root must be an absolute path (got "${root}").`);
-    const archive = reqArchive(args);
     // Validate the workspace exists (engine catalog is authoritative for existence) so a typo
     // doesn't register a dead emitter; append NOTHING when it doesn't.
     const known = await ctx.engine.listWorkspaces();
     if (!known.some((w) => w.id === workspaceId)) {
       throw new Error(`Unknown workspace ${workspaceId}.`);
     }
-    await store.appendConfigured({ emitterId, workspaceId, root, archive });
+    await store.appendConfigured({ emitterId, workspaceId, root });
     return {
-      text: `Configured emitter ${emitterId}: ${workspaceId} → ${root} (archive: ${archive}).`,
-      data: { emitterId, workspaceId, root, archive },
+      text: `Configured emitter ${emitterId}: ${workspaceId} → ${root}.`,
+      data: { emitterId, workspaceId, root },
     };
   },
 };
@@ -664,7 +650,7 @@ const listEmittersTool: WikiTool = {
   name: "listEmitters",
   description:
     "List the live Markdown emitters (per-project disk mirrors) — each emitterId with the " +
-    "workspace it mirrors, its absolute root, and archive policy. Folded from the " +
+    "workspace it mirrors and its absolute root. Folded from the " +
     "`_emitter-config` durable stream (last-writer-wins per emitterId).",
   inputSchema: obj({}, []),
   write: false,
@@ -673,7 +659,7 @@ const listEmittersTool: WikiTool = {
     if (store === undefined) return { text: "Runtime emitters are not configured on this server.", data: [] };
     const { events } = await store.readAll();
     const emitters = [...foldEmitters(events).values()];
-    const lines = emitters.map((e) => `- ${e.emitterId}: ${e.workspaceId} → ${e.root} (archive: ${e.archive})`);
+    const lines = emitters.map((e) => `- ${e.emitterId}: ${e.workspaceId} → ${e.root}`);
     return { text: emitters.length === 0 ? "No emitters configured." : lines.join("\n"), data: emitters };
   },
 };

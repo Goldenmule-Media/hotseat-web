@@ -1,0 +1,30 @@
+# Spec
+
+**Status:** sealed
+
+## Overview
+Design for making the model-inspection FSM graph actionable: clicking a transition edge that leaves the page's current state opens a form generated from that command's argument schema, and a single button runs the mutation over the edge; the existing live tail then repaints the graph at the new state. The graph and each command's argument schema are properties of the page TYPE (from fsmOf + describeMutations' argsSchema); availability and the act of running a transition are properties of the page INSTANCE. v1 covers page-status transitions only — and because every page transition in the loaded models currently takes empty args, the form is a confirm-and-run step today that grows input fields the instant any transition declares arguments. The decisions below resolve each question raised on the brief.
+
+## Design
+_No design yet._
+
+## Decisions
+Only edges that leave the page's current state are interactive. An available edge opens a runnable form; a blocked edge opens the same form read-only with its unmet precondition shown; an inert edge is not clickable. These are exactly the three classes buildFsmGraph already derives from the describeMutations overlay, so transition legality is never recomputed by the new code. Which edges are interactive, and what happens when you click a blocked or inert edge? The model view already classifies each outgoing edge as available (green), blocked-with-reason (amber), or inert (grey, not leaving the current state). Does the new click action attach to all three, only available, or available + blocked?
+
+The form is generated from the command's argsSchema, never hand-authored. A transition edge's event is the command name, so the clicked edge resolves to exactly one descriptor; a pure schemaToFields maps its object schema (properties + required) to typed field specs the renderer draws, with an unrecognized shape falling back to a raw-JSON field. Nothing is hardcoded per page type, so the form is correct for any future transition that gains arguments. How is the form built — hand-written per command, or generated from the command's argument schema? describeMutations already returns an argsSchema (JSON Schema) per command. Do we drive the form fields from that schema generically, or author bespoke inputs for each transition?
+
+The engine is the sole validator. The form does only light, schema-derived hinting — required markers, number/boolean coercion, dropping empty optionals — then submits and shows the engine's ValidationError verbatim. Mirroring each command's Zod rules in the UI would duplicate logic that can silently drift, so the UI formats and forwards the engine's verdict rather than pre-judging it. Validation — replicate the command's rules client-side for instant feedback, or let the engine be the sole validator? The command args are Zod-validated at commit. Do we mirror those rules in the UI (risking drift), or submit and surface the engine's error?
+
+The write goes through the engine handle the read side already owns: WorkspaceSession.handle() then IWorkspaceHandle.mutate(pageId, command, args). The Durable Stream host already allows cross-origin writes (a wildcard allow-origin, plus POST, PUT, HEAD and OPTIONS), so no server endpoint is added — it matches the existing direct-to-stream architecture. On commit the form closes and the existing subscribe tail bumps lastEventAt, re-reading status and describeMutations so the graph repaints at the new state: read-your-writes with no polling and no optimistic local state. How is the mutation actually performed from the browser, and how does the graph update afterward? wiki-ui runs the engine in the browser and tails the stream read-only today. Do we add a server endpoint for writes, or write through the in-browser engine handle — and what drives the post-transition repaint?
+
+The generic form is built regardless, because hardcoding per-command forms is disallowed and the schema-driven mechanism is the deliverable. An empty schema renders zero fields as a confirm-and-run step, which already earns its keep by advancing a page's lifecycle from the UI and making precondition gating actionable, and it grows real input fields the moment any transition declares arguments. Today every page-level transition in the loaded models takes empty args — is a generated args form still worth building, and what is the empty-args experience? If clicking a transition yields no fields, is the feature still valuable, and how should an empty schema render?
+
+v1 covers page-status FSM transitions only — the edges this graph draws — matching the model-inspection scope. Element-level FSMs and free content commands carry richer arguments but are not page-status edges; running them in-graph is the natural follow-up once element FSMs are themselves visualized. Holding v1 to page transitions reuses the existing graph wholesale. Scope — page-status transitions only, or element-level transitions and free content commands too? Several element types carry their own FSMs and the richest-argument commands (addComponent, answerQuestion, setSummary) are content edits, not page-status edges. Is in-graph running of those in scope for v1?
+
+The form lives in a dedicated inspector column beside the graph, not a modal. The model view is a two-column layout: the React Flow canvas on the left and a persistent inspector panel on the right that is populated when you click an interactive edge (and shows a short hint otherwise). Seeing the graph and the form side by side, rather than overlaying a dialog, keeps the current state and the transition you are running visible at once; the panel simply re-populates when you pick a different edge. A row beneath the canvas is the equivalent stacked layout (used on narrow viewports); a modal was rejected. Where does the form live — a modal dialog over the graph, a docked side panel, or an inline drawer below the canvas? This affects how the type-level graph and the instance-level action sit together visually, and how much layout work v1 takes on.
+
+## References
+_None._
+
+## Child pages
+_None._

@@ -180,11 +180,14 @@ export function isStructuralCommit(newEvents: readonly IEventEnvelope[]): boolea
         // No page renders change, but a path-mapping sink derives the WORKSPACE directory from
         // the workspace name — a rename moves every mirrored file, so it must take a rebuild.
         return true;
+      case "WorkspaceArchived":
+      case "WorkspaceUnarchived":
+        // Same reasoning at workspace granularity: no page render changes, but a path-mapping
+        // sink relocates EVERY page (to/from its archived location), so it must take a rebuild.
+        return true;
       case "LinkAdded":
       case "LinkRemoved":
       case "WorkspaceCreated":
-      case "WorkspaceArchived":
-      case "WorkspaceUnarchived":
         break; // no effect on a page's title / existence / tree position
       default: {
         const _exhaustive: never = t; // a new structural type lands here → TS2322

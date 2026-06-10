@@ -22,7 +22,7 @@ import { SqlReadModel } from "../src/readmodel/readmodel.js";
 import { buildStore, migrateToLatest, type ReadModelStore } from "../src/readmodel/store.js";
 import { ProjectionService } from "../src/tail/projection.js";
 import { engineEventSource } from "../src/tail/engine-source.js";
-import { MarkdownDiskProjector, type IMarkdownProjectionConfig } from "../src/tail/markdown-projection.js";
+import { archivedFileName, MarkdownDiskProjector, type IMarkdownProjectionConfig } from "../src/tail/markdown-projection.js";
 
 const Note = definePageType({
   type: "note",
@@ -86,16 +86,14 @@ describe("markdown-disk projection — live filesystem mirror", () => {
   });
 
   const cfg = (
-    archive: IMarkdownProjectionConfig["archive"] = "drop",
     workspaces: IMarkdownProjectionConfig["workspaces"] = "all",
-  ): IMarkdownProjectionConfig => ({ enabled: true, root, workspaces, layout: "tree", archive });
+  ): IMarkdownProjectionConfig => ({ enabled: true, root, workspaces, layout: "tree" });
 
-  /** Build + register the disk projector (default: drop policy, all workspaces); returns it. */
+  /** Build + register the disk projector (default: all workspaces); returns it. */
   async function enableMirror(
-    archive: IMarkdownProjectionConfig["archive"] = "drop",
     workspaces: IMarkdownProjectionConfig["workspaces"] = "all",
   ): Promise<MarkdownDiskProjector> {
-    const projector = new MarkdownDiskProjector(cfg(archive, workspaces), silentLogger);
+    const projector = new MarkdownDiskProjector(cfg(workspaces), silentLogger);
     await projector.init();
     projection.addRenderSink(projector);
     return projector;
@@ -133,7 +131,7 @@ describe("markdown-disk projection — live filesystem mirror", () => {
 
   it("writes only allowlisted workspaces (and nothing for the rest)", async () => {
     const mine = await engine.createWorkspace({ name: "Mine" });
-    await enableMirror("drop", [mine.id]); // allowlist exactly one workspace
+    await enableMirror([mine.id]); // allowlist exactly one workspace
     const { value: minePage } = await mine.createPage("note", { title: "Kept", parentId: null });
     const other = await engine.createWorkspace({ name: "Other" });
     await other.createPage("note", { title: "Skipped", parentId: null });
@@ -200,41 +198,71 @@ describe("markdown-disk projection — live filesystem mirror", () => {
     expect(await exists("docs/guide.md")).toBe(true);
   });
 
-  it("drops an archived page's file (archive: drop)", async () => {
-    await enableMirror("drop");
-    const ws = await engine.createWorkspace({ name: "Docs" });
-    const { value: pageId } = await ws.createPage("note", { title: "Temp", parentId: null });
-    await drain();
-    expect(await exists("docs/temp.md")).toBe(true);
-
-    await ws.archivePage(pageId);
-    await drain();
-    expect(await exists("docs/temp.md")).toBe(false);
-  });
-
-  it("moves an archived page under _archive/ (archive: mirror)", async () => {
-    await enableMirror("mirror");
-    const ws = await engine.createWorkspace({ name: "Docs" });
-    const { value: pageId } = await ws.createPage("note", { title: "Temp", parentId: null });
-    await drain();
-    expect(await exists("docs/temp.md")).toBe(true);
-
-    await ws.archivePage(pageId);
-    await drain();
-    expect(await exists("docs/temp.md")).toBe(false); // left its live path
-    expect(await exists("docs/_archive/temp.md")).toBe(true); // mirrored aside
-  });
-
-  it("drops an archived workspace's whole mirror", async () => {
+  it("moves an archived page's file to a stable id-named file under .archived/", async () => {
     await enableMirror();
     const ws = await engine.createWorkspace({ name: "Docs" });
-    await ws.createPage("note", { title: "Guide", parentId: null });
+    const { value: pageId } = await ws.createPage("note", { title: "Temp", parentId: null });
+    await ws.mutate(pageId, "setBody", { text: "keep me" });
+    await drain();
+    expect(await exists("docs/temp.md")).toBe(true);
+
+    await ws.archivePage(pageId);
+    await drain();
+    const archivedRel = `docs/.archived/${archivedFileName(pageId)}`;
+    expect(await exists("docs/temp.md")).toBe(false); // left its live path…
+    expect(await exists(archivedRel)).toBe(true); // …moved, never deleted
+    expect(await read(archivedRel)).toContain("keep me");
+  });
+
+  it("an archived file's path is id-keyed — a sibling rename does not move it", async () => {
+    await enableMirror();
+    const ws = await engine.createWorkspace({ name: "Docs" });
+    const { value: temp } = await ws.createPage("note", { title: "Temp", parentId: null });
+    const { value: other } = await ws.createPage("note", { title: "Other", parentId: null });
+    await ws.archivePage(temp);
+    await drain();
+    const archivedRel = `docs/.archived/${archivedFileName(temp)}`;
+    expect(await exists(archivedRel)).toBe(true);
+
+    await ws.setPageTitle(other, "Renamed"); // structural → whole rebuild; archived path is stable
+    await drain();
+    expect(await exists(archivedRel)).toBe(true);
+  });
+
+  it("unarchiving a page moves its file back to its live tree path", async () => {
+    await enableMirror();
+    const ws = await engine.createWorkspace({ name: "Docs" });
+    const { value: pageId } = await ws.createPage("note", { title: "Temp", parentId: null });
+    await ws.archivePage(pageId);
+    await drain();
+    expect(await exists(`docs/.archived/${archivedFileName(pageId)}`)).toBe(true);
+
+    await ws.unarchivePage(pageId);
+    await drain();
+    expect(await exists("docs/temp.md")).toBe(true); // restored to the tree
+    expect(await exists(`docs/.archived/${archivedFileName(pageId)}`)).toBe(false); // moved back, not duplicated
+    expect(await read("docs/temp.md")).toBe(await ws.toMarkdown(pageId));
+  });
+
+  it("moves an archived workspace's pages under .archived/ instead of wiping the mirror", async () => {
+    await enableMirror();
+    const ws = await engine.createWorkspace({ name: "Docs" });
+    const { value: pageId } = await ws.createPage("note", { title: "Guide", parentId: null });
+    await ws.mutate(pageId, "setBody", { text: "still here" });
     await drain();
     expect(await exists("docs/guide.md")).toBe(true);
 
     await ws.archive(); // archive the whole workspace
     await drain();
-    expect(await exists("docs/guide.md")).toBe(false); // hidden workspace → not mirrored
+    const archivedRel = `docs/.archived/${archivedFileName(pageId)}`;
+    expect(await exists("docs/guide.md")).toBe(false); // hidden workspace → no live tree
+    expect(await exists(archivedRel)).toBe(true); // content preserved, id-keyed
+    expect(await read(archivedRel)).toContain("still here");
+
+    await ws.unarchive();
+    await drain();
+    expect(await exists("docs/guide.md")).toBe(true); // restored to the tree
+    expect(await exists(archivedRel)).toBe(false);
   });
 
   it("self-heals on restart — reconciles a wiped output directory against head", async () => {

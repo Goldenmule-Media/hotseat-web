@@ -8,9 +8,11 @@
  *  - **One render per commit, fanned out.** The tailer renders a commit's affected pages once
  *    and hands the resulting {@link SearchDoc}s here; this sink consumes `doc.body` (the bytes)
  *    and uses the folded `state` for the tree → path mapping. It never calls `renderPage`.
- *  - **Reconciliation, not append.** The set of expected files is computed from the LIVE tree;
- *    any tracked file with no corresponding live page is an orphan and is removed (drop) or
- *    moved aside (mirror). Deletes, archives, and reparents are all just reconciliation.
+ *  - **Reconciliation — and archives are never dropped.** The set of expected files is computed
+ *    from the live tree; any tracked file with no corresponding expected path is an orphan and
+ *    is removed. An ARCHIVED page (or one whose ancestor — or whole workspace — is archived)
+ *    stays in the expected set at a stable id-keyed path under `.archived/`, so archiving MOVES
+ *    its file there (and unarchiving moves it back); only hard-deleted pages lose their file.
  *  - **Determinism ⇒ no churn.** Each rendered page is content-hashed; an unchanged page is
  *    never rewritten, so `git status` stays quiet. Writes are atomic (temp file + rename).
  *  - **Crash/restart self-heal.** A small on-disk manifest records the applied version + the
@@ -42,8 +44,6 @@ export interface IMarkdownProjectionConfig {
   readonly workspaces: "all" | readonly string[];
   /** Tree layout: nested folders mirroring the page tree. `"flat"` is reserved for later. */
   readonly layout: "tree";
-  /** Archived page (or a descendant of one): remove its file (`drop`) or move it under `_archive/` (`mirror`). */
-  readonly archive: "drop" | "mirror";
 }
 
 /** One workspace's persisted state: applied version + every file written (path → hash, page → path). */
@@ -85,8 +85,12 @@ function hasChildren(pageId: PageId, state: IWorkspaceState): boolean {
   return false;
 }
 
-/** True iff `page` or any ancestor is archived — matches the wiki hiding an archived subtree. */
+/**
+ * True iff the page is hidden from default wiki views: its WORKSPACE is archived, or it — or
+ * any ancestor — is an archived page (matching the wiki hiding an archived subtree).
+ */
 function effectivelyArchived(pageId: PageId, state: IWorkspaceState): boolean {
+  if (state.status === "archived") return true;
   let cur: PageId | null = pageId;
   const seen = new Set<string>();
   while (cur !== null && !seen.has(cur)) {
@@ -118,19 +122,29 @@ function siblingSlug(pageId: PageId, state: IWorkspaceState): string {
   return base;
 }
 
+/** The directory archived pages' files live under, inside the workspace directory. */
+const ARCHIVED_DIR = ".archived";
+
 /**
- * The workspace-relative posix path for a page's Markdown: a folder per ancestor slug, then the
- * page's own slug as `index.md` if it has children else `<slug>.md`. Returns `undefined` for a
- * page that should not be on disk under `drop` (it or an ancestor is archived); under `mirror`
- * the same tree is prefixed with `_archive/`.
+ * The filesystem-safe file name for an archived page, derived from its ID — not its tree
+ * position — so the file NEVER moves again once archived (renames/reparents above it, even a
+ * later hard-delete of an ancestor, leave it untouched). Ids are `type:localpart` (lowercase
+ * base36); the `:` separator is the one filesystem-unsafe character, mapped to `--`, and any
+ * other unexpected character is defensively mapped to `-`.
  */
-export function pageRelPath(
-  pageId: PageId,
-  state: IWorkspaceState,
-  archive: IMarkdownProjectionConfig["archive"],
-): string | undefined {
-  const archived = effectivelyArchived(pageId, state);
-  if (archived && archive === "drop") return undefined;
+export function archivedFileName(pageId: string): string {
+  return `${pageId.replace(/:/g, "--").replace(/[^A-Za-z0-9._-]+/g, "-")}.md`;
+}
+
+/**
+ * The workspace-relative posix path for a page's Markdown. A live page maps onto the tree: a
+ * folder per ancestor slug, then the page's own slug as `index.md` if it has children else
+ * `<slug>.md`. An effectively-archived page (itself, an ancestor, or the whole workspace
+ * archived) maps to a FLAT, stable, id-keyed `.archived/<id>.md` instead — so archiving moves
+ * the file there rather than deleting it, and the path survives any later tree churn.
+ */
+export function pageRelPath(pageId: PageId, state: IWorkspaceState): string {
+  if (effectivelyArchived(pageId, state)) return posix.join(ARCHIVED_DIR, archivedFileName(pageId));
 
   const slugs: string[] = [];
   let cur: PageId | null = pageId;
@@ -142,8 +156,7 @@ export function pageRelPath(
     cur = state.pages.get(cur)!.parentId as PageId | null;
   }
   const rel = slugs.join("/");
-  const file = hasChildren(pageId, state) ? `${rel}/index.md` : `${rel}.md`;
-  return archived ? posix.join("_archive", file) : file;
+  return hasChildren(pageId, state) ? `${rel}/index.md` : `${rel}.md`;
 }
 
 /** The per-workspace subdirectory under `root` (workspace name slug, id-disambiguated if empty). */
@@ -190,8 +203,9 @@ export class MarkdownDiskProjector implements RenderSink {
 
   /**
    * A content commit (no path can move): write the changed pages' bytes at their stable paths
-   * and drop any `removed` pages' files. Path-moving commits are routed to {@link rebuild} by
-   * the tailer ({@link rebuildOnStructural}), so no orphan sweep is needed here.
+   * and drop any `removed` pages' files. Path-moving commits — including page/workspace
+   * archive + unarchive, which relocate files to/from `.archived/` — are routed to
+   * {@link rebuild} by the tailer ({@link rebuildOnStructural}), so no orphan sweep is needed here.
    */
   async applyDelta(
     workspace: WorkspaceId,
@@ -202,13 +216,6 @@ export class MarkdownDiskProjector implements RenderSink {
   ): Promise<void> {
     if (!this.mirrors(workspace)) return;
     const m = this.wsManifest(workspace);
-    // An archived WORKSPACE is hidden from the wiki's default views, so it has no place in the
-    // on-disk mirror — drop any files it previously had. (Workspace-archive is not a structural
-    // commit, so it arrives here with empty docs; wipe explicitly.)
-    if (state.status === "archived") {
-      await this.wipeWorkspace(workspace, version, m);
-      return;
-    }
     const wsDir = workspaceDir(state);
     let written = 0;
     const removedPaths: string[] = [];
@@ -222,18 +229,7 @@ export class MarkdownDiskProjector implements RenderSink {
       }
     }
     for (const doc of docs) {
-      const pageRel = pageRelPath(doc.pageId as PageId, state, this.cfg.archive);
-      if (pageRel === undefined) {
-        // Dropped (archived under `drop`) — remove any prior file for this page.
-        const prior = m.pages[doc.pageId];
-        if (prior !== undefined) {
-          removedPaths.push(prior);
-          delete m.pages[doc.pageId];
-          delete m.files[prior];
-        }
-        continue;
-      }
-      const rel = posix.join(wsDir, pageRel);
+      const rel = posix.join(wsDir, pageRelPath(doc.pageId as PageId, state));
       if (await this.writeIfChanged(rel, doc.body, m)) written++;
       m.pages[doc.pageId] = rel;
     }
@@ -253,8 +249,9 @@ export class MarkdownDiskProjector implements RenderSink {
   /**
    * A whole-workspace reconcile (boot, lag-recovery, or a structural commit): compute the
    * expected file set from the LIVE tree, write changed pages, and remove every tracked file
-   * with no corresponding live page (deletes, archives under `drop`, the old path after a
-   * reparent/rename). `docs` is every live page's render (the shared whole render).
+   * with no corresponding expected path (deletes, the old path after a reparent/rename, a live
+   * path after its page is archived — its content is in the expected set at `.archived/`).
+   * `docs` is every page's render (the shared whole render), archived pages included.
    */
   async rebuild(
     workspace: WorkspaceId,
@@ -264,20 +261,15 @@ export class MarkdownDiskProjector implements RenderSink {
   ): Promise<void> {
     if (!this.mirrors(workspace)) return;
     const m = this.wsManifest(workspace);
-    // An archived workspace is hidden from the wiki, so it mirrors NOTHING — leave `expected`
-    // empty and let the orphan sweep below drop any files it previously had.
-    if (state.status === "archived") {
-      await this.wipeWorkspace(workspace, version, m);
-      return;
-    }
     const wsDir = workspaceDir(state);
     const bodyByPage = new Map<string, string>(docs.map((d) => [d.pageId, d.body]));
 
-    // Expected: every live page that maps to a path (archived pages drop or mirror per policy).
+    // Expected: every page maps to a path — live pages onto the tree, effectively-archived
+    // pages (including every page of an archived WORKSPACE) onto stable `.archived/<id>.md`
+    // files. Archiving therefore MOVES content; nothing but a hard delete removes it.
     const expected = new Map<string, { pageId: string; body: string }>();
     for (const node of state.pages.values()) {
-      const pageRel = pageRelPath(node.id as PageId, state, this.cfg.archive);
-      if (pageRel === undefined) continue;
+      const pageRel = pageRelPath(node.id as PageId, state);
       expected.set(posix.join(wsDir, pageRel), { pageId: node.id, body: bodyByPage.get(node.id) ?? "" });
     }
 
@@ -311,19 +303,6 @@ export class MarkdownDiskProjector implements RenderSink {
   }
 
   // ── internals ──────────────────────────────────────────────────────────────────
-
-  /** Remove every file this workspace had on disk and reset its manifest to `version` (empty). */
-  private async wipeWorkspace(workspace: WorkspaceId, version: number, m: WorkspaceManifest): Promise<void> {
-    const removed = Object.keys(m.files);
-    await this.removeFiles(removed);
-    m.files = {};
-    m.pages = {};
-    m.version = version;
-    await this.persist();
-    if (removed.length > 0) {
-      this.logger.info("markdown-disk dropped archived workspace", { workspace, version, removed: removed.length });
-    }
-  }
 
   private wsManifest(workspace: WorkspaceId): WorkspaceManifest {
     const existing = this.manifest[workspace];

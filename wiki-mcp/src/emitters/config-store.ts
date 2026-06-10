@@ -26,17 +26,18 @@ const JSON_CONTENT_TYPE = "application/json";
 /** DS sentinel offset that means "start of stream". */
 const START_OFFSET = "-1";
 
-/** Archived-page policy carried per emitter (mirrors the Markdown projector's `archive`). */
-export type EmitterArchive = "drop" | "mirror";
-
-/** The two events on the `_emitter-config` stream. */
+/**
+ * The two events on the `_emitter-config` stream. (Historical `EmitterConfigured` events also
+ * carried an `archive` policy — `"drop" | "mirror"` — retired when archived pages gained their
+ * one behavior, moving under `.archived/`; the fold ignores unknown fields, so old events on
+ * existing streams replay fine.)
+ */
 export type EmitterConfigEvent =
   | {
       readonly type: "EmitterConfigured";
       readonly emitterId: string;
       readonly workspaceId: string;
       readonly root: string;
-      readonly archive: EmitterArchive;
       readonly at: string;
     }
   | { readonly type: "EmitterRemoved"; readonly emitterId: string; readonly at: string };
@@ -46,7 +47,6 @@ export interface LiveEmitter {
   readonly emitterId: string;
   readonly workspaceId: string;
   readonly root: string;
-  readonly archive: EmitterArchive;
 }
 
 /** A non-live read's result: the flat event list + the cursor to resume a live tail from. */
@@ -70,7 +70,6 @@ export function foldEmitters(events: readonly EmitterConfigEvent[]): Map<string,
         emitterId: e.emitterId,
         workspaceId: e.workspaceId,
         root: e.root,
-        archive: e.archive,
       });
     } else {
       live.delete(e.emitterId);

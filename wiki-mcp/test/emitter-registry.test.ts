@@ -170,12 +170,11 @@ describe("runtime-configurable Markdown emitters", () => {
   // ── toMarkdownConfig ───────────────────────────────────────────────────────────
 
   it("toMarkdownConfig maps a live emitter to the per-root projector config", () => {
-    expect(toMarkdownConfig({ emitterId: "e1", workspaceId: "ws:A", root: "/out", archive: "mirror" })).toEqual({
+    expect(toMarkdownConfig({ emitterId: "e1", workspaceId: "ws:A", root: "/out" })).toEqual({
       enabled: true,
       root: "/out",
       workspaces: ["ws:A"],
       layout: "tree",
-      archive: "mirror",
     });
   });
 
@@ -189,7 +188,7 @@ describe("runtime-configurable Markdown emitters", () => {
 
     const root = await newRoot();
     const cfgStore = new EmitterConfigStore({ baseUrl: url, namespace: NAMESPACE }, clock());
-    await cfgStore.appendConfigured({ emitterId: "e1", workspaceId: ws.id, root, archive: "drop" });
+    await cfgStore.appendConfigured({ emitterId: "e1", workspaceId: ws.id, root });
 
     const registry = new EmitterRegistry(cfgStore, projection, source, silentLogger);
     await registry.start(); // back-fills synchronously before returning
@@ -211,7 +210,7 @@ describe("runtime-configurable Markdown emitters", () => {
     await drain();
 
     const root = await newRoot();
-    await cfgStore.appendConfigured({ emitterId: "e2", workspaceId: ws.id, root, archive: "drop" });
+    await cfgStore.appendConfigured({ emitterId: "e2", workspaceId: ws.id, root });
     // The live tail picks it up and back-fills existing content with no new commit.
     await until(() => exists(join(root, "beta/first.md")));
     expect(await readFile(join(root, "beta/first.md"), "utf8")).toBe(await ws.toMarkdown(p1));
@@ -236,12 +235,12 @@ describe("runtime-configurable Markdown emitters", () => {
     const cfgStore = new EmitterConfigStore({ baseUrl: url, namespace: NAMESPACE }, clock());
     const registry = new EmitterRegistry(cfgStore, projection, source, silentLogger);
 
-    await cfgStore.appendConfigured({ emitterId: "e1", workspaceId: ws.id, root: rootA, archive: "drop" });
+    await cfgStore.appendConfigured({ emitterId: "e1", workspaceId: ws.id, root: rootA });
     await registry.start();
     expect(await exists(join(rootA, "docs/guide.md"))).toBe(true);
 
     // Re-configure the SAME id at a new root: the old sink is detached, a new one back-fills rootB.
-    await cfgStore.appendConfigured({ emitterId: "e1", workspaceId: ws.id, root: rootB, archive: "drop" });
+    await cfgStore.appendConfigured({ emitterId: "e1", workspaceId: ws.id, root: rootB });
     await until(() => exists(join(rootB, "docs/guide.md")));
 
     // A new commit lands in rootB (the live root); rootA is no longer updated.
@@ -262,7 +261,7 @@ describe("runtime-configurable Markdown emitters", () => {
     const root = await newRoot();
     const cfgStore = new EmitterConfigStore({ baseUrl: url, namespace: NAMESPACE }, clock());
     const registry = new EmitterRegistry(cfgStore, projection, source, silentLogger);
-    await cfgStore.appendConfigured({ emitterId: "e1", workspaceId: ws.id, root, archive: "drop" });
+    await cfgStore.appendConfigured({ emitterId: "e1", workspaceId: ws.id, root });
     await registry.start();
     expect(await exists(join(root, "docs/guide.md"))).toBe(true);
 
@@ -320,7 +319,7 @@ describe("runtime-configurable Markdown emitters", () => {
 
     await tools.get("configureEmitter")!.handle({ emitterId: "e1", workspaceId: ws.id, root }, c);
     const listed = (await tools.get("listEmitters")!.handle({}, c)).data as unknown[];
-    expect(listed).toEqual([{ emitterId: "e1", workspaceId: ws.id, root, archive: "drop" }]);
+    expect(listed).toEqual([{ emitterId: "e1", workspaceId: ws.id, root }]);
 
     await tools.get("removeEmitter")!.handle({ emitterId: "e1" }, c);
     const afterRemove = (await tools.get("listEmitters")!.handle({}, c)).data as unknown[];

@@ -35,7 +35,7 @@ export type { WikiMcpConfig, DbConfig } from "./config.js";
 export { resolveConfig, resolveRuntime } from "./config.js";
 export type { McpTransport } from "./mcp/server.js";
 export type { RenderSink } from "./tail/render-sink.js";
-export type { LiveEmitter, EmitterArchive } from "./emitters/config-store.js";
+export type { LiveEmitter } from "./emitters/config-store.js";
 export { ModelRegistry } from "./models/registry.js";
 export type { ModelRegistryEvent, BundleInfo, BundleSkillInfo } from "./models/registry.js";
 
