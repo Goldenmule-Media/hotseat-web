@@ -7,7 +7,7 @@
 - **Scope:** wiki-mcp
 
 ## Context
-_None._
+_No context yet._
 
 ## Decision
 The MCP server keeps a per-session high-water token per workspace: write tools record the

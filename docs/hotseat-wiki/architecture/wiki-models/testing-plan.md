@@ -12,7 +12,7 @@ The test cases and results for a feature: a list of cases, each carrying a pass/
 Records the verification surface and supplies the brief's `allCasesPassed` ship gate.
 
 ## Design notes
-_None._
+_No design notes._
 
 ## Components
 _No components._

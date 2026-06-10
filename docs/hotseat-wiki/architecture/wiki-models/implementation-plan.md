@@ -12,7 +12,7 @@ The ordered plan of attack for a feature — a reorderable list of steps (each w
 The canonical work breakdown for a feature; its steps are individually checked off as the work ships. Feeds the brief's `beginImplementation` precondition and its `ship` gate (all steps done).
 
 ## Design notes
-_None._
+_No design notes._
 
 ## Components
 _No components._

@@ -12,7 +12,7 @@ One node in a typed graph describing the codebase — documents a single unit (m
 Lets an agent maintain living architecture docs as guarded mutations, linking to code (file + symbol) and to other architecture nodes (typed dependency edges), with freshness recorded as an agent fact rather than an engine-faked flag.
 
 ## Design notes
-_None._
+_No design notes._
 
 ## Components
 _No components._

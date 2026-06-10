@@ -6,4 +6,5 @@
 Home for product/feature documents authored with the `feature` page-type bundle: a feature-brief → implementation-plan → testing-plan progression (plus a feature-spec). The codebase's architecture documentation lives under the **Architecture** TOC.
 
 ## Contents
-_No pages yet._
+- [Model-packaged Claude skills](feature-brief:mq858obw-007r-frn8ym)
+- [General-purpose block-list page type](feature-brief:mq853dwy-007j-o0tkzw)

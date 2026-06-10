@@ -7,7 +7,7 @@
 - **Scope:** wiki-mcp
 
 ## Context
-_None._
+_No context yet._
 
 ## Decision
 The projection applies each commit by folding it with the engine's reducer to an

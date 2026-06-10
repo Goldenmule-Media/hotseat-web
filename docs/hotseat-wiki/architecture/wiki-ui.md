@@ -12,7 +12,7 @@ A standalone **Next.js (App Router) app** — a live-updating **browser client**
 Give people a faithful, zero-lag window onto a workspace — and a safe way to advance it — without re-implementing any engine logic in the UI. The same engine the host runs is folded client-side, so every view is the engine's own deterministic projection (not a parallel renderer), and the only mutations the UI can make are the model's FSM-gated commands. It is the human-facing complement to the MCP surface: agents drive the wiki over MCP; people watch it update live and take transition steps in the browser.
 
 ## Design notes
-_None._
+_No design notes._
 
 ## Components
 _No components._

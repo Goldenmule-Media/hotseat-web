@@ -7,7 +7,7 @@
 - **Scope:** wiki-mcp
 
 ## Context
-_None._
+_No context yet._
 
 ## Decision
 Materialize the read model in Postgres via Kysely, on PGlite locally and pg in

@@ -12,7 +12,7 @@ The question-free, DECIDED source of truth authored *from* the brief's resolved 
 Separates the clean current design (the spec) from the deliberation trail (the brief's Q&A), and structurally guarantees no resolved decision was silently dropped.
 
 ## Design notes
-_None._
+_No design notes._
 
 ## Components
 _No components._

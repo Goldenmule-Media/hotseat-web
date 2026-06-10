@@ -3,7 +3,7 @@
 **Status:** active
 
 ## Overview
-_None._
+_No overview yet._
 
 ## Contents
 - [Design decisions live in the wiki](decision-record:mq110m3o-0003-gqol23)

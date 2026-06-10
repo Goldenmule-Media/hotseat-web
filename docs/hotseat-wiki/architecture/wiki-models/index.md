@@ -12,7 +12,7 @@ The **schema layer** — the only home for concrete page types. Built to standal
 Keep the engine and stream host **schema-agnostic** by isolating ALL domain page types here. Each page type is authored declaratively via `definePageType` against `wiki/authoring`: typed sections/fields, an element vocabulary, a status FSM (`t(from, event, to)`), Zod-validated commands, optional pure `derived` projections, and a deterministic render config. New domains are added here and hot-loaded — no engine change.
 
 ## Design notes
-_None._
+_No design notes._
 
 ## Components
 - [feature-brief](architecture:mpzoj1j9-0055-wifv4u)

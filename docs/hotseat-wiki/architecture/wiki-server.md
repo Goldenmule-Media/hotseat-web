@@ -12,7 +12,7 @@ Thin process **wiring** — implements no engine logic. Runs `@durable-streams/s
 Be the single runnable process that stands up storage + read model + MCP for local dev and deployment. It owns process lifecycle and configuration (`flags → env → defaults`), wires the embedded wiki-mcp's stream URL to its own co-hosted Durable Streams host, and loads page-type bundles at boot (`--models` / `--models-dir`) or at runtime via the control listener.
 
 ## Design notes
-_None._
+_No design notes._
 
 ## Components
 _No components._

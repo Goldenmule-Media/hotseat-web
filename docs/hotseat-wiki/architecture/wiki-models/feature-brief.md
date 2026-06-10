@@ -12,7 +12,7 @@ The deliberation record and root-of-the-funnel for a feature: a typed brief hold
 The bundle's lifecycle driver and sign-off authority — the page an agent walks from idea to shipped, gating progress on the state of its pinned children (plan, testing-plan, spec).
 
 ## Design notes
-_None._
+_No design notes._
 
 ## Components
 _No components._

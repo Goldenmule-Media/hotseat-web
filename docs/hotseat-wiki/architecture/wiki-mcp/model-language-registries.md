@@ -12,7 +12,7 @@ Two sibling, generation-counted registries that load plugins by module specifier
 Make page-type schema swappable at runtime (the local edit → build → reload loop) without changing `wiki` / `wiki-server`, and load heavy / version-sensitive parsers in the host (never in the engine) so analysis stays a read-side projection.
 
 ## Design notes
-_None._
+Model-packaged Claude skills: a bundle may declare the Claude skills it ships with via an OPTIONAL named skills export beside its page-type array, validated by the loader's extractSkills (absent yields an empty set; malformed throws a contract error naming the specifier). The registry carries the declaration per bundle, and list() derives each skill's installCommands by pure templating — /plugin marketplace add <marketplaceSource> then /plugin install <plugin>@<marketplace> — so BundleInfo.skills flows to both discovery surfaces unchanged: the listModelSkills MCP read tool (optional bundleId filter; degrades to not-available when no registry is wired into the tool context) and the models route on the control listener (verbatim pass-through of list()). The declaration type IBundleSkillDecl is engine type vocabulary only (reachable via wiki/authoring); the engine has no runtime behavior for it — the model declares, the host reads generically. Skills are host metadata, not page types: they never touch the engine Registry, fingerprint, or fold.
 
 ## Components
 _No components._
@@ -24,6 +24,9 @@ _No components._
 - class `ModelRegistry` in `wiki-mcp/src/models/registry.ts`
 - function `loadModelBundle` in `wiki-mcp/src/models/loader.ts`
 - class `LanguageRegistry` in `wiki-mcp/src/models/language-registry.ts`
+- function `extractSkills` in `wiki-mcp/src/models/loader.ts`
+- interface `BundleSkillInfo` in `wiki-mcp/src/models/registry.ts`
+- constant `listModelSkillsTool` in `wiki-mcp/src/mcp/tools.ts`
 
 ## Data model
 `ModelRegistry` owns a `Map<bundleId, {id, specifier, pageTypes}>`, a memoized engine `Registry`, a generation counter, and a cache-bust counter (emits `ModelRegistryEvent`). `LanguageRegistry` owns `lang→analyzer` / `lang→specifier` maps; the analyzer contract types (`AnalyzerSymbol`, `AnalyzerReference`, `RenameResult`) feed the `symbol_index` / `reference_index` tables.
