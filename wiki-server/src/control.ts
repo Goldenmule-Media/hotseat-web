@@ -53,9 +53,23 @@ export interface ModelEvent {
  * schema-agnostic: it forwards a bundle **id + module specifier** and never imports the
  * bundle itself (the embedded `wiki-mcp` does the dynamic `import()`).
  */
+/**
+ * A Claude skill a bundle declares it ships with, plus the registry-derived install
+ * commands (mirrors wiki-mcp's `BundleSkillInfo`). Opaque to wiki-server — proxied verbatim.
+ */
+export interface ModelSkill {
+  readonly name: string;
+  readonly description: string;
+  readonly plugin: string;
+  readonly marketplace: string;
+  readonly marketplaceSource: string;
+  readonly command?: string;
+  readonly installCommands: readonly string[];
+}
+
 export interface ModelsControl {
   /** Loaded bundles (for `GET /_server/models`). */
-  list(): { id: string; specifier: string; types: string[] }[];
+  list(): { id: string; specifier: string; types: string[]; skills: ModelSkill[] }[];
   /** The current registry generation (bumps on every change). */
   generation(): number;
   /** Load or hard-replace a bundle, then rebind + reproject (awaits the whole reaction). */
@@ -274,7 +288,7 @@ function toInt(value: string | null): number | undefined {
  *
  * | Method · path | Action |
  * |---|---|
- * | `GET /_server/models` | `{ generation, bundles: [{ id, specifier, types }] }` |
+ * | `GET /_server/models` | `{ generation, bundles: [{ id, specifier, types, skills }] }` — each skill carries its `installCommands` |
  * | `POST /_server/models` · body `{ id, specifier }` | load (or hard-replace) a bundle → rebind + reproject |
  * | `POST /_server/models/<id>/reload` | re-import a known bundle's specifier (cache-busted) |
  * | `DELETE /_server/models/<id>` | hard-unregister a bundle |

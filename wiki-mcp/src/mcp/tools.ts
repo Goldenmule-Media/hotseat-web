@@ -42,6 +42,7 @@ import type { SqlReadModel } from "../readmodel/readmodel.js";
 import { createLanguageRegistry } from "../models/analyzers/index.js";
 import type { LanguageRegistry, RenameTarget } from "../models/language-registry.js";
 import { foldEmitters, type EmitterArchive, type EmitterConfigStore } from "../emitters/config-store.js";
+import type { ModelRegistry } from "../models/registry.js";
 import type { SessionTokenManager } from "./tokens.js";
 
 /**
@@ -78,6 +79,12 @@ export interface WikiToolContext {
    * tools need not wire one — the emitter tools degrade to "not configured" when absent.
    */
   readonly emitters?: EmitterConfigStore;
+  /**
+   * The live model registry (feature: model-packaged Claude skills). The running server
+   * always provides it; it is optional only so a test exercising other tools need not
+   * wire one — `listModelSkills` degrades to "not available" when absent.
+   */
+  readonly models?: ModelRegistry;
   readonly tokens: SessionTokenManager;
   /** The MCP session id (undefined for stdio) — the token-manager key. */
   readonly sessionId: string | undefined;
@@ -947,6 +954,36 @@ const listWorkspacesTool: WikiTool = {
   },
 };
 
+const listModelSkillsTool: WikiTool = {
+  name: "listModelSkills",
+  description:
+    "List the Claude skills packaged with the loaded model bundles — each with the exact Claude " +
+    "marketplace commands to run (in order) to install it. Optionally filter to one bundle id.",
+  inputSchema: obj({ bundleId: str('Filter to one loaded bundle id (e.g. "feature").') }, []),
+  write: false,
+  async handle(args, ctx) {
+    const models = ctx.models;
+    if (models === undefined) return { text: "Model registry not available on this server.", data: [] };
+    const bundleId = optStrOrNull(args, "bundleId");
+    const bundles = models.list().filter((b) => bundleId === null || b.id === bundleId);
+    if (bundleId !== null && bundles.length === 0) {
+      return { text: `Unknown bundle "${bundleId}" — nothing loaded under that id.`, data: [] };
+    }
+    const lines = bundles.flatMap((b) =>
+      b.skills.map(
+        (s) =>
+          `- ${b.id} → ${s.name}${s.command !== undefined ? ` (${s.command})` : ""}: ` +
+          `${s.installCommands.join(" ; ")} — ${s.description}`,
+      ),
+    );
+    const text =
+      lines.length === 0
+        ? `No packaged skills declared by ${bundleId === null ? "any loaded bundle" : `bundle "${bundleId}"`}.`
+        : lines.join("\n");
+    return { text, data: bundles };
+  },
+};
+
 const getPageTool: WikiTool = {
   name: "getPage",
   description: "Fetch one page's projected state (type, title, status, sections) from the read model.",
@@ -1517,6 +1554,7 @@ export function wikiTools(): readonly WikiTool[] {
     describeMutationsTool,
     describePageTypeTool,
     listWorkspacesTool,
+    listModelSkillsTool,
     getPageTool,
     treeTool,
     renderPageTool,

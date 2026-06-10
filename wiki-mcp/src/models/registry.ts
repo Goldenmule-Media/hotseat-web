@@ -8,13 +8,15 @@
  * it (a workspace with live events of a dropped type then halts).
  */
 import { Registry } from "wiki/registry";
+import type { IBundleSkillDecl } from "wiki/authoring";
 
-import { loadModelBundle, type PageTypeSet } from "./loader.js";
+import { loadModelBundle, type PageTypeSet, type SkillSet } from "./loader.js";
 
 interface Bundle {
   readonly id: string;
   readonly specifier: string;
   readonly pageTypes: PageTypeSet;
+  readonly skills: SkillSet;
 }
 
 /** Emitted (and AWAITED) on every registry change so the runtime can rebind + reproject. */
@@ -25,11 +27,19 @@ export interface ModelRegistryEvent {
   readonly bundleId: string;
 }
 
+/** A declared skill plus the host-derived install commands. */
+export interface BundleSkillInfo extends IBundleSkillDecl {
+  /** Derived, in order: `/plugin marketplace add <marketplaceSource>`, `/plugin install <plugin>@<marketplace>`. */
+  readonly installCommands: readonly string[];
+}
+
 /** A loaded bundle as seen by the control surface (`GET /_server/models`). */
 export interface BundleInfo {
   readonly id: string;
   readonly specifier: string;
   readonly types: string[];
+  /** The Claude skills the bundle declares it ships with (`[]` for most bundles). */
+  readonly skills: BundleSkillInfo[];
 }
 
 /** Specifier stamped on a bundle registered from already-loaded defs (no import to reload). */
@@ -76,21 +86,28 @@ export class ModelRegistry {
       id: b.id,
       specifier: b.specifier,
       types: b.pageTypes.map((p) => (p as { __def: { type: string } }).__def.type),
+      skills: b.skills.map((s) => ({
+        ...s,
+        installCommands: [
+          `/plugin marketplace add ${s.marketplaceSource}`,
+          `/plugin install ${s.plugin}@${s.marketplace}`,
+        ],
+      })),
     }));
   }
 
   /** Register a bundle from already-loaded defs (the initial/static set; no import). */
-  register(id: string, pageTypes: PageTypeSet): Promise<ModelRegistryEvent> {
+  register(id: string, pageTypes: PageTypeSet, skills: SkillSet = []): Promise<ModelRegistryEvent> {
     const reason = this.bundles.has(id) ? "reload" : "load";
-    this.bundles.set(id, { id, specifier: IN_MEMORY, pageTypes });
+    this.bundles.set(id, { id, specifier: IN_MEMORY, pageTypes, skills });
     return this.bump(reason, id);
   }
 
   /** Load (or hard-replace) a bundle `id` from its `specifier`, cache-busted, then bump the generation. */
   async load(id: string, specifier: string): Promise<ModelRegistryEvent> {
     const reason = this.bundles.has(id) ? "reload" : "load";
-    const { pageTypes } = await loadModelBundle(specifier, String(this.cacheBust++));
-    this.bundles.set(id, { id, specifier, pageTypes });
+    const { pageTypes, skills } = await loadModelBundle(specifier, String(this.cacheBust++));
+    this.bundles.set(id, { id, specifier, pageTypes, skills });
     return this.bump(reason, id);
   }
 

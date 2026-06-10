@@ -8,7 +8,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createLogger, type IConsolidatingLogger } from "../src/logger";
-import { startControlServer, type ControlServer, type ModelEvent, type ModelsControl } from "../src/control";
+import { startControlServer, type ControlServer, type ModelEvent, type ModelSkill, type ModelsControl } from "../src/control";
 
 const cleanups: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
@@ -26,9 +26,20 @@ function makeLogger(): IConsolidatingLogger {
   });
 }
 
+/** The skill the fake registry attaches to a loaded bundle (mirrors wiki-mcp's BundleSkillInfo). */
+const FAKE_SKILL: ModelSkill = {
+  name: "build-feature",
+  description: "FSM-gated feature builds.",
+  plugin: "hotseat",
+  marketplace: "hotseat",
+  marketplaceSource: "Goldenmule-Media/hotseat-web",
+  command: "/build-feature",
+  installCommands: ["/plugin marketplace add Goldenmule-Media/hotseat-web", "/plugin install hotseat@hotseat"],
+};
+
 /** A fake ModelsControl that records calls and bumps a generation, mimicking ModelRegistry. */
 function fakeModels(): { control: ModelsControl; calls: string[] } {
-  const bundles = new Map<string, { id: string; specifier: string; types: string[] }>();
+  const bundles = new Map<string, { id: string; specifier: string; types: string[]; skills: ModelSkill[] }>();
   const calls: string[] = [];
   let gen = 0;
   const event = (reason: string, bundleId: string): ModelEvent => ({ generation: ++gen, fingerprint: `fp-${gen}`, reason, bundleId });
@@ -37,7 +48,7 @@ function fakeModels(): { control: ModelsControl; calls: string[] } {
     generation: () => gen,
     load: async (id, specifier) => {
       calls.push(`load:${id}:${specifier}`);
-      bundles.set(id, { id, specifier, types: ["note"] });
+      bundles.set(id, { id, specifier, types: ["note"], skills: id === "feature" ? [FAKE_SKILL] : [] });
       return event("load", id);
     },
     reload: async (id) => {
@@ -85,9 +96,24 @@ describe("control: /_server/models (ADR-M6)", () => {
     expect((await res.json()).reason).toBe("load");
 
     res = await fetch(`${c.url}/_server/models`);
-    const listed = (await res.json()) as { generation: number; bundles: { id: string }[] };
+    const listed = (await res.json()) as { generation: number; bundles: { id: string; skills: ModelSkill[] }[] };
     expect(listed.bundles.map((b) => b.id)).toEqual(["feature"]);
     expect(listed.generation).toBe(1);
+    // The registry's skills (with derived installCommands) pass through verbatim.
+    expect(listed.bundles[0].skills).toEqual([FAKE_SKILL]);
+
+    // A skill-less bundle carries an empty skills array.
+    res = await fetch(`${c.url}/_server/models`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "toc", specifier: "/abs/dist/toc.js" }),
+    });
+    expect(res.status).toBe(200);
+    res = await fetch(`${c.url}/_server/models`);
+    const both = (await res.json()) as { bundles: { id: string; skills: ModelSkill[] }[] };
+    expect(both.bundles.find((b) => b.id === "toc")?.skills).toEqual([]);
+    res = await fetch(`${c.url}/_server/models/toc`, { method: "DELETE" });
+    expect(res.status).toBe(200);
 
     res = await fetch(`${c.url}/_server/models/feature/reload`, { method: "POST" });
     expect(res.status).toBe(200);
@@ -97,7 +123,13 @@ describe("control: /_server/models (ADR-M6)", () => {
     expect(res.status).toBe(200);
     expect((await res.json()).reason).toBe("unregister");
 
-    expect(calls).toEqual(["load:feature:/abs/dist/feature.js", "reload:feature", "unregister:feature"]);
+    expect(calls).toEqual([
+      "load:feature:/abs/dist/feature.js",
+      "load:toc:/abs/dist/toc.js",
+      "unregister:toc",
+      "reload:feature",
+      "unregister:feature",
+    ]);
   });
 
   it("400 on a bad POST body, 404 on an unknown bundle, 503 with no registry", async () => {

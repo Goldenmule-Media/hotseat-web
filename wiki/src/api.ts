@@ -371,6 +371,30 @@ export interface IWiki {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Model-bundle vocabulary (type-only — the engine never acts on it)
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A Claude skill a model bundle declares it ships with (a named `skills` export beside
+ * the bundle's page-type array). Model-declared metadata read generically by hosts —
+ * the engine carries the type vocabulary only and has no runtime behavior for it.
+ */
+export interface IBundleSkillDecl {
+  /** Skill name inside its plugin, e.g. `"build-feature"` (namespaced `<plugin>:<name>`). */
+  readonly name: string;
+  /** One-line description surfaced by discovery. */
+  readonly description: string;
+  /** The Claude plugin that ships the skill — a `plugins[].name` in the marketplace manifest. */
+  readonly plugin: string;
+  /** The marketplace id — the top-level `name` in `.claude-plugin/marketplace.json`. */
+  readonly marketplace: string;
+  /** Marketplace source for `/plugin marketplace add` — `owner/repo` or a checkout path. */
+  readonly marketplaceSource: string;
+  /** The slash command that invokes the skill, e.g. `"/build-feature"`. */
+  readonly command?: string;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Type-level helpers derived (pragmatically) from the page-type registry
 // ────────────────────────────────────────────────────────────────────────────
 

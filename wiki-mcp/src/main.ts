@@ -37,7 +37,7 @@ export type { McpTransport } from "./mcp/server.js";
 export type { RenderSink } from "./tail/render-sink.js";
 export type { LiveEmitter, EmitterArchive } from "./emitters/config-store.js";
 export { ModelRegistry } from "./models/registry.js";
-export type { ModelRegistryEvent, BundleInfo } from "./models/registry.js";
+export type { ModelRegistryEvent, BundleInfo, BundleSkillInfo } from "./models/registry.js";
 
 /**
  * Everything `createWikiMcp` needs: the resolved wire {@link WikiMcpConfig}, the
@@ -205,6 +205,7 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
     readModel,
     searchIndex,
     emitters,
+    models,
     namespace: config.namespace,
     logger: logger.child?.({ subsystem: "mcp" }) ?? logger,
     // A local commit doesn't fan out to its own handle's subscribers, so push each

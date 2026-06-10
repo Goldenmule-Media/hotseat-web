@@ -18,6 +18,10 @@ root). From any Claude Code session:
 To test changes before pushing: `/plugin marketplace add /path/to/hotseat-web`, then install,
 then `/plugin marketplace update hotseat` after edits.
 
+Discovery: the `feature` model bundle declares this plugin (a `skills` export in
+`wiki-models/src/feature/index.ts`), so a running server reports the skill and the exact
+install commands above — the `listModelSkills` MCP tool, or `GET :4438/_server/models`.
+
 ## Prerequisites (per machine)
 
 The skill talks to a running `wiki-server`; the plugin only carries the client wiring.

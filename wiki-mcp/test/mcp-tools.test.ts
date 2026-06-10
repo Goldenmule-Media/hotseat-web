@@ -34,6 +34,7 @@ import { buildStore, migrateToLatest, type ReadModelStore } from "../src/readmod
 import { ProjectionService } from "../src/tail/projection.js";
 import { engineEventSource } from "../src/tail/engine-source.js";
 import { SessionTokenManager } from "../src/mcp/tokens.js";
+import { ModelRegistry } from "../src/models/registry.js";
 import { wikiTools, type WikiTool, type WikiToolContext } from "../src/mcp/tools.js";
 import { readResource, workspaceUri, pageUri, type WikiResourceContext } from "../src/mcp/resources.js";
 
@@ -430,6 +431,56 @@ describe("MCP tools + token manager + resources", () => {
     await expect(
       tools.get("mutatePage")!.handle({ workspaceId: wsId, pageId, command: "publish", args: {} }, ctx(session)),
     ).rejects.toMatchObject({ code: "MUTATION_NOT_ALLOWED" });
+  });
+
+  it("listModelSkills reports each bundle's packaged skills with install commands; bundleId filters", async () => {
+    const models = new ModelRegistry();
+    await models.register("default", PAGE_TYPES);
+    await models.register(
+      "feature",
+      [],
+      [
+        {
+          name: "build-feature",
+          description: "FSM-gated feature builds.",
+          plugin: "hotseat",
+          marketplace: "hotseat",
+          marketplaceSource: "Goldenmule-Media/hotseat-web",
+          command: "/build-feature",
+        },
+      ],
+    );
+    const withModels = { ...ctx("s-skills"), models };
+
+    const tool = tools.get("listModelSkills")!;
+    expect(tool.write).toBe(false); // advertised with readOnlyHint via `!write` in server.ts
+
+    const all = await tool.handle({}, withModels);
+    const bundles = all.data as { id: string; skills: { installCommands: string[] }[] }[];
+    expect(bundles.map((b) => b.id).sort()).toEqual(["default", "feature"]);
+    expect(bundles.find((b) => b.id === "feature")!.skills[0].installCommands).toEqual([
+      "/plugin marketplace add Goldenmule-Media/hotseat-web",
+      "/plugin install hotseat@hotseat",
+    ]);
+    expect(all.text).toContain("/plugin install hotseat@hotseat");
+    expect(all.text).toContain("(/build-feature)");
+
+    const filtered = await tool.handle({ bundleId: "feature" }, withModels);
+    expect((filtered.data as unknown[]).length).toBe(1);
+
+    // A loaded bundle with no skills reports that plainly.
+    const skillLess = await tool.handle({ bundleId: "default" }, withModels);
+    expect(skillLess.text).toMatch(/No packaged skills/);
+
+    const unknown = await tool.handle({ bundleId: "nope" }, withModels);
+    expect(unknown.text).toMatch(/Unknown bundle "nope"/);
+    expect(unknown.data).toEqual([]);
+  });
+
+  it("listModelSkills degrades when no model registry is wired", async () => {
+    const res = await tools.get("listModelSkills")!.handle({}, ctx("s-skills"));
+    expect(res.text).toBe("Model registry not available on this server.");
+    expect(res.data).toEqual([]);
   });
 });
 

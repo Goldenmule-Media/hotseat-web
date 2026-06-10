@@ -8,11 +8,13 @@
  * we can't observe re-evaluation HERE; instead we assert the loader emits a **distinct
  * cache-busting URL per load** (the controllable half), which is what makes Node reload.
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
+
+import featurePageTypes, { skills as featureSkills } from "wiki-models/feature";
 
 import { loadModelBundle } from "../src/models/loader.js";
 import { ModelRegistry } from "../src/models/registry.js";
@@ -61,5 +63,83 @@ describe("ModelRegistry + loader (ADR-M6)", () => {
 
   it("rejects a bundle whose default export is not an array", async () => {
     await expect(loadModelBundle(tmpModule(`export default 42;`))).rejects.toThrow(/must default-export an array/);
+  });
+});
+
+// ── model-packaged Claude skills (the optional named `skills` export) ───────────────
+
+const SKILL = {
+  name: "build-feature",
+  description: "FSM-gated feature builds.",
+  plugin: "hotseat",
+  marketplace: "hotseat",
+  marketplaceSource: "Goldenmule-Media/hotseat-web",
+  command: "/build-feature",
+};
+
+function skillBundle(skill: Record<string, unknown>): string {
+  return tmpModule(`export default [];\nexport const skills = [${JSON.stringify(skill)}];`);
+}
+
+describe("model-packaged Claude skills", () => {
+  it("loads a bundle's named `skills` export beside its page types; absent → []", async () => {
+    const withSkills = await loadModelBundle(skillBundle(SKILL));
+    expect(withSkills.skills).toEqual([SKILL]);
+
+    const without = await loadModelBundle(tmpModule(`export default [];`));
+    expect(without.skills).toEqual([]);
+  });
+
+  it("rejects a malformed `skills` export with a descriptive contract error", async () => {
+    await expect(loadModelBundle(tmpModule(`export default [];\nexport const skills = 42;`))).rejects.toThrow(
+      /`skills` export that is not an array/,
+    );
+    const { command: _command, plugin: _plugin, ...missingPlugin } = SKILL;
+    await expect(loadModelBundle(skillBundle(missingPlugin))).rejects.toThrow(/missing the string field "plugin"/);
+    await expect(loadModelBundle(skillBundle({ ...SKILL, marketplace: 7 }))).rejects.toThrow(
+      /missing the string field "marketplace"/,
+    );
+    await expect(loadModelBundle(skillBundle({ ...SKILL, command: 7 }))).rejects.toThrow(
+      /command must be a string/,
+    );
+  });
+
+  it("list() derives installCommands from the declaration; in-memory register() declares none", async () => {
+    const reg = new ModelRegistry();
+    await reg.load("feature", skillBundle(SKILL));
+    expect(reg.list()[0].skills).toEqual([
+      {
+        ...SKILL,
+        installCommands: ["/plugin marketplace add Goldenmule-Media/hotseat-web", "/plugin install hotseat@hotseat"],
+      },
+    ]);
+
+    // The createWikiMcp seed path: already-loaded defs, no skills param.
+    await reg.register("default", featurePageTypes);
+    expect(reg.list().find((b) => b.id === "default")?.skills).toEqual([]);
+  });
+
+  it("reload threads skills; a replaced registration reflects new metadata", async () => {
+    const reg = new ModelRegistry();
+    await reg.load("feature", skillBundle(SKILL));
+    await reg.reload("feature"); // the reload path re-extracts skills via the loader
+    expect(reg.list()[0].skills[0].name).toBe("build-feature");
+
+    // Registry-level metadata replace — what a real Node reload delivers (the distinct
+    // ?v= per load, asserted above, is what makes Node re-evaluate; vitest caches imports).
+    await reg.register("feature", [], [{ ...SKILL, description: "v2" }]);
+    expect(reg.list()[0].skills[0].description).toBe("v2");
+  });
+
+  it("the feature bundle's declaration stays consistent with the repo's marketplace manifest", () => {
+    // Keeps the triple-named "hotseat" (marketplace.json / plugin.json / bundle decl) from drifting.
+    const marketplace = JSON.parse(
+      readFileSync(new URL("../../.claude-plugin/marketplace.json", import.meta.url), "utf8"),
+    ) as { name: string; plugins: { name: string }[] };
+    for (const skill of featureSkills) {
+      expect(skill.marketplace).toBe(marketplace.name);
+      expect(marketplace.plugins.map((p) => p.name)).toContain(skill.plugin);
+    }
+    expect(featureSkills.length).toBeGreaterThan(0);
   });
 });
