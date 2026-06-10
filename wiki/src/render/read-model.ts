@@ -164,8 +164,7 @@ function renderListField(
     return blocks.join("\n\n");
   }
   const template = sr.item ?? "{text}";
-  // "" → the caller's placeholder fallback (model-declared `sr.placeholder` or default).
-  if (f.elements.length === 0) return "";
+  if (f.elements.length === 0) return sr.placeholder ?? placeholder();
   if (sr.as === "checklist") {
     // A box is checked when the element status === checkedWhen.
     return bulletList(
@@ -176,20 +175,22 @@ function renderListField(
 }
 
 /**
- * Render a field's body, or "" when it is present but EMPTY — the caller falls back to
- * the model-declared `sr.placeholder` (or the engine default), so a declared placeholder
- * applies uniformly to missing AND empty fields.
+ * Render a field's body. A present-but-EMPTY field falls back to the model-declared
+ * `sr.placeholder` (or the engine default) — the same contract the caller applies to a
+ * MISSING field — so a declared placeholder applies uniformly. (Grouped lists render a
+ * per-group engine-default placeholder instead; see {@link renderListField}.)
  */
 function renderFieldBody(
   f: IField,
   sr: SectionRender,
   label: LabelResolver,
 ): string {
+  const empty = (): string => sr.placeholder ?? placeholder();
   switch (f.kind) {
     case "scalar":
-      return String(f.value);
+      return String(f.value).length === 0 ? empty() : String(f.value);
     case "prose":
-      return f.value;
+      return f.value.length === 0 ? empty() : f.value;
     case "code":
       return "```" + f.lang + "\n" + f.source + "\n```";
     case "attachment-ref":
@@ -197,7 +198,7 @@ function renderFieldBody(
     case "ref":
       return label(f.target);
     case "blocks":
-      return f.blocks.length === 0 ? "" : renderBlocks(f.blocks, label);
+      return f.blocks.length === 0 ? empty() : renderBlocks(f.blocks, label);
     case "list":
       return renderListField(f, sr, label);
   }

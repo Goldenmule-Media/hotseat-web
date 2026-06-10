@@ -160,6 +160,19 @@ describe("document: authoring and deterministic rendering", () => {
     await addBlock("addExternalLink", { href: "https://example.com/spec", text: "the upstream spec" });
     expect(await body()).toContain("[the upstream spec](https://example.com/spec)");
   });
+
+  it("setParagraph rejects a non-paragraph target instead of silently converting it", async () => {
+    const before = await ws.toMarkdown(doc);
+    await expect(ws.mutate(doc, "setParagraph", { blockId: codeId, text: "oops" })).rejects.toThrow(/only edits paragraphs/);
+    expect(await ws.toMarkdown(doc)).toBe(before); // the code block survives
+  });
+
+  it("rejects malformed args at the curated schema: empty text, fence-corrupting language", async () => {
+    await expect(ws.mutate(doc, "addParagraph", { text: "" })).rejects.toThrow();
+    // "```" + language renders verbatim into the fence line — whitespace/backticks are barred.
+    await expect(ws.mutate(doc, "addCode", { language: "ts\n# pwned", source: "x" })).rejects.toThrow();
+    await expect(ws.mutate(doc, "addCode", { language: "", source: "x" })).rejects.toThrow();
+  });
 });
 
 describe("document: determinism across instances", () => {

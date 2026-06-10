@@ -330,7 +330,8 @@ export const Architecture = definePageType({
     title: "{title}",
     graphSections: false,
     // A `placeholder` applies to derived sections and to missing OR empty fields alike;
-    // sections without one fall back to the engine default `_None._`.
+    // sections without one fall back to the engine default `_None._`. (Grouped list
+    // sections are the exception: each empty group renders the engine default.)
     sections: [
       { section: "summary", field: "kind", heading: "Kind", as: "inline" },
       { section: "summary", field: "body", heading: "Summary", as: "block" },
