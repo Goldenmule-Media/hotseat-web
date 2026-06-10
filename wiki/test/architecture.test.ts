@@ -131,12 +131,12 @@ describe("architecture: a typed graph node describing the codebase", () => {
 
   it("materializes Design notes empty on a fresh page (no backfill); add returns an id, remove clears it", async () => {
     const node = (await ws.createPage("architecture", { title: "NoteLifecycle", parentId: null })).value;
-    // The required blocks section auto-materializes empty at fold time → engine default placeholder.
-    expect(block(await ws.toMarkdown(node), "Design notes")).toBe("_None._");
+    // The required blocks section auto-materializes empty at fold time → the model-declared placeholder.
+    expect(block(await ws.toMarkdown(node), "Design notes")).toBe("_No design notes._");
     const n = (await ws.mutate(node, "addNote", { text: "x" })).value as { blockId: string };
     expect(n.blockId).toBeTruthy();
     await ws.mutate(node, "removeNote", { blockId: n.blockId });
-    expect(block(await ws.toMarkdown(node), "Design notes")).toBe("_None._");
+    expect(block(await ws.toMarkdown(node), "Design notes")).toBe("_No design notes._");
   });
 
   it("drives the current⇄stale freshness lifecycle and rejects off-FSM events", async () => {

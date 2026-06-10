@@ -329,9 +329,8 @@ export const Architecture = definePageType({
   render: {
     title: "{title}",
     graphSections: false,
-    // NOTE: a `placeholder` is honored for DERIVED sections and missing fields, but an empty
-    // scalar/prose/list field renders the engine default `_None._` (renderFieldBody), so we
-    // set placeholders only on the derived rows where they actually apply.
+    // A `placeholder` applies to derived sections and to missing OR empty fields alike;
+    // sections without one fall back to the engine default `_None._`.
     sections: [
       { section: "summary", field: "kind", heading: "Kind", as: "inline" },
       { section: "summary", field: "body", heading: "Summary", as: "block" },
