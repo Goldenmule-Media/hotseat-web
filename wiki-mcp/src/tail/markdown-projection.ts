@@ -25,7 +25,7 @@
  * It is OFF by default, scoped to an allowlist of workspaces, single-writer (one owning
  * process per `root`, documented not enforced), and writes ONLY under `root`.
  */
-import { access, mkdir, readFile, rename, rm, rmdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, rmdir, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { dirname, join, posix } from "node:path";
 
@@ -221,11 +221,13 @@ export class MarkdownDiskProjector implements RenderSink {
 
   /**
    * Load the persisted manifest (best-effort: a missing/corrupt manifest starts empty →
-   * full rebuild), then VERIFY it against disk: a manifest entry whose file is missing is
-   * dropped and its workspace's version zeroed, so the next reconcile rebuilds instead of
-   * hash-skipping files that no longer exist. Without this, a partially-wiped output dir
-   * never self-heals — `appliedVersion` reports current and `writeIfChanged` dedupes on
-   * the stale hash, so re-registering the emitter is a no-op.
+   * full rebuild), then VERIFY it against disk: a manifest entry whose file is missing —
+   * or whose bytes no longer hash to the recorded value (an out-of-band edit, e.g. a git
+   * checkout over the mirror) — is dropped and its workspace's version zeroed, so the
+   * next reconcile rebuilds instead of hash-skipping stale or absent files. Without this,
+   * a partially-wiped or externally-touched output dir never self-heals —
+   * `appliedVersion` reports current and `writeIfChanged` dedupes on the recorded hash,
+   * so re-registering the emitter is a no-op.
    */
   async init(): Promise<void> {
     return withRootLock(this.cfg.root, () => this.initLocked());
@@ -240,23 +242,27 @@ export class MarkdownDiskProjector implements RenderSink {
       return;
     }
     for (const [workspace, m] of Object.entries(this.manifest)) {
-      let missing = 0;
-      for (const rel of Object.keys(m.files)) {
+      let stale = 0;
+      for (const [rel, hash] of Object.entries(m.files)) {
+        let ok = false;
         try {
-          await access(join(this.cfg.root, rel));
+          ok = sha256(await readFile(join(this.cfg.root, rel), "utf8")) === hash;
         } catch {
+          // missing/unreadable → not ok
+        }
+        if (!ok) {
           delete m.files[rel];
-          missing++;
+          stale++;
         }
       }
-      if (missing === 0) continue;
+      if (stale === 0) continue;
       for (const [pageId, rel] of Object.entries(m.pages)) {
         if (m.files[rel] === undefined) delete m.pages[pageId];
       }
       m.version = 0; // lag the sink so the next reconcile/commit takes the rebuild path
-      this.logger.warn("markdown-disk manifest claimed missing files; forcing a rebuild", {
+      this.logger.warn("markdown-disk manifest disagreed with disk; forcing a rebuild", {
         workspace,
-        missing,
+        stale,
       });
     }
   }

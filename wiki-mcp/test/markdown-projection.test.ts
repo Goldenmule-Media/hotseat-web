@@ -5,7 +5,7 @@
  * the on-disk Markdown tree tracks the wiki: byte-identical to the render, nested per the page
  * tree, no churn on unchanged pages, and correct on rename / reparent / archive / restart.
  */
-import { access, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
+import { access, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -318,7 +318,7 @@ describe("markdown-disk projection — live filesystem mirror", () => {
     expect(await read("docs/top.md")).toBe(await ws.toMarkdown(top));
   });
 
-  it("init() verifies the manifest against disk — a partially-wiped tree self-heals", async () => {
+  it("init() verifies the manifest against disk — missing AND stale files self-heal", async () => {
     await enableMirror();
     const ws = await engine.createWorkspace({ name: "Docs" });
     const { value: a } = await ws.createPage("note", { title: "Alpha", parentId: null });
@@ -327,20 +327,23 @@ describe("markdown-disk projection — live filesystem mirror", () => {
     await ws.mutate(b, "setBody", { text: "beta" });
     await drain();
     const alpha = await read("docs/alpha.md");
+    const beta = await read("docs/beta.md");
 
-    // Delete ONE mirrored file but keep the manifest (the incident shape: the manifest
-    // claimed files that were missing on disk, and re-registering the emitter no-opped).
+    // Delete one mirrored file and overwrite another out-of-band, keeping the manifest
+    // (the incident shape: the manifest claimed files missing on disk — and a git
+    // checkout restored stale bytes behind a current hash — and re-registering no-opped).
     await rm(join(root, "docs/alpha.md"));
+    await writeFile(join(root, "docs/beta.md"), "stale bytes from a git checkout\n", "utf8");
 
     const restarted = new MarkdownDiskProjector(cfg(), silentLogger);
-    await restarted.init(); // must detect the missing file, not trust the manifest
+    await restarted.init(); // must detect both, not trust the manifest
     const projection2 = new ProjectionService(store.db, PAGE_TYPES, readModel, silentLogger);
     projection2.addRenderSink(restarted);
     await projection2.reconcileSinks(engineEventSource(engine));
 
     expect(await exists("docs/alpha.md")).toBe(true);
     expect(await read("docs/alpha.md")).toBe(alpha);
-    expect(await read("docs/beta.md")).toBe(await ws.toMarkdown(b));
+    expect(await read("docs/beta.md")).toBe(beta);
   });
 
   it("self-heals on restart — reconciles a wiped output directory against head", async () => {
