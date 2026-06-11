@@ -25,7 +25,7 @@
  * It is OFF by default, scoped to an allowlist of workspaces, single-writer (one owning
  * process per `root`, documented not enforced), and writes ONLY under `root`.
  */
-import { mkdir, readFile, rename, rm, rmdir, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, rm, rmdir, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { dirname, join, posix } from "node:path";
 
@@ -122,6 +122,44 @@ function siblingSlug(pageId: PageId, state: IWorkspaceState): string {
   return base;
 }
 
+/**
+ * True iff `pageId`'s mirror path can be computed faithfully from this fold: it resolves
+ * to the stable id-keyed `.archived/` form before the ancestor walk needs a missing node,
+ * or its whole parent chain is present. A chain broken by a page the fold skipped
+ * (`state.retired` — a not-yet-loaded or retired type) silently TRUNCATES the path
+ * {@link pageRelPath} computes, so such a page must be left where it is on disk rather
+ * than moved or swept (boot-race bug: an early partial-registry rebuild deleted the
+ * mirrored files of every page under an unregistered-type ancestor).
+ */
+function hasReliablePath(pageId: PageId, state: IWorkspaceState): boolean {
+  if (state.status === "archived") return true; // whole workspace → id-keyed .archived paths
+  let cur: PageId | null = pageId;
+  const seen = new Set<string>();
+  while (cur !== null && !seen.has(cur)) {
+    seen.add(cur);
+    const node = state.pages.get(cur);
+    if (node === undefined) return false; // broken chain → pageRelPath would truncate
+    if (node.archived === true) return true; // id-keyed .archived path from here up
+    cur = node.parentId as PageId | null;
+  }
+  return true;
+}
+
+/**
+ * Per-root write serialization. Reconciles and deltas for ONE root can arrive from
+ * several callers at once (the live tail, a model-reload reproject, a boot/runtime
+ * emitter back-fill — possibly via a REPLACED projector instance for the same root), and
+ * the manifest + tree mutations interleave destructively. The lock is keyed by root and
+ * module-global so it also covers two projector instances over the same directory.
+ */
+const rootLocks = new Map<string, Promise<unknown>>();
+function withRootLock<T>(root: string, fn: () => Promise<T>): Promise<T> {
+  const prev = rootLocks.get(root) ?? Promise.resolve();
+  const run = prev.then(fn, fn);
+  rootLocks.set(root, run.catch(() => undefined));
+  return run;
+}
+
 /** The directory archived pages' files live under, inside the workspace directory. */
 const ARCHIVED_DIR = ".archived";
 
@@ -181,13 +219,45 @@ export class MarkdownDiskProjector implements RenderSink {
     private readonly logger: Logger,
   ) {}
 
-  /** Load the persisted manifest (best-effort: a missing/corrupt manifest starts empty → full rebuild). */
+  /**
+   * Load the persisted manifest (best-effort: a missing/corrupt manifest starts empty →
+   * full rebuild), then VERIFY it against disk: a manifest entry whose file is missing is
+   * dropped and its workspace's version zeroed, so the next reconcile rebuilds instead of
+   * hash-skipping files that no longer exist. Without this, a partially-wiped output dir
+   * never self-heals — `appliedVersion` reports current and `writeIfChanged` dedupes on
+   * the stale hash, so re-registering the emitter is a no-op.
+   */
   async init(): Promise<void> {
+    return withRootLock(this.cfg.root, () => this.initLocked());
+  }
+
+  private async initLocked(): Promise<void> {
     try {
       const raw = await readFile(join(this.cfg.root, MANIFEST_FILE), "utf8");
       this.manifest = JSON.parse(raw) as Manifest;
     } catch {
       this.manifest = {};
+      return;
+    }
+    for (const [workspace, m] of Object.entries(this.manifest)) {
+      let missing = 0;
+      for (const rel of Object.keys(m.files)) {
+        try {
+          await access(join(this.cfg.root, rel));
+        } catch {
+          delete m.files[rel];
+          missing++;
+        }
+      }
+      if (missing === 0) continue;
+      for (const [pageId, rel] of Object.entries(m.pages)) {
+        if (m.files[rel] === undefined) delete m.pages[pageId];
+      }
+      m.version = 0; // lag the sink so the next reconcile/commit takes the rebuild path
+      this.logger.warn("markdown-disk manifest claimed missing files; forcing a rebuild", {
+        workspace,
+        missing,
+      });
     }
   }
 
@@ -215,12 +285,24 @@ export class MarkdownDiskProjector implements RenderSink {
     state: IWorkspaceState,
   ): Promise<void> {
     if (!this.mirrors(workspace)) return;
+    return withRootLock(this.cfg.root, () => this.applyDeltaLocked(workspace, version, docs, removed, state));
+  }
+
+  private async applyDeltaLocked(
+    workspace: WorkspaceId,
+    version: number,
+    docs: readonly SearchDoc[],
+    removed: readonly PageId[],
+    state: IWorkspaceState,
+  ): Promise<void> {
     const m = this.wsManifest(workspace);
     const wsDir = workspaceDir(state);
     let written = 0;
     const removedPaths: string[] = [];
 
     for (const id of removed) {
+      // Absent from the fold because its type isn't registered (yet) ≠ deleted — keep the file.
+      if (state.retired?.has(id) === true) continue;
       const rel = m.pages[id];
       if (rel !== undefined) {
         removedPaths.push(rel);
@@ -252,6 +334,12 @@ export class MarkdownDiskProjector implements RenderSink {
    * with no corresponding expected path (deletes, the old path after a reparent/rename, a live
    * path after its page is archived — its content is in the expected set at `.archived/`).
    * `docs` is every page's render (the shared whole render), archived pages included.
+   *
+   * Pages the fold could not see are FROZEN, never swept: a page in `state.retired` (its
+   * type isn't registered — a boot still loading bundles, or a genuinely retired type) and
+   * any page whose path a retired ancestor would truncate ({@link hasReliablePath}) keep
+   * their tracked file + manifest entry untouched. "Unfoldable" is not "deleted"; a later
+   * rebuild with the full registry converges the tree and sweeps real orphans.
    */
   async rebuild(
     workspace: WorkspaceId,
@@ -260,15 +348,31 @@ export class MarkdownDiskProjector implements RenderSink {
     state: IWorkspaceState,
   ): Promise<void> {
     if (!this.mirrors(workspace)) return;
+    return withRootLock(this.cfg.root, () => this.rebuildLocked(workspace, version, docs, state));
+  }
+
+  private async rebuildLocked(
+    workspace: WorkspaceId,
+    version: number,
+    docs: readonly SearchDoc[],
+    state: IWorkspaceState,
+  ): Promise<void> {
     const m = this.wsManifest(workspace);
     const wsDir = workspaceDir(state);
     const bodyByPage = new Map<string, string>(docs.map((d) => [d.pageId, d.body]));
 
-    // Expected: every page maps to a path — live pages onto the tree, effectively-archived
-    // pages (including every page of an archived WORKSPACE) onto stable `.archived/<id>.md`
-    // files. Archiving therefore MOVES content; nothing but a hard delete removes it.
+    // Expected: every reliably-pathed page maps to a path — live pages onto the tree,
+    // effectively-archived pages (including every page of an archived WORKSPACE) onto stable
+    // `.archived/<id>.md` files. Archiving therefore MOVES content; nothing but a hard
+    // delete removes it. Pages whose path would be truncated by a retired ancestor are
+    // frozen instead of written somewhere wrong.
     const expected = new Map<string, { pageId: string; body: string }>();
+    const frozen: string[] = [...(state.retired ?? [])];
     for (const node of state.pages.values()) {
+      if (!hasReliablePath(node.id as PageId, state)) {
+        frozen.push(node.id);
+        continue;
+      }
       const pageRel = pageRelPath(node.id as PageId, state);
       expected.set(posix.join(wsDir, pageRel), { pageId: node.id, body: bodyByPage.get(node.id) ?? "" });
     }
@@ -282,15 +386,33 @@ export class MarkdownDiskProjector implements RenderSink {
       nextFiles[rel] = m.files[rel]!; // writeIfChanged guarantees a hash for every expected file
     }
 
-    // Orphans: any tracked file not in the new expected set (deletes, archives, old paths after moves).
-    const orphans = Object.keys(m.files).filter((rel) => !expected.has(rel));
+    // Frozen pages keep their last-known file + manifest entry verbatim (no write, no move).
+    const kept = new Set<string>();
+    for (const pageId of frozen) {
+      const rel = m.pages[pageId];
+      if (rel === undefined || expected.has(rel)) continue;
+      nextPages[pageId] = rel;
+      if (m.files[rel] !== undefined) nextFiles[rel] = m.files[rel];
+      kept.add(rel);
+    }
+
+    // Orphans: any tracked file not in the new expected set (deletes, archives, old paths
+    // after moves) — frozen pages' files excepted.
+    const orphans = Object.keys(m.files).filter((rel) => !expected.has(rel) && !kept.has(rel));
     await this.removeFiles(orphans);
 
     m.files = nextFiles;
     m.pages = nextPages;
     m.version = version;
     await this.persist();
-    this.logger.info("markdown-disk reconciled", { workspace, version, written, removed: orphans.length, pages: expected.size });
+    this.logger.info("markdown-disk reconciled", {
+      workspace,
+      version,
+      written,
+      removed: orphans.length,
+      pages: expected.size,
+      ...(frozen.length > 0 ? { frozen: frozen.length } : {}),
+    });
   }
 
   /** Disk has no token-gated waiters; just surface the failure for operability. */

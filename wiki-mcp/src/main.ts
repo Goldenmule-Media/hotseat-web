@@ -182,9 +182,13 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
   await emitterRegistry.start();
 
   // ── model hot-reload (ADR-M6) ──
-  // On a registry change, rebind the engine + the projection's registry, reproject the
-  // read model, and RE-ATTACH the live tail (the old engine's stream subscriptions died
-  // with its handles). `models.load/reload/unregister` await this whole reaction.
+  // On a registry change, STOP the live tail first — its per-workspace runners and the
+  // discovery poll would otherwise re-project workspaces concurrently with the reproject
+  // below, racing whole-tree rebuilds into the same render sinks (the boot-race bug that
+  // corrupted Markdown mirrors). Then rebind the engine + the projection's registry,
+  // reproject the read model, and re-attach a fresh tail (the old engine's stream
+  // subscriptions died with its handles anyway). `models.load/reload/unregister` await
+  // this whole reaction.
   const modelLogger = logger.child?.({ subsystem: "models" }) ?? logger;
   models.onChange = async (event) => {
     modelLogger.info("model registry changed", {
@@ -192,10 +196,10 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
       bundleId: event.bundleId,
       generation: event.generation,
     });
+    projection.stopLive();
     await engine.rebind(models.pageTypes());
     projection.rebind(models.current());
     await projection.reproject(source);
-    projection.stopLive();
     await projection.start(source, discoverOpts);
   };
 

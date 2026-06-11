@@ -40,6 +40,7 @@ const stateOf = (
   pages: new Map(nodes.map((n) => [n.id, n])),
   children: new Map(),
   links: links.map((l) => ({ from: l.from as PageId, to: l.to as PageId, role: l.role })),
+  retired: new Set(),
   version,
 });
 

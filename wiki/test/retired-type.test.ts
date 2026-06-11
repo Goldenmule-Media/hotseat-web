@@ -51,6 +51,10 @@ describe("retired page type: folded as absent, never bricks the fold", () => {
     // And the parent's child list no longer dangles a pointer to the skipped page.
     const briefId = [...state.pages.values()].find((p) => p.type === "feature-brief")!.id;
     expect(state.children.get(briefId)).not.toContain(testPlanId);
+
+    // The skip is EXPOSED on the state: "absent because unfoldable" is distinguishable
+    // from "deleted", so derived-artifact consumers (the Markdown mirror) never destroy.
+    expect(state.retired.has(testPlanId)).toBe(true);
   });
 
   it("an EMPTY registry still THROWS (boot race: models not loaded yet → halt + retry)", () => {
@@ -61,5 +65,6 @@ describe("retired page type: folded as absent, never bricks the fold", () => {
     const full = new Registry([FeatureBrief, ImplementationPlan, TestingPlan, FeatureSpec]);
     const state = foldWorkspace(history, full);
     expect(state.pages.has(testPlanId)).toBe(true);
+    expect(state.retired.size).toBe(0);
   });
 });

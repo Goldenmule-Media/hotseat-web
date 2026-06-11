@@ -40,6 +40,7 @@ export function serializeState(state: IWorkspaceState): SerializedWorkspaceState
     pages,
     children,
     links,
+    retired: [...state.retired] as string[],
   };
 }
 
@@ -67,6 +68,8 @@ export function deserializeState(ser: SerializedWorkspaceState): IWorkspaceState
     pages,
     children,
     links,
+    // A pre-`retired` snapshot lacks the field — start empty (the tail re-skips as it folds).
+    retired: new Set((ser.retired ?? []) as PageId[]),
   };
 }
 

@@ -249,6 +249,13 @@ export interface IWorkspaceState {
   children: Map<PageId | RootId, PageId[]>;
   /** graph edges beyond the tree. */
   links: { from: PageId; to: PageId; role: string }[];
+  /**
+   * Ids of pages the fold SKIPPED because their type is not in the registry (a retired
+   * type — or one whose bundle has not loaded yet). Absent from `pages`, but "absent
+   * because unfoldable" is not "deleted": consumers that destroy derived artifacts
+   * (e.g. the Markdown-disk mirror sweeping orphan files) must treat them as existing.
+   */
+  retired: Set<PageId>;
   /** per-workspace, == stream length (event count). */
   version: number;
 }

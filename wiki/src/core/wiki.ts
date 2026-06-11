@@ -427,6 +427,7 @@ function seedEmptyProjection(id: WorkspaceId): BusProjection {
     pages: new Map(),
     children: new Map([[ROOT, []]]),
     links: [],
+    retired: new Set(),
     version: 0,
   };
   return {

@@ -19,6 +19,7 @@ function workspaceWith(node: IPageNode): IWorkspaceState {
     pages: new Map([[node.id, node]]),
     children: new Map(),
     links: [],
+    retired: new Set(),
     version: 1,
   };
 }

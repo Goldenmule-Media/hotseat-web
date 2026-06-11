@@ -44,6 +44,8 @@ export interface SerializedWorkspaceState {
   readonly pages: IPageNode[];
   readonly children: [parent: PageOrRootKey, childIds: string[]][];
   readonly links: { from: string; to: string; role: string }[];
+  /** Pages skipped as retired-type during the fold; optional — absent in older snapshots. */
+  readonly retired?: string[];
 }
 
 export type PageOrRootKey = string; // PageId | "@root"

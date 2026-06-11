@@ -160,6 +160,7 @@ export function emptyWorkspace(created: IEventEnvelope): IWorkspaceState {
     pages: new Map<PageId, IPageNode>(),
     children,
     links: [],
+    retired: new Set<PageId>(),
     version: created.version + 1,
   };
 }
@@ -239,15 +240,15 @@ function isRetiredType(registry: Registry, type: string): boolean {
  * page type's `apply`. Unknown page/event types → {@link UnknownPageTypeError}.
  *
  * `skipped` accumulates the ids of pages whose type was RETIRED (see {@link isRetiredType});
- * every later event targeting such a page is folded as a no-op. Full folds
- * ({@link foldWorkspace}) thread one set across the whole history; the incremental tail
- * caller passes none (new commits never carry a retired type — the command bus rejects them).
+ * every later event targeting such a page is folded as a no-op. It defaults to (and is
+ * normally) `state.retired`, so the set persists across a full fold AND incremental tail
+ * applies — a content event arriving later for a retired page still skips.
  */
 export function applyWorkspace(
   state: IWorkspaceState,
   event: IEventEnvelope,
   registry: Registry,
-  skipped: Set<PageId> = new Set(),
+  skipped: Set<PageId> = state.retired ?? new Set(),
 ): IWorkspaceState {
   if (isStructuralEvent(event.type)) {
     return applyStructural(state, event, registry, skipped);
@@ -484,14 +485,15 @@ export function foldWorkspace(
   from?: { state: IWorkspaceState; fromVersion: number },
 ): IWorkspaceState {
   let state: IWorkspaceState | undefined = from?.state;
+  // A snapshot deserialized by an older build may predate `retired`; the skip set must
+  // be a single accumulating instance, so materialize it before any apply.
+  if (state !== undefined && (state.retired as Set<PageId> | undefined) === undefined) {
+    state.retired = new Set<PageId>();
+  }
   const fromVersion = from?.fromVersion ?? -1;
 
   let lastVersion = state !== undefined ? state.version - 1 : -1;
   let seeded = state !== undefined;
-
-  // Ids of pages whose type was retired (folded as absent); threaded across the whole
-  // history so a retired page's later content/structural events skip too.
-  const skipped = new Set<PageId>();
 
   for (const event of events) {
     // Snapshot skip: events already baked into the `from` state.
@@ -515,7 +517,9 @@ export function foldWorkspace(
       );
     }
 
-    state = applyWorkspace(state as IWorkspaceState, event, registry, skipped);
+    // Retired-page skips accumulate on `state.retired` (the applyWorkspace default), so
+    // a retired page's later content/structural events skip across the whole history.
+    state = applyWorkspace(state as IWorkspaceState, event, registry);
     (state as IWorkspaceState).version = event.version + 1;
     lastVersion = event.version;
   }

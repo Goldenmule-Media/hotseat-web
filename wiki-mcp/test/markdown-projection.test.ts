@@ -39,7 +39,21 @@ const Note = definePageType({
   render: { sections: [{ section: "body", heading: "Body", field: "text", as: "block" }] },
 });
 
-const PAGE_TYPES = [Note] as const;
+const Folder = definePageType({
+  type: "folder",
+  version: 1,
+  initialStatus: "open",
+  statusTransitions: [t("open", "close", "closed")],
+  sections: {
+    body: { name: "Body", required: true, mutableIn: ["open"], fields: { text: { kind: "prose" } } },
+  },
+  commands: {
+    setBody: { args: zodSchema(z.object({ text: z.string() })), target: { section: "body", field: "text" }, set: { text: arg("text") } },
+  },
+  render: { sections: [{ section: "body", heading: "Body", field: "text", as: "block" }] },
+});
+
+const PAGE_TYPES = [Note, Folder] as const;
 const NAMESPACE = "test";
 
 function clock(): () => string {
@@ -263,6 +277,70 @@ describe("markdown-disk projection — live filesystem mirror", () => {
     await drain();
     expect(await exists("docs/guide.md")).toBe(true); // restored to the tree
     expect(await exists(archivedRel)).toBe(false);
+  });
+
+  it("a partial-registry rebuild freezes unfoldable pages — never deletes their files (boot race)", async () => {
+    const projector = await enableMirror();
+    const ws = await engine.createWorkspace({ name: "Docs" });
+    const { value: folder } = await ws.createPage("folder", { title: "Section", parentId: null });
+    await ws.mutate(folder, "setBody", { text: "the folder page" });
+    const { value: child } = await ws.createPage("note", { title: "Inside", parentId: folder });
+    await ws.mutate(child, "setBody", { text: "child content" });
+    const { value: top } = await ws.createPage("note", { title: "Top", parentId: null });
+    await ws.mutate(top, "setBody", { text: "top content" });
+    await drain();
+    expect(await exists("docs/section/index.md")).toBe(true);
+    expect(await exists("docs/section/inside.md")).toBe(true);
+    expect(await exists("docs/top.md")).toBe(true);
+    const folderBytes = await read("docs/section/index.md");
+    const childBytes = await read("docs/section/inside.md");
+
+    // A model-reload reproject mid-boot: the registry knows `note` but not (yet) `folder`.
+    // The fold skips the folder page as retired AND truncates its child's path — both must
+    // be frozen on disk, not swept as orphans or rewritten somewhere wrong.
+    const partial = new ProjectionService(store.db, [Note], readModel, silentLogger);
+    partial.addRenderSink(projector);
+    await partial.reproject(engineEventSource(engine));
+
+    expect(await exists("docs/section/index.md")).toBe(true); // retired type → frozen
+    expect(await read("docs/section/index.md")).toBe(folderBytes);
+    expect(await exists("docs/section/inside.md")).toBe(true); // truncated path → frozen
+    expect(await read("docs/section/inside.md")).toBe(childBytes);
+    expect(await exists("docs/inside.md")).toBe(false); // never written at the truncated path
+    expect(await exists("docs/top.md")).toBe(true); // reliable pages still maintained
+
+    // Once the full registry lands (the last bundle loaded), the mirror converges cleanly.
+    const full = new ProjectionService(store.db, PAGE_TYPES, readModel, silentLogger);
+    full.addRenderSink(projector);
+    await full.reproject(engineEventSource(engine));
+    expect(await read("docs/section/index.md")).toBe(await ws.toMarkdown(folder));
+    expect(await read("docs/section/inside.md")).toBe(await ws.toMarkdown(child));
+    expect(await read("docs/top.md")).toBe(await ws.toMarkdown(top));
+  });
+
+  it("init() verifies the manifest against disk — a partially-wiped tree self-heals", async () => {
+    await enableMirror();
+    const ws = await engine.createWorkspace({ name: "Docs" });
+    const { value: a } = await ws.createPage("note", { title: "Alpha", parentId: null });
+    await ws.mutate(a, "setBody", { text: "alpha" });
+    const { value: b } = await ws.createPage("note", { title: "Beta", parentId: null });
+    await ws.mutate(b, "setBody", { text: "beta" });
+    await drain();
+    const alpha = await read("docs/alpha.md");
+
+    // Delete ONE mirrored file but keep the manifest (the incident shape: the manifest
+    // claimed files that were missing on disk, and re-registering the emitter no-opped).
+    await rm(join(root, "docs/alpha.md"));
+
+    const restarted = new MarkdownDiskProjector(cfg(), silentLogger);
+    await restarted.init(); // must detect the missing file, not trust the manifest
+    const projection2 = new ProjectionService(store.db, PAGE_TYPES, readModel, silentLogger);
+    projection2.addRenderSink(restarted);
+    await projection2.reconcileSinks(engineEventSource(engine));
+
+    expect(await exists("docs/alpha.md")).toBe(true);
+    expect(await read("docs/alpha.md")).toBe(alpha);
+    expect(await read("docs/beta.md")).toBe(await ws.toMarkdown(b));
   });
 
   it("self-heals on restart — reconciles a wiped output directory against head", async () => {
