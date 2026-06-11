@@ -1,6 +1,6 @@
 {
   "ws:mpzncs2z-0001-2wgv51": {
-    "version": 1834,
+    "version": 1835,
     "files": {
       "hotseat-wiki/architecture/index.md": "fea57d534a3aa7ca70deabb6089650bb28b9562fa7bd01d010cae03f89ebf5cc",
       "hotseat-wiki/feature-specs/index.md": "f39d08db07e0ed57f225cb9f5c595b09681c1f99fbc6753333f70742a6cb5dad",
@@ -97,8 +97,8 @@
       "hotseat-wiki/.archived/testing-plan--mq858obw-007t-um5okl.md": "5662d74c5f1d6587ac2770f209f83f13ca7518bea4bbd6691919c8b0617a7d9b",
       "hotseat-wiki/.archived/feature-spec--mq858obw-007u-czpbbd.md": "a9865de56c482b09ab526f6a725930ab89610afa0bffed8387308255a3b36092",
       "hotseat-wiki/architecture/wiki-models/bug-report.md": "4fb47393435e0661f5b1a83367ad3b639d21cebcf3db43af2b62cf6b16910ecd",
-      "hotseat-wiki/bugs/index.md": "44dfc512fbe3712d52d16512796de2fc19d1fa204a8852a0b8f36b899e750e98",
-      "hotseat-wiki/bugs/boot-time-emitter-back-fill-races-model-bundle-registration-and-deletes-mirrored-files.md": "18fb0a4b3ce2e49f22bc7480ba30372bc654c706bcbe0a2c83e7bb3b5a9a47ca",
+      "hotseat-wiki/bugs/index.md": "47541c840af8d9303497041b2734813a2791f48b6e2e0e067907a41ff58b4e3b",
+      "hotseat-wiki/.archived/bug-report--mq9ntvvm-000n-d6gkn7.md": "18fb0a4b3ce2e49f22bc7480ba30372bc654c706bcbe0a2c83e7bb3b5a9a47ca",
       "hotseat-wiki/decision-records/declared-authored-ness-gates-requiredin-the-engine-enforces-field-completeness-per-status.md": "63bb19248ee7db25f632482a7714a69fe3317aaf69900446410c60ff4490d062"
     },
     "pages": {
@@ -198,7 +198,7 @@
       "feature-spec:mq858obw-007u-czpbbd": "hotseat-wiki/.archived/feature-spec--mq858obw-007u-czpbbd.md",
       "architecture:mq9mf28s-0001-7bddvs": "hotseat-wiki/architecture/wiki-models/bug-report.md",
       "toc:mq9ntno0-000l-gie2eu": "hotseat-wiki/bugs/index.md",
-      "bug-report:mq9ntvvm-000n-d6gkn7": "hotseat-wiki/bugs/boot-time-emitter-back-fill-races-model-bundle-registration-and-deletes-mirrored-files.md",
+      "bug-report:mq9ntvvm-000n-d6gkn7": "hotseat-wiki/.archived/bug-report--mq9ntvvm-000n-d6gkn7.md",
       "decision-record:mq9oa2cx-0014-scc7q": "hotseat-wiki/decision-records/declared-authored-ness-gates-requiredin-the-engine-enforces-field-completeness-per-status.md"
     }
   }
