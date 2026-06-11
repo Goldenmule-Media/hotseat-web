@@ -41,7 +41,7 @@ import type {
   PageState,
   Precondition,
 } from "wiki/authoring";
-import { arg, definePageType, t } from "wiki/authoring";
+import { arg, definePageType, parseInline, t } from "wiki/authoring";
 import { z, zodSchema } from "wiki/authoring";
 
 const empty = z.object({});
@@ -189,9 +189,10 @@ const relationRows: DerivedList = (page, ctx) => {
 // Block authoring helpers (mirrors feature-spec's addParagraph / addDesignCode)
 // ────────────────────────────────────────────────────────────────────────────
 
-/** A prose paragraph block carrying `text` (id minted from the injected `newId`). */
+/** A prose paragraph block carrying `text` — inline Markdown (code spans, emphasis, links) is
+ *  parsed into canonical runs so a `blocks` field accepts it. Id minted from the injected `newId`. */
 function paragraph(text: string, newId: () => string): IBlock {
-  return { kind: "paragraph", id: newId() as BlockId, inlines: [{ kind: "text", value: text, marks: [] }] };
+  return { kind: "paragraph", id: newId() as BlockId, inlines: parseInline(text) };
 }
 
 export const DecisionRecord = definePageType({

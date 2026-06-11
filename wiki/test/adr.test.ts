@@ -79,6 +79,21 @@ describe("decision-record: lifecycle, render, and metadata", () => {
     expect(block(md, "Relations")).toBe("_None._");
   });
 
+  it("addDecisionBlock accepts inline Markdown — reifies code spans/emphasis, keeps identifiers literal", async () => {
+    // The exact shape that cost the real session several retries: backticks, an emphasis,
+    // and identifiers with intraword underscores, all in one `blocks`-field paragraph.
+    const adr = await makeAdr(ws, container, "ship multi-platform builds");
+    await ws.mutate(adr, "addDecisionBlock", {
+      text: "Enable `import_etc2_astc` for *arm64*; export_filter stays all_resources.",
+    });
+    const md = await ws.toMarkdown(adr);
+    expect(await ws.toMarkdown(adr)).toBe(md); // determinism: byte-identical re-render
+    const decision = block(md, "Decision");
+    expect(decision).toContain("`import_etc2_astc`"); // code span preserved
+    expect(decision).toContain("_arm64_"); // emphasis canonicalized to the renderer's underscores
+    expect(decision).toContain("export_filter stays all_resources"); // intraword `_` stays literal
+  });
+
   it("walks proposed → accepted; rejects an off-FSM jump (supersede from proposed)", async () => {
     const adr = await makeAdr(ws, container, "adopt CQRS");
     // supersede is not legal from `proposed`.

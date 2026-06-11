@@ -24,7 +24,7 @@ import type {
   RefTarget,
   SectionId,
 } from "wiki/authoring";
-import { arg, definePageType, t } from "wiki/authoring";
+import { arg, definePageType, parseInline, t } from "wiki/authoring";
 import { z, zodSchema } from "wiki/authoring";
 
 const empty = z.object({});
@@ -134,7 +134,7 @@ export const FeatureSpec = definePageType({
       produces: (_page, args, ctx) => {
         const a = args as { text: string };
         const id = ctx.newId() as BlockId;
-        const block: IBlock = { kind: "paragraph", id, inlines: [{ kind: "text", value: a.text, marks: [] }] };
+        const block: IBlock = { kind: "paragraph", id, inlines: parseInline(a.text) };
         return [{ op: "addBlock", section: "design", field: "body", block }];
       },
     },
@@ -145,7 +145,7 @@ export const FeatureSpec = definePageType({
       produces: (_page, args, ctx) => {
         const a = args as { level: 1 | 2 | 3 | 4 | 5 | 6; text: string };
         const id = ctx.newId() as BlockId;
-        const block: IBlock = { kind: "heading", id, level: a.level, inlines: [{ kind: "text", value: a.text, marks: [] }] };
+        const block: IBlock = { kind: "heading", id, level: a.level, inlines: parseInline(a.text) };
         return [{ op: "addBlock", section: "design", field: "body", block }];
       },
     },
@@ -185,7 +185,7 @@ export const FeatureSpec = definePageType({
         const brief = briefId !== null ? ctx.related.page(briefId) : undefined;
         const questionsSec = brief?.sections.find((s) => s.key === "questions");
         const id = ctx.newId() as BlockId;
-        const inlines: IInline[] = [{ kind: "text", value: `${a.text} `, marks: [] }];
+        const inlines: IInline[] = parseInline(`${a.text} `);
         // Thread in a live, integrity-checked ref to the decided question. (If the brief
         // or its questions section is somehow absent, fall back to a plain paragraph
         // rather than emit a dangling ref the engine would reject.)

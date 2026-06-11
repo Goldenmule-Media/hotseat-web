@@ -23,6 +23,7 @@ import type {
   ISection,
 } from "../api";
 import { BlockNormalFormError, FieldKindError, PreconditionUnmetError, RefIntegrityError, ValidationError } from "./errors";
+import { isInertText } from "./inline-md";
 import type { Registry } from "./registry";
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -120,15 +121,21 @@ export function normalizeBlocks(blocks: IBlock[]): IBlock[] {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// no-markdown-in-text-leaf
+// no-significant-markdown-in-text-leaf
+//
+// A text leaf is canonical iff it is a parse FIXED POINT — `parseInline(value)` yields it
+// back unchanged (see core/inline-md). This replaces a blunt character ban: a value may now
+// carry delimiter characters that aren't significant in context (an intraword `_` in
+// `import_etc2_astc`, a bare `*` in `2 * 3`) — those are inert and render verbatim. Only
+// SIGNIFICANT syntax (a real code span / emphasis / link) is rejected, since it must be
+// reified into a code-span/mark/ref run. Authoring helpers call `parseInline` to do exactly
+// that, so well-formed Markdown is accepted; this guards a model hand-building an un-reified run.
 // ────────────────────────────────────────────────────────────────────────────
 
-const MARKDOWN_LEAF = /```|`|\*|_|\[[^\]]*\]\([^)]*\)|^#/m;
-
 function assertNoMarkdownInText(value: string): void {
-  if (MARKDOWN_LEAF.test(value)) {
+  if (!isInertText(value)) {
     throw new BlockNormalFormError(
-      `A blocks text run may not contain Markdown syntax (fence/backtick/*/_/[..](..)/leading #). Reify as a code-span, mark, or ref.`,
+      `A blocks text run may not contain significant Markdown (code span / emphasis / link). Reify it into a code-span, mark, or ref — the authoring helpers parse inline Markdown for you.`,
     );
   }
 }

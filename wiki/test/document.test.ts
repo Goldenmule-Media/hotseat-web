@@ -252,9 +252,9 @@ describe("document: inline runs — marks, code spans, normalization, rejection"
     expect(await bodyOf(ws, doc)).toContain("abc**d**");
   });
 
-  it("rejects Markdown syntax inside a text run — structure must be reified as runs", async () => {
+  it("rejects significant Markdown inside a text run — structure must be reified as runs", async () => {
     const before = await ws.toMarkdown(doc);
-    await expect(ws.mutate(doc, "addParagraph", { inlines: ["**bold**"] })).rejects.toThrow(/Markdown syntax/);
+    await expect(ws.mutate(doc, "addParagraph", { inlines: ["**bold**"] })).rejects.toThrow(/significant Markdown/);
     await expect(ws.mutate(doc, "addParagraph", { inlines: [{ text: "_x_", italic: true }] })).rejects.toThrow();
     expect(await ws.toMarkdown(doc)).toBe(before);
   });
