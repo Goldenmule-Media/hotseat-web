@@ -9,6 +9,7 @@
  *   form, and ref integrity over the whole page.
  */
 import type {
+  DeepReadonly,
   FieldDecl,
   IBlock,
   IField,
@@ -21,7 +22,7 @@ import type {
   RefTarget,
   ISection,
 } from "../api";
-import { BlockNormalFormError, FieldKindError, RefIntegrityError, ValidationError } from "./errors";
+import { BlockNormalFormError, FieldKindError, PreconditionUnmetError, RefIntegrityError, ValidationError } from "./errors";
 import type { Registry } from "./registry";
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -372,15 +373,82 @@ function validateDeclaredConstraints(section: ISection, def: IPageTypeDef, type:
   }
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// Authored-ness — the `requiredIn` gate's notion of "carries real content"
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Is a field AUTHORED — i.e. does it carry real content, as opposed to the empty value a
+ * required section materializes at create? Per kind: scalar/prose non-empty string (a
+ * scalar holding a non-string — number/boolean — is always authored), code non-empty
+ * source, blocks/list non-empty, ref always (an UNSET ref materializes as a scalar `""`,
+ * so reaching the ref shape means it was set), attachment-ref always (presence is
+ * content; the grammar checks its parts).
+ */
+function fieldAuthored(field: DeepReadonly<IField>): boolean {
+  switch (field.kind) {
+    case "scalar":
+      return field.value !== "";
+    case "prose":
+      return field.value !== "";
+    case "code":
+      return field.source !== "";
+    case "blocks":
+      return field.blocks.length > 0;
+    case "list":
+      return field.elements.length > 0;
+    default:
+      return true; // ref / attachment-ref
+  }
+}
+
+/**
+ * The `section.field` paths of every declared field whose `requiredIn` names `status`
+ * but which is currently UNAUTHORED. Top-level declared sections only (mirroring the
+ * declared-constraint pass). Shared by the write-side gate below and by
+ * `describeMutations`' predictive unmet on page-transition commands.
+ */
+export function unauthoredRequiredInFields(
+  sections: readonly DeepReadonly<Pick<ISection, "key" | "fields">>[],
+  def: IPageTypeDef,
+  status: string,
+): string[] {
+  const missing: string[] = [];
+  for (const [key, sd] of Object.entries(def.sections)) {
+    const fields = sections.find((s) => s.key === key)?.fields;
+    for (const [fk, fd] of Object.entries(sd.fields)) {
+      if (fd.requiredIn === undefined || !fd.requiredIn.includes(status)) continue;
+      const f = fields?.[fk];
+      if (f === undefined || !fieldAuthored(f)) missing.push(`${key}.${fk}`);
+    }
+  }
+  return missing;
+}
+
+/** The `requiredIn` gate over a post-op page state: in the page's (post-fold) status,
+ *  every field declaring that status must be authored — rejecting both a transition INTO
+ *  the status while content is missing and a write that would BLANK such a field while in
+ *  it. {@link PreconditionUnmetError} so hosts surface it like any other unmet gate. */
+function validateRequiredInAuthored(page: IPageNode, def: IPageTypeDef): void {
+  const missing = unauthoredRequiredInFields(page.sections, def, page.status);
+  if (missing.length > 0) {
+    throw new PreconditionUnmetError(
+      `author ${missing.join(", ")} — required in status "${page.status}"`,
+    );
+  }
+}
+
 /**
  * Engine well-formedness over a page's resulting sections: field-kind grammar,
  * no-markdown-in-text-leaf, block normal form, ref integrity (deep), PLUS the page type's
- * declared `required`/scalar-`schema` constraints (so generated structural commands can't
- * bypass them). Pure.
+ * declared `required`/scalar-`schema` constraints and the `requiredIn` authored-ness gate
+ * (so generated structural commands can't bypass them). Pure. Runs only on the write-side
+ * dry-run — never on projection/fold — so already-committed history is never rejected.
  */
 export function validatePage(state: IWorkspaceState, page: IPageNode, registry: Registry): void {
   for (const section of page.sections) validateSection(state, page, section);
   if (!registry.has(page.type)) return;
   const def = registry.page(page.type);
   for (const section of page.sections) validateDeclaredConstraints(section, def, page.type);
+  validateRequiredInAuthored(page, def);
 }

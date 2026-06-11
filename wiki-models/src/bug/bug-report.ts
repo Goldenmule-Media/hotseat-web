@@ -10,11 +10,13 @@
  *
  * Lifecycle: `draft` →(open)→ `open` →(close)→ `closed` →(reopen)→ `open`.
  *
- * "Required on creation" is the draft→open gate: `createPage` takes no field args, so the
- * page is born in `draft` and the forward `open` edge (agency: "agent" — the completeness
- * edge the agent drives itself) is precondition-gated on component, platform, version, and
- * summary all being authored. The unmet reason names exactly what is missing, so the
- * self-directing loop (`nextActions`) authors the basics immediately after create.
+ * "Required on creation" is the draft→open gate, DECLARED, not hand-rolled: `createPage`
+ * takes no field args, so the page is born in `draft`, and the basics (component /
+ * platform / version / summary) carry `requiredIn: ["open", "closed"]` — the ENGINE
+ * refuses the forward `open` edge (agency: "agent" — the completeness edge the agent
+ * drives itself) while any is unauthored, names the missing `section.field` paths in the
+ * unmet reason (so the self-directing loop authors them immediately after create), and
+ * also rejects any later write that would blank one while the report is open.
  *
  * CLOSING REFERENCES A COMMIT BY CONSTRUCTION: `close` is ONE declarative command that
  * both records the fix commit (an `addElement` into `resolution`) and fires the page
@@ -24,7 +26,7 @@
  * Content sections freeze in `closed` (mutableIn draft/open), so a closed report is a
  * stable record until explicitly reopened.
  */
-import type { DeepReadonly, DerivedItem, DerivedList, IField, PageState, Precondition } from "wiki/authoring";
+import type { DeepReadonly, DerivedItem, DerivedList, IField, PageState } from "wiki/authoring";
 import { arg, definePageType, t } from "wiki/authoring";
 import { z, zodSchema } from "wiki/authoring";
 
@@ -33,8 +35,13 @@ const empty = z.object({});
 // The statuses in which the report's content is authorable (closed = frozen).
 const editable = ["draft", "open"];
 
+// The statuses in which the report basics must be AUTHORED (the engine's `requiredIn`
+// authored-ness gate): entering `open` requires them, and they cannot be blanked while
+// the bug is open. `closed` is declarative honesty — content is frozen there anyway.
+const requiredOnceOpen = ["open", "closed"];
+
 // ────────────────────────────────────────────────────────────────────────────
-// Pure read helpers over folded state (shared by the gate and the renderer)
+// Pure read helpers over folded state (used by the report-rows renderer)
 // ────────────────────────────────────────────────────────────────────────────
 
 /** A section's field map (or {} when the section is absent). */
@@ -47,26 +54,6 @@ function scalarOf(fields: DeepReadonly<Record<string, IField>>, key: string): st
   const f = fields[key];
   return f !== undefined && f.kind === "scalar" ? String(f.value) : "";
 }
-
-/** A prose field's text, or "". */
-function proseOf(fields: DeepReadonly<Record<string, IField>>, key: string): string {
-  const f = fields[key];
-  return f !== undefined && f.kind === "prose" ? f.value : "";
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// The draft→open gate — the "required on creation" pieces must be authored
-// ────────────────────────────────────────────────────────────────────────────
-
-const reportComplete: Precondition = (page) => {
-  const report = fieldsOf(page, "report");
-  const missing: string[] = [];
-  if (scalarOf(report, "component").length === 0) missing.push("component");
-  if (scalarOf(report, "platform").length === 0) missing.push("platform");
-  if (scalarOf(report, "version").length === 0) missing.push("version");
-  if (proseOf(fieldsOf(page, "summary"), "body").length === 0) missing.push("summary");
-  return missing.length === 0 ? true : { unmet: `set ${missing.join(", ")} before opening` };
-};
 
 // ────────────────────────────────────────────────────────────────────────────
 // Render projection — the report basics as a compact metadata block
@@ -103,16 +90,16 @@ export const BugReport = definePageType({
       required: true,
       mutableIn: editable,
       fields: {
-        component: { kind: "scalar", required: true },
-        platform: { kind: "scalar", required: true },
-        version: { kind: "scalar", required: true },
+        component: { kind: "scalar", required: true, requiredIn: requiredOnceOpen },
+        platform: { kind: "scalar", required: true, requiredIn: requiredOnceOpen },
+        version: { kind: "scalar", required: true, requiredIn: requiredOnceOpen },
       },
     },
     summary: {
       name: "Summary",
       required: true,
       mutableIn: editable,
-      fields: { body: { kind: "prose", required: true } },
+      fields: { body: { kind: "prose", required: true, requiredIn: requiredOnceOpen } },
     },
     repro: {
       name: "Repro steps",
@@ -203,10 +190,11 @@ export const BugReport = definePageType({
       set: { body: arg("text") },
     },
     // ── lifecycle ──
+    // No preconditions: the engine's `requiredIn` gate refuses `open` until the report
+    // basics are authored, naming the missing `section.field` paths.
     open: {
       args: zodSchema(empty),
       transition: { level: "page", event: "open" },
-      preconditions: [reportComplete],
     },
     // ONE command, one atomic op list: record the fix commit AND transition to closed —
     // the args schema makes the sha/message mandatory, so a commit-less close is

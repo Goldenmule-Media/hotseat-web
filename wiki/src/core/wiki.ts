@@ -48,6 +48,7 @@ import { displayTitle, renderPage, renderWorkspace } from "../render/read-model"
 import { EventLog } from "../stores/event-log";
 import { CommandBus, type BusProjection, type CommandBusConfig, type CommitOutcome } from "./command-bus";
 import { PageNotFoundError, WorkspaceNotFoundError } from "./errors";
+import { unauthoredRequiredInFields } from "./ingestion";
 import { encodeToken, InMemoryReadModel } from "./readmodel";
 import { Registry } from "./registry";
 import {
@@ -927,9 +928,23 @@ class PageView implements IPageView {
           : cmd.target?.section !== undefined
             ? mutableNow(cmd.target.section)
             : true;
+      // Then the engine's own `requiredIn` authored-ness gate, PREDICTIVELY: resolve the
+      // edge's target status and require every field declaring it to be authored — the
+      // same check the bus enforces on the dry-run post-state, surfaced here as a
+      // blocked-edge reason naming the `section.field` paths to author.
+      let unmet: string | undefined;
+      if (available && cmd.transition?.level === "page") {
+        const target = guard.next(node.status, name);
+        if (target !== undefined) {
+          const missing = unauthoredRequiredInFields(view.sections, def, target);
+          if (missing.length > 0) {
+            available = false;
+            unmet = `author ${missing.join(", ")} — required in status "${target}"`;
+          }
+        }
+      }
       // Then, if still legal, every declared precondition must currently hold; the first
       // failure flips `available` off and surfaces its reason as `unmet`.
-      let unmet: string | undefined;
       if (available && cmd.preconditions !== undefined && cmd.preconditions.length > 0) {
         related ??= this.handle.relatedReaderFor(this.id);
         for (const pre of cmd.preconditions) {

@@ -50,26 +50,31 @@ describe("bug-report: lifecycle, completeness gate, atomic close, render", () =>
     await harness.stop();
   });
 
-  it("is born in draft and cannot open until component/platform/version/summary are set", async () => {
+  it("is born in draft and cannot open until component/platform/version/summary are authored (engine requiredIn gate)", async () => {
     const bug = (await ws.createPage("bug-report", { title: "crash on save", parentId: null })).value;
     expect(statusOf(await ws.toMarkdown(bug))).toBe("draft");
 
-    // The gate's unmet reason names ALL the missing pieces.
-    await expect(ws.mutate(bug, "open", {})).rejects.toThrow(/component, platform, version, summary/);
+    // The engine gate's unmet reason names ALL the missing `section.field` paths.
+    await expect(ws.mutate(bug, "open", {})).rejects.toThrow(
+      /report\.component, report\.platform, report\.version, summary\.body/,
+    );
 
     // Author them one at a time — the reason shrinks as the report completes.
     await ws.mutate(bug, "setComponent", { component: "wiki" });
     await ws.mutate(bug, "setPlatform", { platform: "node 20" });
-    await expect(ws.mutate(bug, "open", {})).rejects.toThrow(/version, summary/);
+    await expect(ws.mutate(bug, "open", {})).rejects.toThrow(/report\.version, summary\.body/);
     const desc = await (await ws.page(bug)).describeMutations();
     const open = desc.find((d) => d.name === "open");
     expect(open?.available).toBe(false);
-    expect(open?.unmet).toMatch(/version, summary/);
+    expect(open?.unmet).toMatch(/report\.version, summary\.body/);
 
     await ws.mutate(bug, "setVersion", { version: "0.1.0" });
     await ws.mutate(bug, "setSummary", { text: "Saving a page crashes the host." });
     await ws.mutate(bug, "open", {});
     expect(statusOf(await ws.toMarkdown(bug))).toBe("open");
+
+    // The gate also HOLDS while open: blanking a required-in-open field rejects.
+    await expect(ws.mutate(bug, "setComponent", { component: "" })).rejects.toThrow(/report\.component/);
   });
 
   it("close records the fix commit AND transitions in ONE command; a commit-less close is unrepresentable", async () => {

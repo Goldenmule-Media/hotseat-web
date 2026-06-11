@@ -848,15 +848,36 @@ export interface SectionOpsAppliedPayload {
 // Declarative authoring
 // ────────────────────────────────────────────────────────────────────────────
 
-/** The model's view of a field-kind in a section/element declaration. */
+/**
+ * The model's view of a field-kind in a section/element declaration.
+ *
+ * Two orthogonal contract knobs:
+ *  - `required` — the field must be PRESENT in the materialized field set (a required
+ *    section materializes its fields empty at create, so presence ≠ content).
+ *  - `requiredIn` — the statuses in which the field must be AUTHORED (carry real
+ *    content): the dual of a section's `mutableIn`. `mutableIn` gates writes BY status;
+ *    `requiredIn` declares the statuses in which content must HOLD. The engine enforces
+ *    it on the write-side dry-run post-state — uniformly across declarative commands,
+ *    generated structural commands, batches, and cascades — so a transition INTO a
+ *    listed status rejects while any such field is unauthored, and a write that would
+ *    BLANK one while in a listed status rejects too. Authored-ness per kind:
+ *    scalar/prose ≠ "", code source ≠ "", blocks/list non-empty, ref set,
+ *    serial/attachment-ref always (engine-assigned / presence-is-content).
+ *    `describeMutations` surfaces the gate predictively on page-transition commands
+ *    (`available: false` + an `unmet` naming the `section.field` paths to author), so
+ *    the self-direction loop names exactly the content to write — models declare WHICH
+ *    fields matter per status and never hand-roll completeness preconditions.
+ *    Section fields only (rejected at registration on element fields); must not name
+ *    the initial status (pages are born empty — an unsatisfiable gate).
+ */
 export type FieldDecl =
-  | { readonly kind: "scalar"; required?: boolean; schema?: ISchema }
-  | { readonly kind: "prose"; required?: boolean }
-  | { readonly kind: "code"; required?: boolean }
-  | { readonly kind: "attachment-ref"; required?: boolean }
-  | { readonly kind: "ref"; required?: boolean; targetKinds?: RefTarget["kind"][] }
-  | { readonly kind: "blocks"; required?: boolean }
-  | { readonly kind: "list"; element: string; ordered?: boolean; required?: boolean }
+  | { readonly kind: "scalar"; required?: boolean; requiredIn?: readonly string[]; schema?: ISchema }
+  | { readonly kind: "prose"; required?: boolean; requiredIn?: readonly string[] }
+  | { readonly kind: "code"; required?: boolean; requiredIn?: readonly string[] }
+  | { readonly kind: "attachment-ref"; required?: boolean; requiredIn?: readonly string[] }
+  | { readonly kind: "ref"; required?: boolean; requiredIn?: readonly string[]; targetKinds?: RefTarget["kind"][] }
+  | { readonly kind: "blocks"; required?: boolean; requiredIn?: readonly string[] }
+  | { readonly kind: "list"; element: string; ordered?: boolean; required?: boolean; requiredIn?: readonly string[] }
   /**
    * An ENGINE-ASSIGNED, IMMUTABLE sequence number. At `createPage` the engine mints the
    * next value — `max(existing) + 1`, scoped to pages of the SAME TYPE in the workspace,
@@ -866,7 +887,7 @@ export type FieldDecl =
    * can surface it as a human-friendly label (e.g. `"ADR-{meta.number}: {title}"`) without
    * it ever becoming the page's identity — that remains the page id.
    */
-  | { readonly kind: "serial"; required?: boolean };
+  | { readonly kind: "serial"; required?: boolean; requiredIn?: readonly string[] };
 
 export interface SectionDecl {
   readonly name: string;

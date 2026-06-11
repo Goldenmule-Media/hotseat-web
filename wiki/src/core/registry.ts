@@ -87,6 +87,16 @@ export class Registry {
         if (fd.kind === "list" && !elementTypes.has((fd as { element: string }).element)) {
           issues.push({ path: ["sections", key, "fields", fk], message: `list element "${(fd as { element: string }).element}" is not a declared element type` });
         }
+        for (const status of fd.requiredIn ?? []) {
+          if (!statuses.has(status)) {
+            issues.push({ path: ["sections", key, "fields", fk, "requiredIn"], message: `references unknown status "${status}"` });
+          }
+          // Pages are born with required sections materialized EMPTY, so an authored-ness
+          // gate on the initial status can never be satisfied — a load-time deadlock.
+          if (status === def.initialStatus) {
+            issues.push({ path: ["sections", key, "fields", fk, "requiredIn"], message: `must not include the initial status "${def.initialStatus}" — pages are created empty, the gate would be unsatisfiable` });
+          }
+        }
       }
       for (const status of sd.mutableIn ?? []) {
         if (!statuses.has(status)) {
@@ -96,6 +106,16 @@ export class Registry {
       for (const [nk, nested] of Object.entries(sd.sections ?? {})) validateSectionDecl(nk, nested);
     };
     for (const [key, sd] of Object.entries(def.sections)) validateSectionDecl(key, sd);
+
+    // `requiredIn` is a page-status gate over SECTION fields; element fields carry no page
+    // status to gate on — reject loudly rather than silently never enforcing.
+    for (const [tag, el] of Object.entries(def.elements ?? {})) {
+      for (const [fk, fd] of Object.entries(el.fields)) {
+        if ((fd as { requiredIn?: readonly string[] }).requiredIn !== undefined) {
+          issues.push({ path: ["elements", tag, "fields", fk, "requiredIn"], message: `requiredIn is supported on section fields only` });
+        }
+      }
+    }
 
     // ── static reachability guards ───────────────────────────────────────────
     // Turn whole classes of silent, load-after deadlocks into load-time errors.
@@ -126,6 +146,15 @@ export class Registry {
         }
         if (sd.mutableIn.length === 0 && sd.required === true) {
           issues.push({ path: ["sections", key, "mutableIn"], message: `a required section that is never mutable (mutableIn: []) is materialized empty and can never be filled` });
+        }
+      }
+      // An authored-ness gate on a status that can never be entered is dead weight —
+      // same class of silent rot as a dead write-gate.
+      for (const [fk, fd] of Object.entries(sd.fields)) {
+        for (const status of fd.requiredIn ?? []) {
+          if (statuses.has(status) && !reachableStatuses.has(status)) {
+            issues.push({ path: ["sections", key, "fields", fk, "requiredIn"], message: `status "${status}" is unreachable from the initial status "${def.initialStatus}" — a dead authored-ness gate` });
+          }
         }
       }
       for (const [nk, nested] of Object.entries(sd.sections ?? {})) lintGate(nk, nested);

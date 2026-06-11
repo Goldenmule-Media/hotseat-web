@@ -99,6 +99,9 @@ The load-bearing mental model; full detail in [`architecture/wiki/`](docs/hotsea
   **FSM** (`t(from, event, to)`), commands (Zod-validated args via `zodSchema`), a pure `apply` reducer,
   and a deterministic `render`. A mutation is legal **iff** the FSM declares the transition; structural
   rules (acyclic tree, unique sibling title, link target exists) are invariants checked in handlers.
+  Field completeness is declarative too: a field's `requiredIn: [statuses]` (the dual of a section's
+  `mutableIn`) makes the ENGINE refuse entering — or blanking content while in — those statuses until the
+  field is authored, naming the missing `section.field` paths; models never hand-roll completeness gates.
 - **CQRS with consistency tokens.** Every write returns `Committed<T>` (value + opaque token = the
   committed head `version`). Reads are async and token-gated: pass `consistentWith` a write's token to
   read-your-writes (the read waits via `IReadModel.waitFor`), or omit it for eventually-consistent state.
