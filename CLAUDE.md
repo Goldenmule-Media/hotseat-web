@@ -73,6 +73,7 @@ wiki-models   The schema layer — the ONLY home for concrete page types (e.g. t
 [wiki-models](docs/hotseat-wiki/architecture/wiki-models/) ·
 [wiki-mcp](docs/hotseat-wiki/architecture/wiki-mcp/) ·
 [wiki-server](docs/hotseat-wiki/architecture/wiki-server.md) ·
+[wiki-mirror](docs/hotseat-wiki/architecture/wiki-mirror.md) ·
 [Content model](docs/hotseat-wiki/architecture/content-model.md).
 
 **`wiki-ui`** — a standalone **Next.js (App Router) app**, *not* a workspace member (own lockfile,
