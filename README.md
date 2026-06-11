@@ -14,11 +14,11 @@ every page renders **deterministically** to Markdown. Agents reach it over **MCP
   reads its own prior writes.
 - **Schema is pluggable and hot-reloadable.** Page types live in `wiki-models` and load into a running
   server by reference — the engine ships none baked in.
-- **Renders back to disk (optional, per project).** A project registers a Markdown mirror at runtime over MCP —
-  `configureEmitter({ emitterId, workspaceId, root })` — and the wiki mirrors that workspace's Markdown into that
-  absolute root, kept current off the same projection tail, content-hashed so the git diff stays honest. The
-  emitter set is event-sourced on its own durable stream (replayed on boot, tailed live → no restart). The wiki
-  stays the source of truth; each repo gets a faithful, always-current rendered copy.
+- **Renders back to disk (optional, per project).** A separate local process, **`wiki-mirror`**, tails a
+  (possibly remote) server's Durable Stream and writes a workspace's deterministic Markdown into a local root,
+  content-hashed so the git diff stays honest. It is configured by a local `wiki-mirror.config.json`
+  (`workspaceId → absolute root`), per machine — never server state. The wiki stays the source of truth; each
+  repo gets a faithful, always-current rendered copy.
 
 ### The packages
 
@@ -28,6 +28,7 @@ every page renders **deterministically** to Markdown. Agents reach it over **MCP
 | `wiki-models` | The schema layer — the only home for concrete page types (e.g. the `feature` bundle). Loaded at runtime. |
 | `wiki-mcp` | Long-lived host: embeds the engine, maintains a SQL read model (PGlite/pg), exposes MCP tools + resources. |
 | `wiki-server` | Thin process that runs the durable stream host **and** hosts `wiki-mcp` in one process. |
+| `wiki-mirror` | Local Markdown mirror: tails a (possibly remote) server's stream and writes a workspace's deterministic Markdown to a local checkout — the headless, disk-writing sibling of `wiki-ui`. |
 | `wiki-ui` | Standalone Next.js browser for a running server — embeds the engine client-side, tails the stream live, drives FSM transitions. **Not** a workspace member (own install/build). |
 
 Architecture, boundaries, and conventions live in [`CLAUDE.md`](./CLAUDE.md); per-package design intent,

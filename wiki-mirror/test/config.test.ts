@@ -81,6 +81,11 @@ describe("wiki-mirror config resolution", () => {
     expect(() => resolveConfig(["--workspace", "ws:a", "--root", "/y"], {}, dir)).toThrow(/duplicate emitter/);
   });
 
+  it("throws on two emitters sharing a root (single-writer-per-root)", () => {
+    writeConfig({ emitters: [{ workspaceId: "ws:a", root: "/x" }, { workspaceId: "ws:b", root: "/x" }] });
+    expect(() => resolveConfig([], {}, dir)).toThrow(/same root/);
+  });
+
   it("throws on an empty root", () => {
     writeConfig({ emitters: [{ workspaceId: "ws:a", root: "" }] });
     expect(() => resolveConfig([], {}, dir)).toThrow(/non-empty root/);

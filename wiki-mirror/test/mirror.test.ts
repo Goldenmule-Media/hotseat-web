@@ -20,6 +20,7 @@ import { Registry } from "wiki/registry";
 import { startTestServer, wikiOn } from "wiki/testing";
 
 import { silentLogger } from "../src/logger.js";
+import { startMirror } from "../src/main.js";
 import { archivedFileName, MarkdownDiskProjector } from "../src/markdown-projection.js";
 import { WorkspaceMirror } from "../src/mirror.js";
 
@@ -231,18 +232,34 @@ describe("wiki-mirror — tail a workspace stream to a local Markdown mirror", (
     expect(await read(root, "docs/guide.md")).toBe(expected);
   });
 
-  it("mirrors multiple workspaces, each under its own subdir, from independent loops", async () => {
+  it("mirrors multiple workspaces from one process, each to its own root", async () => {
     const other = await writerWiki.createWorkspace({ name: "Other" });
     await writer.createPage("note", { title: "One", parentId: null });
     await other.createPage("note", { title: "Two", parentId: null });
-    const root = await freshRoot();
-    const m1 = await makeMirror(root);
-    const m2 = await makeMirrorFor(other, root);
+    const rootA = await freshRoot();
+    const rootB = await freshRoot();
+    const m1 = await makeMirror(rootA);
+    const m2 = await makeMirrorFor(other, rootB);
     await m1.start();
     await m2.start();
 
-    expect(await exists(root, "docs/one.md")).toBe(true);
-    expect(await exists(root, "other/two.md")).toBe(true);
+    expect(await exists(rootA, "docs/one.md")).toBe(true);
+    expect(await exists(rootB, "other/two.md")).toBe(true);
+  });
+
+  it("startMirror skips a workspace whose boot fails instead of aborting the whole process", async () => {
+    // models:[] → empty registry → folding any non-empty workspace throws UnknownPageTypeError,
+    // so opening this workspace fails at boot. The other emitters (none here) must be unaffected,
+    // startMirror must NOT reject, and close() must still tear down cleanly.
+    await writer.createPage("note", { title: "X", parentId: null });
+    const root = await freshRoot();
+    const running = await startMirror(
+      { streamBaseUrl: url, namespace: "test", models: [], emitters: [{ workspaceId: writer.id, root }] },
+      silentLogger,
+    );
+    expect(running.mirrors.length).toBe(0); // the failing workspace was skipped, not fatal
+    expect(await exists(root, "docs/x.md")).toBe(false);
+    await running.close(); // tears down cleanly despite the skipped workspace
   });
 
   it("never appends to the workspace stream (read-only)", async () => {

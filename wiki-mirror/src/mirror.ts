@@ -38,11 +38,14 @@ export class WorkspaceMirror {
     this.unsub = await this.handle.subscribe(() => this.kick());
   }
 
-  /** Stop tailing and await any in-flight reconcile. */
+  /** Stop tailing and drain any in-flight reconcile. */
   async stop(): Promise<void> {
     this.stopped = true;
     this.unsub?.();
-    await this.chain;
+    // Drain the in-flight reconcile but ABSORB a prior failed one: a kick()-driven reconcile
+    // that rejected left its rejection on `this.chain` (kick's `.catch` rides a derived promise,
+    // not `this.chain`), and a clean shutdown must not re-throw it.
+    await this.chain.catch(() => {});
   }
 
   /**

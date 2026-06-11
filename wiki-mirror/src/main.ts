@@ -41,21 +41,33 @@ export async function startMirror(
 
   const mirrors: WorkspaceMirror[] = [];
   for (const entry of config.emitters) {
-    const handle = await wiki.openWorkspace(entry.workspaceId as WorkspaceId);
-    const sink = new MarkdownDiskProjector(
-      { enabled: true, root: entry.root, workspaces: [entry.workspaceId], layout: "tree" },
-      logger.child?.({ subsystem: "markdown-disk", workspace: entry.workspaceId, root: entry.root }) ?? logger,
-    );
-    const mirror = new WorkspaceMirror(
-      handle,
-      registry,
-      sink,
-      entry.workspaceId as WorkspaceId,
-      logger.child?.({ subsystem: "mirror", workspace: entry.workspaceId }) ?? logger,
-    );
-    await mirror.start();
-    mirrors.push(mirror);
-    logger.info("wiki-mirror: mirroring workspace", { workspace: entry.workspaceId, root: entry.root });
+    try {
+      const handle = await wiki.openWorkspace(entry.workspaceId as WorkspaceId);
+      const sink = new MarkdownDiskProjector(
+        { enabled: true, root: entry.root, workspaces: [entry.workspaceId], layout: "tree" },
+        logger.child?.({ subsystem: "markdown-disk", workspace: entry.workspaceId, root: entry.root }) ?? logger,
+      );
+      const mirror = new WorkspaceMirror(
+        handle,
+        registry,
+        sink,
+        entry.workspaceId as WorkspaceId,
+        logger.child?.({ subsystem: "mirror", workspace: entry.workspaceId }) ?? logger,
+      );
+      await mirror.start();
+      mirrors.push(mirror);
+      logger.info("wiki-mirror: mirroring workspace", { workspace: entry.workspaceId, root: entry.root });
+    } catch (err) {
+      // One workspace failing — a missing/typo'd id, a page type this mirror didn't load, a
+      // transient I/O error during the boot back-fill — must NOT strand the others (the old
+      // per-workspace-resilient reconcile guaranteed this). Log and skip; a restart re-attempts
+      // it. Any half-opened engine handle is reclaimed by `wiki.close()` in `close()` below.
+      logger.warn("wiki-mirror: skipping workspace (boot failed)", {
+        workspace: entry.workspaceId,
+        root: entry.root,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   return {
@@ -78,7 +90,9 @@ async function waitForStreamHost(baseUrl: string, logger: Logger, timeoutMs = 30
   const deadline = Date.now() + timeoutMs;
   for (let attempt = 0; ; attempt++) {
     try {
-      await fetch(baseUrl, { method: "GET" });
+      // Per-attempt timeout so a connection that accepts but never responds (a hung/half-open
+      // host) can't pin this await past the deadline — without it the retry loop never advances.
+      await fetch(baseUrl, { method: "GET", signal: AbortSignal.timeout(5000) });
       return; // any response (even a 404) means the host is up
     } catch (err) {
       if (Date.now() >= deadline) {

@@ -125,6 +125,7 @@ export function resolveConfig(
   }
 
   const seen = new Set<string>();
+  const seenRoots = new Set<string>();
   const emitters: IEmitterEntry[] = raw.map((e) => {
     if (typeof e.workspaceId !== "string" || e.workspaceId.length === 0) {
       throw new Error(`wiki-mirror: each emitter needs a non-empty workspaceId (got ${JSON.stringify(e.workspaceId)})`);
@@ -137,6 +138,13 @@ export function resolveConfig(
     }
     seen.add(e.workspaceId);
     const root = isAbsolute(e.root) ? e.root : resolvePath(e.base, e.root);
+    // One root = one writer: the projector is single-writer-per-root and all of a root's
+    // workspaces share one `.wiki-md-manifest.json`, so two emitters on the same root would
+    // clobber each other's manifest. Give each workspace its own root.
+    if (seenRoots.has(root)) {
+      throw new Error(`wiki-mirror: two emitters target the same root "${root}" — give each workspace its own root (single-writer-per-root)`);
+    }
+    seenRoots.add(root);
     return { workspaceId: e.workspaceId, root };
   });
 
