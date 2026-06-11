@@ -1,9 +1,9 @@
 {
   "ws:mpzncs2z-0001-2wgv51": {
-    "version": 1835,
+    "version": 1973,
     "files": {
-      "hotseat-wiki/architecture/index.md": "fea57d534a3aa7ca70deabb6089650bb28b9562fa7bd01d010cae03f89ebf5cc",
-      "hotseat-wiki/feature-specs/index.md": "f39d08db07e0ed57f225cb9f5c595b09681c1f99fbc6753333f70742a6cb5dad",
+      "hotseat-wiki/architecture/index.md": "5213acdc1038077e77d636e752170d48a0efdbf3a8639b6e6d795f4fde277015",
+      "hotseat-wiki/feature-specs/index.md": "5e3ce143271ea530d71fc678e0192ca57c3d5b7bdcaee7cf0832df3d5d42138a",
       "hotseat-wiki/architecture/wiki/index.md": "c6ec4be94906f20cfa597bc55fa2374dcb2e372d75261e64d6445d2621e5cdd9",
       "hotseat-wiki/architecture/wiki-models/index.md": "acec0870b92ee856c5cb0edb135ccae625d159a6aee93c18439e8b310ec50d66",
       "hotseat-wiki/architecture/wiki-mcp/index.md": "d588057a56c0b7550e7aa4afc64a4eebecfc6cef113028ebe07bc95bdc494c4d",
@@ -99,7 +99,12 @@
       "hotseat-wiki/architecture/wiki-models/bug-report.md": "4fb47393435e0661f5b1a83367ad3b639d21cebcf3db43af2b62cf6b16910ecd",
       "hotseat-wiki/bugs/index.md": "47541c840af8d9303497041b2734813a2791f48b6e2e0e067907a41ff58b4e3b",
       "hotseat-wiki/.archived/bug-report--mq9ntvvm-000n-d6gkn7.md": "18fb0a4b3ce2e49f22bc7480ba30372bc654c706bcbe0a2c83e7bb3b5a9a47ca",
-      "hotseat-wiki/decision-records/declared-authored-ness-gates-requiredin-the-engine-enforces-field-completeness-per-status.md": "63bb19248ee7db25f632482a7714a69fe3317aaf69900446410c60ff4490d062"
+      "hotseat-wiki/decision-records/declared-authored-ness-gates-requiredin-the-engine-enforces-field-completeness-per-status.md": "63bb19248ee7db25f632482a7714a69fe3317aaf69900446410c60ff4490d062",
+      "hotseat-wiki/feature-specs/local-markdown-mirror-wiki-mirror/index.md": "a1014392867aea87e2b96b83f7be0f78926f5911c5a90c682920219a61fa4b9a",
+      "hotseat-wiki/feature-specs/local-markdown-mirror-wiki-mirror/implementation-plan-local-markdown-mirror-wiki-mirror.md": "e243c32b7585bace7642c628020f1fc18701a9137397b81c3aeb3374fba96779",
+      "hotseat-wiki/feature-specs/local-markdown-mirror-wiki-mirror/testing-plan-local-markdown-mirror-wiki-mirror.md": "a895124c32941a464823d9214babff272426393d4381df386292e1b07741f887",
+      "hotseat-wiki/feature-specs/local-markdown-mirror-wiki-mirror/spec-local-markdown-mirror-wiki-mirror.md": "07a1df5e42fcab5e6f1804b03309417ab0879b23992426618d8349e42c41e178",
+      "hotseat-wiki/architecture/wiki-mirror.md": "bdebf8996091c22feb572e0b1dc78104318852ef0df66eac2550c0270dae3eb1"
     },
     "pages": {
       "toc:mpznedyz-0003-pdtcmh": "hotseat-wiki/architecture/index.md",
@@ -199,7 +204,12 @@
       "architecture:mq9mf28s-0001-7bddvs": "hotseat-wiki/architecture/wiki-models/bug-report.md",
       "toc:mq9ntno0-000l-gie2eu": "hotseat-wiki/bugs/index.md",
       "bug-report:mq9ntvvm-000n-d6gkn7": "hotseat-wiki/.archived/bug-report--mq9ntvvm-000n-d6gkn7.md",
-      "decision-record:mq9oa2cx-0014-scc7q": "hotseat-wiki/decision-records/declared-authored-ness-gates-requiredin-the-engine-enforces-field-completeness-per-status.md"
+      "decision-record:mq9oa2cx-0014-scc7q": "hotseat-wiki/decision-records/declared-authored-ness-gates-requiredin-the-engine-enforces-field-completeness-per-status.md",
+      "feature-brief:mq9yvq8d-00kq-s5n5j9": "hotseat-wiki/feature-specs/local-markdown-mirror-wiki-mirror/index.md",
+      "implementation-plan:mq9yvq8d-00kr-qdpkzg": "hotseat-wiki/feature-specs/local-markdown-mirror-wiki-mirror/implementation-plan-local-markdown-mirror-wiki-mirror.md",
+      "testing-plan:mq9yvq8d-00ks-7dkr41": "hotseat-wiki/feature-specs/local-markdown-mirror-wiki-mirror/testing-plan-local-markdown-mirror-wiki-mirror.md",
+      "feature-spec:mq9yvq8d-00kt-chirbk": "hotseat-wiki/feature-specs/local-markdown-mirror-wiki-mirror/spec-local-markdown-mirror-wiki-mirror.md",
+      "architecture:mqa0p1qp-00po-bgsbah": "hotseat-wiki/architecture/wiki-mirror.md"
     }
   }
 }

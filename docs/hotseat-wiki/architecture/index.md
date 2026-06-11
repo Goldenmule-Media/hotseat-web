@@ -16,3 +16,4 @@ Architecture map of the **hotseat-web** monorepo — an event-sourced, CQRS, LLM
   - [wiki-ui](architecture:mq6p8be5-001t-rjcytt)
 - **Ungrouped**
   - [Content model](architecture:mq5nej50-0026-edazv6)
+  - [wiki-mirror](architecture:mqa0p1qp-00po-bgsbah)
