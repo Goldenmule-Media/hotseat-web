@@ -161,6 +161,7 @@ _None._
 - The only rich text is the structured blocks model: a closed vocabulary of typed, id-bearing block and inline nodes; ingestion rejects Markdown syntax inside a text run, forcing it into a code-span, a mark, or a ref.
 - No parser, AST, LSP, or formatter lives in the engine — all language machinery is host-side behind a runtime registry.
 - A new block or inline kind requires a written decision record proving closed render, stable-id addressability, and no opaque leaf — the closed vocabulary does not grow casually.
+- A FieldDecl carries two orthogonal contract knobs: required (the field must be PRESENT in the materialized set — required sections materialize fields EMPTY at create, so presence is not content) and requiredIn (the statuses in which the field must be AUTHORED — the dual of mutableIn). The engine enforces requiredIn on the write-side dry-run post-state across every write path, rejects entering or blanking-while-in a listed status, surfaces the gate predictively in describeMutations (unmet names the section.field paths), and lints unknown/unreachable/initial statuses and element fields at registration. Authored-ness per kind: scalar, prose, code non-empty; blocks, list non-empty; ref set; serial, attachment-ref always.
 
 ## Synced commit
-1b7451f
+c6668d1

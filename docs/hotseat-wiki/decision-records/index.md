@@ -36,3 +36,4 @@ _No overview yet._
 - [Remote auth via an engine `IStreamConfig.headers` hook](decision-record:mq110xwb-009c-h64sj5)
 - [Generic mutations in v1, generated subcommands later](decision-record:mq110ye5-009p-4evl6w)
 - [Cross-workspace operations are an admin/system affordance, not a content read](decision-record:mq5hnpu9-001m-c9yfrl)
+- [Declared authored-ness gates (`requiredIn`): the engine enforces field completeness per status](decision-record:mq9oa2cx-0014-scc7q)

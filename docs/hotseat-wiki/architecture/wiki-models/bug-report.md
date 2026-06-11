@@ -30,9 +30,9 @@ Sections: `report` (required scalars `component` / `platform` / `version`), `sum
 **Lifecycle:** `draft --open--> open --close--> closed --reopen--> open`. `open` carries `agency: "agent"` (the forward completeness edge); `close` / `reopen` carry no agency — closing claims a real fix landed, never auto-driven. Commands: `setComponent` / `setPlatform` / `setVersion` / `setSummary` (the create-gate content), `addReproStep` / `removeReproStep`, `setExpected` / `setObserved`, then `open`, `close({ sha, message, url? })`, `reopen`.
 
 ## Invariants & constraints
-- "Required on creation" is the draft→open gate: `createPage` takes no field args, so the `reportComplete` precondition gates the open edge on component, platform, version, and summary all being non-empty — the unmet reason names exactly the missing fields, driving the self-directing loop.
 - `close` is ONE declarative command combining a content op and the page transition (`set` + `transition` in a single atomic op list): it appends a `commit` element to `resolution` AND fires `close`, so a commit-less close is unrepresentable — the args schema makes `sha` and `message` mandatory.
 - Content sections are `mutableIn: ["draft", "open"]` (frozen once closed); `resolution` is `mutableIn: ["open"]` only. A reopen→re-close appends a SECOND fix commit — the resolution list keeps the full fix history, never overwriting.
+- "Required on creation" is DECLARED, not hand-rolled: component / platform / version / summary carry requiredIn [open, closed], so the ENGINE refuses the draft→open edge while any is unauthored (the unmet reason names the missing section.field paths, driving the self-directing loop) and rejects any write that would blank one while the bug is open. No model precondition exists; see the ADR "Declared authored-ness gates (requiredIn)".
 
 ## Synced commit
-fbabb27
+c6668d1

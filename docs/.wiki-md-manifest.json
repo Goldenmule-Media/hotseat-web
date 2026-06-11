@@ -1,6 +1,6 @@
 {
   "ws:mpzncs2z-0001-2wgv51": {
-    "version": 1818,
+    "version": 1831,
     "files": {
       "hotseat-wiki/architecture/index.md": "fea57d534a3aa7ca70deabb6089650bb28b9562fa7bd01d010cae03f89ebf5cc",
       "hotseat-wiki/feature-specs/index.md": "f39d08db07e0ed57f225cb9f5c595b09681c1f99fbc6753333f70742a6cb5dad",
@@ -47,7 +47,7 @@
       "hotseat-wiki/.archived/implementation-plan--mq0z8mvy-008g-bglkr7.md": "884fb36efa34ab04dad0ccf5bd3f3514f1fcd2f0c69d333b6c546a5a89291bd2",
       "hotseat-wiki/.archived/testing-plan--mq0z8mvz-008i-1dmape.md": "2e482867e58fa657daeeb0eddd511474649debbfa2f3f038c251c24a828ef651",
       "hotseat-wiki/.archived/feature-spec--mq0z8mvz-008j-22lx4e.md": "4a139424b08c2a8a75f4e0ea1001028e83d5bf65af678a5632804b57119ed4ae",
-      "hotseat-wiki/decision-records/index.md": "8bc08a4a5ac1dd2aaf3590dd34fd0a7710ab93a35089e5b711ff64ef865ea5c9",
+      "hotseat-wiki/decision-records/index.md": "4be5753eea3e7e7b8c22b41c971841de5389eb083dd59bcf52a207a1b59c13a3",
       "hotseat-wiki/decision-records/design-decisions-live-in-the-wiki.md": "d1089191baf724c3b59f77839e6b5a94735b11822ce27619f7161cdcb68ae8bd",
       "hotseat-wiki/decision-records/use-durable-streams-directly-no-storage-port.md": "44029f6a7d78681a461e83a6af0ec1dc2e3e0b5f277a14fdf4451210a680379f",
       "hotseat-wiki/decision-records/workspace-as-the-aggregate-one-stream.md": "5c7dea8a89a387cd236d13a2d9d2fc6d52d68c2e6311e6efcf6e34d6bb41669f",
@@ -86,7 +86,7 @@
       "hotseat-wiki/.archived/implementation-plan--mq5mpdpu-0002-xwbiww.md": "e272714a32731f179899463cc05e694e8b551a457ee4c13d55633dac5699d0b4",
       "hotseat-wiki/.archived/testing-plan--mq5mpdpu-0004-c5lssy.md": "ec023e3ac3cdcf48981eacb0d332a911b0716541bbdac4c09c74e538dd0466e0",
       "hotseat-wiki/.archived/feature-spec--mq5mpdpu-0005-muprnl.md": "93e8793661f1bb64a1461f39765c3ac2a300e152242fc639558a0a2cef15b3ba",
-      "hotseat-wiki/architecture/content-model.md": "08dfe6a7750444b24ac27668b18f048e594dc4b1a6f646805452d69c67772f3c",
+      "hotseat-wiki/architecture/content-model.md": "92983ac27f3e87708e43e2d390688c8193e011a31fd4c832298341d1dd5f41ab",
       "hotseat-wiki/architecture/wiki-ui.md": "1378f0c03f5030599f838bf3c6452d4d573a937a250e9808ce33612657c3e3d0",
       "hotseat-wiki/.archived/feature-brief--mq853dwy-007j-o0tkzw.md": "dd3933b744153f7122ce0a04e4486d256d11dd426d5c68eac2a7db88acbd734e",
       "hotseat-wiki/.archived/implementation-plan--mq853dwy-007k-xwyarw.md": "de0c2b9f85c8057c5353ceb7196eeb57f6263fd4bcb047b86f98392f9c557327",
@@ -96,9 +96,10 @@
       "hotseat-wiki/.archived/implementation-plan--mq858obw-007s-1jyv5l.md": "f3eb994d18495a0a736563c8d6c2de3a2f73a620f20ae8c2da3fabf1f0c18aa2",
       "hotseat-wiki/.archived/testing-plan--mq858obw-007t-um5okl.md": "5662d74c5f1d6587ac2770f209f83f13ca7518bea4bbd6691919c8b0617a7d9b",
       "hotseat-wiki/.archived/feature-spec--mq858obw-007u-czpbbd.md": "a9865de56c482b09ab526f6a725930ab89610afa0bffed8387308255a3b36092",
-      "hotseat-wiki/architecture/wiki-models/bug-report.md": "455f6d15a0d68523c21aca29877f51e5411eb6fbb75975ef81b2f678a5714445",
+      "hotseat-wiki/architecture/wiki-models/bug-report.md": "4fb47393435e0661f5b1a83367ad3b639d21cebcf3db43af2b62cf6b16910ecd",
       "hotseat-wiki/bugs/index.md": "44dfc512fbe3712d52d16512796de2fc19d1fa204a8852a0b8f36b899e750e98",
-      "hotseat-wiki/bugs/boot-time-emitter-back-fill-races-model-bundle-registration-and-deletes-mirrored-files.md": "5d7605d28ed2c903de2e1d57e0c44949fd92521946a60e3e5c0f30e2e9cc4209"
+      "hotseat-wiki/bugs/boot-time-emitter-back-fill-races-model-bundle-registration-and-deletes-mirrored-files.md": "5d7605d28ed2c903de2e1d57e0c44949fd92521946a60e3e5c0f30e2e9cc4209",
+      "hotseat-wiki/decision-records/declared-authored-ness-gates-requiredin-the-engine-enforces-field-completeness-per-status.md": "63bb19248ee7db25f632482a7714a69fe3317aaf69900446410c60ff4490d062"
     },
     "pages": {
       "toc:mpznedyz-0003-pdtcmh": "hotseat-wiki/architecture/index.md",
@@ -197,7 +198,8 @@
       "feature-spec:mq858obw-007u-czpbbd": "hotseat-wiki/.archived/feature-spec--mq858obw-007u-czpbbd.md",
       "architecture:mq9mf28s-0001-7bddvs": "hotseat-wiki/architecture/wiki-models/bug-report.md",
       "toc:mq9ntno0-000l-gie2eu": "hotseat-wiki/bugs/index.md",
-      "bug-report:mq9ntvvm-000n-d6gkn7": "hotseat-wiki/bugs/boot-time-emitter-back-fill-races-model-bundle-registration-and-deletes-mirrored-files.md"
+      "bug-report:mq9ntvvm-000n-d6gkn7": "hotseat-wiki/bugs/boot-time-emitter-back-fill-races-model-bundle-registration-and-deletes-mirrored-files.md",
+      "decision-record:mq9oa2cx-0014-scc7q": "hotseat-wiki/decision-records/declared-authored-ness-gates-requiredin-the-engine-enforces-field-completeness-per-status.md"
     }
   }
 }
