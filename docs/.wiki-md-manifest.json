@@ -1,11 +1,11 @@
 {
   "ws:mpzncs2z-0001-2wgv51": {
-    "version": 1794,
+    "version": 1805,
     "files": {
       "hotseat-wiki/architecture/index.md": "fea57d534a3aa7ca70deabb6089650bb28b9562fa7bd01d010cae03f89ebf5cc",
       "hotseat-wiki/feature-specs/index.md": "f39d08db07e0ed57f225cb9f5c595b09681c1f99fbc6753333f70742a6cb5dad",
       "hotseat-wiki/architecture/wiki/index.md": "c6ec4be94906f20cfa597bc55fa2374dcb2e372d75261e64d6445d2621e5cdd9",
-      "hotseat-wiki/architecture/wiki-models/index.md": "784ad18a2f34cbb748e24225ff37fff99e1ec7542518604049046f6c9f2514c8",
+      "hotseat-wiki/architecture/wiki-models/index.md": "acec0870b92ee856c5cb0edb135ccae625d159a6aee93c18439e8b310ec50d66",
       "hotseat-wiki/architecture/wiki-mcp/index.md": "d588057a56c0b7550e7aa4afc64a4eebecfc6cef113028ebe07bc95bdc494c4d",
       "hotseat-wiki/architecture/wiki-server.md": "a86507e6f8b5ae9b41e1538c447557c51e0a433b85f1386724ce91e3d2e3f90b",
       "hotseat-wiki/architecture/wiki/command-bus.md": "1cc461a9b2b709a733afa911530ada04c24d99cd7c2d62b54eddde6959560bff",
@@ -95,7 +95,8 @@
       "hotseat-wiki/.archived/feature-brief--mq858obw-007r-frn8ym.md": "4c0e1ed7cd4332cefc040a372152ac6c580cccfb69d1eca910a62ca6f12dd915",
       "hotseat-wiki/.archived/implementation-plan--mq858obw-007s-1jyv5l.md": "f3eb994d18495a0a736563c8d6c2de3a2f73a620f20ae8c2da3fabf1f0c18aa2",
       "hotseat-wiki/.archived/testing-plan--mq858obw-007t-um5okl.md": "5662d74c5f1d6587ac2770f209f83f13ca7518bea4bbd6691919c8b0617a7d9b",
-      "hotseat-wiki/.archived/feature-spec--mq858obw-007u-czpbbd.md": "a9865de56c482b09ab526f6a725930ab89610afa0bffed8387308255a3b36092"
+      "hotseat-wiki/.archived/feature-spec--mq858obw-007u-czpbbd.md": "a9865de56c482b09ab526f6a725930ab89610afa0bffed8387308255a3b36092",
+      "hotseat-wiki/architecture/wiki-models/bug-report.md": "455f6d15a0d68523c21aca29877f51e5411eb6fbb75975ef81b2f678a5714445"
     },
     "pages": {
       "toc:mpznedyz-0003-pdtcmh": "hotseat-wiki/architecture/index.md",
@@ -191,7 +192,8 @@
       "feature-brief:mq858obw-007r-frn8ym": "hotseat-wiki/.archived/feature-brief--mq858obw-007r-frn8ym.md",
       "implementation-plan:mq858obw-007s-1jyv5l": "hotseat-wiki/.archived/implementation-plan--mq858obw-007s-1jyv5l.md",
       "testing-plan:mq858obw-007t-um5okl": "hotseat-wiki/.archived/testing-plan--mq858obw-007t-um5okl.md",
-      "feature-spec:mq858obw-007u-czpbbd": "hotseat-wiki/.archived/feature-spec--mq858obw-007u-czpbbd.md"
+      "feature-spec:mq858obw-007u-czpbbd": "hotseat-wiki/.archived/feature-spec--mq858obw-007u-czpbbd.md",
+      "architecture:mq9mf28s-0001-7bddvs": "hotseat-wiki/architecture/wiki-models/bug-report.md"
     }
   }
 }
