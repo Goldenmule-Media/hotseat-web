@@ -1,29 +1,33 @@
 /**
- * The **Markdown-disk projection** (feature: "Markdown projection to disk — live filesystem
- * mirror"). A {@link RenderSink} that mirrors a workspace's deterministic Markdown to a
- * directory and keeps it current off the SAME projection tail as the SQL read model and the
- * search index — a second consumer of the ONE per-commit render, never a second renderer.
+ * The **Markdown-disk projector** — relocated from wiki-mcp into `wiki-mirror` unchanged
+ * (it was always a pure write-side sink depending only on `wiki`'s public types + Node `fs`).
+ * It takes a commit's already-rendered {@link SearchDoc}s plus the folded {@link IWorkspaceState}
+ * and mirrors a workspace's deterministic Markdown to a directory. In `wiki-mirror` it is no
+ * longer a `RenderSink` registered on a shared projection tail — the {@link WorkspaceMirror}
+ * tail loop owns it and calls {@link init}/{@link rebuild}/{@link applyDelta}/{@link fail}
+ * directly — but its on-disk behavior (and manifest format) is byte-for-byte the old one, so an
+ * existing mirror self-heals and continues rather than rebuilding from scratch.
  *
- * Design (see the feature-spec in the wiki):
- *  - **One render per commit, fanned out.** The tailer renders a commit's affected pages once
- *    and hands the resulting {@link SearchDoc}s here; this sink consumes `doc.body` (the bytes)
- *    and uses the folded `state` for the tree → path mapping. It never calls `renderPage`.
- *  - **Reconciliation — and archives are never dropped.** The set of expected files is computed
- *    from the live tree; any tracked file with no corresponding expected path is an orphan and
- *    is removed. An ARCHIVED page (or one whose ancestor — or whole workspace — is archived)
- *    stays in the expected set at a stable id-keyed path under `.archived/`, so archiving MOVES
- *    its file there (and unarchiving moves it back); only hard-deleted pages lose their file.
- *  - **Determinism ⇒ no churn.** Each rendered page is content-hashed; an unchanged page is
- *    never rewritten, so `git status` stays quiet. Writes are atomic (temp file + rename).
+ * Design:
+ *  - **One render per commit.** The tail renders a commit's pages once and hands the resulting
+ *    {@link SearchDoc}s here; this projector consumes `doc.body` (the bytes) and uses the folded
+ *    `state` for the tree → path mapping. It never calls `renderPage`.
+ *  - **Reconciliation — and archives are never dropped.** The expected file set is computed from
+ *    the live tree; any tracked file with no expected path is an orphan and is removed. An
+ *    ARCHIVED page (or one whose ancestor — or whole workspace — is archived) stays in the
+ *    expected set at a stable id-keyed path under `.archived/`, so archiving MOVES its file there
+ *    (and unarchiving moves it back); only hard-deleted pages lose their file.
+ *  - **Determinism ⇒ no churn.** Each rendered page is content-hashed; an unchanged page is never
+ *    rewritten, so `git status` stays quiet. Writes are atomic (temp file + rename).
  *  - **Crash/restart self-heal.** A small on-disk manifest records the applied version + the
- *    path/hash of every written file. On boot the tailer reconciles disk against the stream
- *    head (a whole-workspace {@link rebuild}); a lost manifest just forces a full rebuild.
- *  - **Structural commits rebuild.** A content edit cannot move a path, so it takes the cheap
- *    affected-delta {@link applyDelta}; a STRUCTURAL commit (rename/reparent/create/archive)
- *    can move a whole subtree, so {@link rebuildOnStructural} routes it to a whole rebuild.
+ *    path/hash of every written file. On boot the mirror reconciles disk against the stream head
+ *    (a whole-workspace {@link rebuild}); a lost manifest just forces a full rebuild.
+ *  - **Structural commits rebuild.** A content edit cannot move a path; a STRUCTURAL commit
+ *    (rename/reparent/create/archive) can move a whole subtree, so {@link rebuildOnStructural}
+ *    routes it to a whole rebuild (the mirror's loop always reconciles to head, so this is moot
+ *    there, but the flag is preserved for parity).
  *
- * It is OFF by default, scoped to an allowlist of workspaces, single-writer (one owning
- * process per `root`, documented not enforced), and writes ONLY under `root`.
+ * Single-writer (one owning process per `root`, documented not enforced); writes ONLY under `root`.
  */
 import { mkdir, readFile, rename, rm, rmdir, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
@@ -31,10 +35,9 @@ import { dirname, join, posix } from "node:path";
 
 import type { IWorkspaceState, PageId, SearchDoc, WorkspaceId } from "wiki";
 
-import type { Logger } from "../logger.js";
-import type { RenderSink } from "./render-sink.js";
+import type { Logger } from "./logger.js";
 
-/** Where + how the Markdown-disk mirror writes (the feature's config surface). */
+/** Where + how the Markdown-disk mirror writes (the projector's config surface). */
 export interface IMarkdownProjectionConfig {
   /** Master switch — the projector is built only when this is true. @default false */
   readonly enabled: boolean;
@@ -146,11 +149,11 @@ function hasReliablePath(pageId: PageId, state: IWorkspaceState): boolean {
 }
 
 /**
- * Per-root write serialization. Reconciles and deltas for ONE root can arrive from
- * several callers at once (the live tail, a model-reload reproject, a boot/runtime
- * emitter back-fill — possibly via a REPLACED projector instance for the same root), and
- * the manifest + tree mutations interleave destructively. The lock is keyed by root and
- * module-global so it also covers two projector instances over the same directory.
+ * Per-root write serialization. Reconciles and deltas for ONE root can arrive from several
+ * callers at once (the live tail, a boot back-fill — possibly via a REPLACED projector
+ * instance for the same root), and the manifest + tree mutations interleave destructively. The
+ * lock is keyed by root and module-global so it also covers two projector instances over the
+ * same directory.
  */
 const rootLocks = new Map<string, Promise<unknown>>();
 function withRootLock<T>(root: string, fn: () => Promise<T>): Promise<T> {
@@ -204,10 +207,11 @@ function workspaceDir(state: IWorkspaceState): string {
 }
 
 /**
- * The Markdown-disk mirror. Constructed only when enabled; {@link init} loads the manifest, then
- * it is registered as a {@link RenderSink} on the projection tailer.
+ * The Markdown-disk mirror. Constructed per configured workspace by {@link WorkspaceMirror};
+ * {@link init} loads + verifies the manifest, then the tail loop drives
+ * {@link rebuild}/{@link applyDelta} from each commit's render.
  */
-export class MarkdownDiskProjector implements RenderSink {
+export class MarkdownDiskProjector {
   readonly name = "markdown-disk";
   readonly rebuildOnStructural = true;
 
@@ -281,7 +285,7 @@ export class MarkdownDiskProjector implements RenderSink {
    * A content commit (no path can move): write the changed pages' bytes at their stable paths
    * and drop any `removed` pages' files. Path-moving commits — including page/workspace
    * archive + unarchive, which relocate files to/from `.archived/` — are routed to
-   * {@link rebuild} by the tailer ({@link rebuildOnStructural}), so no orphan sweep is needed here.
+   * {@link rebuild} by the tail, so no orphan sweep is needed here.
    */
   async applyDelta(
     workspace: WorkspaceId,

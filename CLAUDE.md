@@ -7,10 +7,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 An **event-sourced, CQRS, LLM-first structured wiki**. Pages are typed documents that change only
 through named, typed, FSM-gated mutations (never free text); a workspace is a graph of pages that maps
 to one append-only Durable Stream and is the unit of atomic consistency; everything renders
-deterministically to Markdown. An **npm-workspaces monorepo of four packages** (`wiki` · `wiki-models` ·
-`wiki-mcp` · `wiki-server`) forms the engine + host; a fifth directory, **`wiki-ui`**, is a standalone
-Next.js browser for a running server — its own install/build, **not** a workspace member. ESM, TypeScript,
-Node ≥20.
+deterministically to Markdown. An **npm-workspaces monorepo of five packages** (`wiki` · `wiki-models` ·
+`wiki-mcp` · `wiki-server` · `wiki-mirror`) forms the engine + host + local Markdown mirror; a sixth
+directory, **`wiki-ui`**, is a standalone Next.js browser for a running server — its own install/build,
+**not** a workspace member. ESM, TypeScript, Node ≥20.
 
 **The codebase documents itself.** Design intent lives in the wiki and is mirrored to [`docs/hotseat-wiki/`](docs/hotseat-wiki/):
 per-package architecture plus the cross-cutting [Content model](docs/hotseat-wiki/architecture/content-model.md)
@@ -18,7 +18,7 @@ page (sections, field-kinds, the section-operation reducer, render) in
 [`docs/hotseat-wiki/architecture/`](docs/hotseat-wiki/architecture/); every Architecture Decision Record in
 [`docs/hotseat-wiki/decision-records/`](docs/hotseat-wiki/decision-records/); feature/product documents in
 [`docs/hotseat-wiki/feature-specs/`](docs/hotseat-wiki/feature-specs/). **The wiki is the source of truth; `docs/hotseat-wiki/**` is
-its always-current rendered mirror** (a configured emitter back-fills it — see "Running locally"). This
+its always-current rendered mirror** (the local `wiki-mirror` process back-fills it — see "Running locally"). This
 file is the **boundary map + the gotchas**; the depth is in those pages. **Before changing a package's
 behavior, read its architecture page and the ADRs it links.**
 
@@ -36,13 +36,14 @@ Run from the repo root unless noted. There is **no linter/formatter** — `typec
 | One test by name | `npm run test -w wiki -- -t "rejects a stale append"` |
 | Watch | `npm run test:watch -w <pkg>` (wiki · wiki-mcp · wiki-server; not wiki-models) |
 | Run the server | `npm run start -w wiki-server` (tsx; see "Running locally") |
+| Run server + mirror | `npm start` (root — boots the server **and** the local `wiki-mirror` via `concurrently`) |
 
-`<pkg>` ∈ `wiki` · `wiki-models` · `wiki-mcp` · `wiki-server`. **`wiki-ui` is NOT covered by the root
+`<pkg>` ∈ `wiki` · `wiki-models` · `wiki-mcp` · `wiki-server` · `wiki-mirror`. **`wiki-ui` is NOT covered by the root
 scripts** — it has its own `node_modules`/lockfile and `next build`/`vitest`; run `npm install` / `npm run
 typecheck` / `npm run build` / `npm run dev` **inside `wiki-ui/`** (see "wiki-ui (the browser)" below).
 Don't run `npm install` at the root (already done).
 
-## Architecture: four packages + a browser UI
+## Architecture: five packages + a browser UI
 
 Dependency arrows point downward; **the import boundaries are load-bearing — do not cross them.**
 
@@ -82,11 +83,20 @@ no polling. A parallel consumer of the engine: it reads live **and** drives the 
 interactively (`handle.mutate` through the same handle — no second engine), but authors no free text.
 Canonical doc: [`wiki-ui/README.md`](wiki-ui/README.md).
 
+**`wiki-mirror`** — a workspace-member Node package (tsdown/tsx, like `wiki-mcp`), the **local Markdown
+mirror** and the headless, disk-writing sibling of `wiki-ui`. It tails a (possibly remote) `wiki-server`'s
+Durable Stream, folds + renders each commit with the embedded engine, and writes the deterministic Markdown
+tree to a local checkout — a parallel consumer of `wiki` (+ `wiki-models`) that imports **no**
+`wiki-mcp`/`wiki-server` internals and authors nothing back. Its `workspaceId → root` map is a per-machine
+local config file (`wiki-mirror.config.json`), never server state. This is what keeps `docs/hotseat-wiki/`
+current. Canonical doc: the *Local markdown mirror* feature spec
+([`docs/hotseat-wiki/feature-specs/`](docs/hotseat-wiki/feature-specs/)).
+
 Keeping the engine and stream host **schema-agnostic**, with all page types in `wiki-models` loaded at
 runtime, is a deliberate, central design choice (see the *Live ModelRegistry with cache-busted hot-reload*
 and *Declarative page types* ADRs). When adding behavior, put it in the layer that owns it: engine
 mechanics → `wiki`; page types/schema → `wiki-models`; read model / projection / MCP / token logic →
-`wiki-mcp`; process wiring → `wiki-server`; browser presentation → `wiki-ui`.
+`wiki-mcp`; process wiring → `wiki-server`; local disk mirror → `wiki-mirror`; browser presentation → `wiki-ui`.
 
 ## Core engine model (`wiki`) — orientation
 
@@ -122,10 +132,10 @@ The load-bearing mental model; full detail in [`architecture/wiki/`](docs/hotsea
   - `wiki` and `wiki-models` are consumed as TS **source** (`moduleResolution: "Bundler"`) → relative
     imports are **extensionless** (`from "../api"`). `wiki-ui` consumes them the same way (Next
     `transpilePackages` resolves extensionless `.ts`).
-  - `wiki-mcp` and `wiki-server` are **compiled and run as Node** (`bin` / `tsx`) → relative imports use
-    **`.js`** extensions (`from "./config.js"`). Bare package specifiers are always extensionless.
-- **Builds differ:** `wiki` builds with `tsc` (emits `dist/`); `wiki-models` / `wiki-mcp` / `wiki-server`
-  build with **`tsdown`** (Rolldown), bundling the workspace source in and keeping npm deps external
+  - `wiki-mcp`, `wiki-server`, and `wiki-mirror` are **compiled and run as Node** (`bin` / `tsx`) → relative
+    imports use **`.js`** extensions (`from "./config.js"`). Bare package specifiers are always extensionless.
+- **Builds differ:** `wiki` builds with `tsc` (emits `dist/`); `wiki-models` / `wiki-mcp` / `wiki-server` /
+  `wiki-mirror` build with **`tsdown`** (Rolldown), bundling the workspace source in and keeping npm deps external
   (`wiki-ui` builds with `next build`). In every tsdown config, `deps.alwaysBundle` **must be a regex**
   (`/^wiki(\/|$)/`) so subpath exports like `wiki/registry` and `wiki/authoring` are bundled too — a
   bare-string `"wiki"` leaves them external and Node crashes at runtime loading the engine's extensionless
@@ -136,7 +146,8 @@ The load-bearing mental model; full detail in [`architecture/wiki/`](docs/hotsea
   `wiki-models` because the engine's own tests import the real `feature` bundle from `wiki-models/feature`.
 - **Tests** live in each package's `test/` (vitest), and use in-memory infra: `wiki/testing`
   (`createTestWiki`, `startTestServer`, `wikiOn`) spins up an in-process `DurableStreamTestServer`;
-  `wiki-mcp` uses in-memory PGlite. `wiki-models` has no tests (`vitest run --passWithNoTests`).
+  `wiki-mcp` uses in-memory PGlite; `wiki-mirror` drives the public engine via `wiki/testing` (a writer +
+  a mirror client on one server). `wiki-models` has no tests (`vitest run --passWithNoTests`).
 
 ## Running locally
 
@@ -151,27 +162,27 @@ its own. Full surface: [`architecture/wiki-server.md`](docs/hotseat-wiki/archite
 - **The server loads NO page types by default.** Provide the schema explicitly:
   `npm run start -w wiki-server -- --models wiki-models/feature` (or `WIKI_SERVER_MODELS=wiki-models/feature`).
   At runtime you can also `POST /_server/models {"id":"feature","specifier":"wiki-models/feature"}`, or list
-  with `GET localhost:4438/_server/models`. **Load every bundle at once:** `npm start` (root) runs with
-  `--models-dir ../wiki-models/src` (each `src/<bundle>/` → a bundle, id = dir name; also accepts a built
-  `dist` tree, skipping non-bundle chunks with a warning). An explicit `--models` overrides a discovered
-  bundle of the same id (and still hard-fails if it can't load).
-- **Markdown disk mirrors — the runtime emitter registry.** A project mirrors a workspace's deterministic
-  Markdown to its own checkout by registering an **emitter** over MCP at runtime (no boot-time flag).
-  `configureEmitter({ emitterId, workspaceId, root })` registers/reconfigures one workspace → one
-  **absolute** on-disk root; `listEmitters()` returns the live set; `removeEmitter({ emitterId })` detaches
-  it (already-mirrored files are **left on disk** — the checkout owns them). The emitter set is
-  **event-sourced on its own per-namespace durable stream** (`{baseUrl}/{namespace}/_emitter-config`, owned
-  by `wiki-mcp`, separate from workspace streams), replayed + folded on boot (last-writer-wins per
-  `emitterId`) and tailed live, so configure/remove take effect with **no restart** (a fresh emitter
-  back-fills from the workspace head). Each is a `MarkdownDiskProjector` render-sink on the **same projection
-  tail** as the SQL read model + search index (one render per commit, fanned out). Layout
-  `<root>/<workspace>/<page tree>` (folder + `index.md` per page-with-children), content-hashed so the git
-  diff stays honest, atomic temp+rename writes, and a boot back-fill that self-heals a wiped output dir.
-  **Archiving never deletes a mirrored file:** archiving a page (or the whole workspace) moves its file to a
-  stable id-named `<workspace>/.archived/<type>--<id>.md`, and unarchiving moves it back to the tree; only a
-  hard page delete removes a file. **This repo's own [`docs/hotseat-wiki/`](docs/hotseat-wiki/) is
-  one such mirror.** Local-only trust (v1, roots written verbatim, no sandboxing); single-writer per root
-  (documented, not enforced).
+  with `GET localhost:4438/_server/models`. **Load every bundle at once:** `npm start` (root) boots the
+  server with `--models-dir ../wiki-models/src` **and** the local `wiki-mirror` process (via `concurrently`;
+  config `wiki-mirror.config.json` at the repo root). Under `--models-dir`, each `src/<bundle>/` → a bundle,
+  id = dir name; also accepts a built `dist` tree, skipping non-bundle chunks with a warning. An explicit
+  `--models` overrides a discovered bundle of the same id (and still hard-fails if it can't load).
+- **Markdown disk mirrors — the `wiki-mirror` process.** A project mirrors a workspace's deterministic
+  Markdown to its own checkout by running **`wiki-mirror`**, a SEPARATE local process (not the server): it
+  tails the (possibly remote) server's Durable Stream, folds + renders each commit with the embedded engine,
+  and writes the tree to a local root — the disk-writing sibling of `wiki-ui`, built on `wiki`'s public
+  surface alone (no `wiki-mcp`/`wiki-server` internals; tails read-only, authors nothing back). Config is a
+  **local file** (`wiki-mirror.config.json`, resolved `flags → env WIKI_MIRROR_* → file → defaults`) mapping
+  each `workspaceId →` **absolute** root (one tail loop each) — per-machine state, never stored on the shared
+  server. It is read once at startup; **restart to reconfigure**. Layout `<root>/<workspace>/<page tree>`
+  (folder + `index.md` per page-with-children), content-hashed so the git diff stays honest, atomic
+  temp+rename writes, an on-disk manifest (`.wiki-md-manifest.json`), and a boot back-fill that self-heals a
+  wiped output dir. **Archiving never deletes a mirrored file:** archiving a page (or the whole workspace)
+  moves its file to a stable id-named `<workspace>/.archived/<type>--<id>.md`, and unarchiving moves it back
+  to the tree; only a hard page delete removes a file. **This repo's own
+  [`docs/hotseat-wiki/`](docs/hotseat-wiki/) is one such mirror**, driven by the `wiki-mirror.config.json` at
+  the repo root (run it with the server via `npm start`, or standalone via `npm run start -w wiki-mirror`).
+  Local-only trust (roots written verbatim, no sandboxing); single-writer per root (documented, not enforced).
 - **`.mcp.json`** wires this Claude Code session's `wiki` MCP server to `http://127.0.0.1:4439/mcp` — i.e. a
   locally-running `wiki-server`. The `wiki` MCP tools won't work unless that server is up **with a model loaded**.
 - **Self-direction (don't ask "what next?").** The wiki is self-directing via two model-declared classifiers

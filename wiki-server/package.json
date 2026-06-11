@@ -16,7 +16,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "tsdown",
     "start": "tsx src/main.ts",
-    "start:all": "tsx src/main.ts --models-dir ../wiki-models/src --md-root ../docs --md-workspaces ws:mpzncs2z-0001-2wgv51",
+    "start:all": "tsx src/main.ts --models-dir ../wiki-models/src",
     "test": "vitest run",
     "test:watch": "vitest"
   },

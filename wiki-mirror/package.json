@@ -1,0 +1,36 @@
+{
+  "name": "wiki-mirror",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Local Markdown-disk mirror for a (possibly remote) wiki-server. A headless, schema-agnostic stream client: tails a workspace's Durable Stream, folds + renders each commit with the `wiki` engine, and writes the deterministic Markdown to a local checkout. The disk-writing sibling of wiki-ui; imports `wiki` + `wiki-models` only, never wiki-mcp/wiki-server.",
+  "exports": {
+    ".": "./src/main.ts"
+  },
+  "bin": {
+    "wiki-mirror": "dist/bin.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "tsdown",
+    "start": "tsx src/bin.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "wiki": "*",
+    "wiki-models": "*",
+    "@durable-streams/client": "^0.2.6",
+    "kysely": "^0.27.5",
+    "zod": "^3.23.0",
+    "zod-to-json-schema": "^3.23.0"
+  },
+  "devDependencies": {
+    "@durable-streams/server": "^0.3.5"
+  }
+}

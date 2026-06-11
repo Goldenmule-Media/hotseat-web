@@ -1,0 +1,15 @@
+{
+  "streamBaseUrl": "http://127.0.0.1:4437",
+  "namespace": "default",
+  "models": [
+    "wiki-models/feature",
+    "wiki-models/toc",
+    "wiki-models/architecture",
+    "wiki-models/adr",
+    "wiki-models/bug",
+    "wiki-models/document"
+  ],
+  "emitters": [
+    { "workspaceId": "ws:mpzncs2z-0001-2wgv51", "root": "docs" }
+  ]
+}

@@ -127,20 +127,19 @@ export class ProjectionService {
   }
 
   /**
-   * Register another {@link RenderSink} (e.g. the Markdown-disk mirror) to receive the same
-   * per-commit render as the search index. Call BEFORE {@link start}/{@link drain} so the
-   * sink is fed during the initial catch-up; pair with {@link reconcileSinks} at boot for a
-   * sink that may already lag a current read model.
+   * Register an additional in-process {@link RenderSink} (beyond the search index) to receive
+   * the same per-commit render. Call BEFORE {@link start}/{@link drain} so the sink is fed
+   * during the initial catch-up; pair with {@link reconcileSinks} at boot for a sink that may
+   * already lag a current read model.
    */
   addRenderSink(sink: RenderSink): void {
     this.renderSinks.push(sink);
   }
 
   /**
-   * Detach a previously-{@link addRenderSink}ed sink by IDENTITY — used when an emitter is
-   * removed at runtime (feature: runtime-configurable Markdown emitters), so its
-   * {@link MarkdownDiskProjector} stops receiving the per-commit fan-out. A no-op if the sink
-   * isn't registered (already removed). Leaves any files the sink already wrote on disk.
+   * Detach a previously-{@link addRenderSink}ed sink by IDENTITY, so it stops receiving the
+   * per-commit fan-out. A no-op if the sink isn't registered (already removed). Any artifacts
+   * the sink already produced are left as-is.
    */
   removeRenderSink(sink: RenderSink): void {
     const i = this.renderSinks.indexOf(sink);
@@ -284,9 +283,9 @@ export class ProjectionService {
 
   /**
    * Bring ONE {@link RenderSink} up to each workspace's stream head — the single-sink unit of
-   * {@link reconcileSinks}, and the back-fill a freshly-registered emitter runs on its own (so a
-   * runtime-added Markdown mirror catches up to head WITHOUT a full boot reconcile of every
-   * sink). Folds each workspace once and rebuilds the sink only when it lags head; a sink already
+   * {@link reconcileSinks}, and the back-fill a freshly-registered sink can run on its own (so a
+   * runtime-added sink catches up to head WITHOUT a full boot reconcile of every sink). Folds
+   * each workspace once and rebuilds the sink only when it lags head; a sink already
    * current is skipped. Best-effort and resilient per workspace: a workspace whose page types
    * aren't registered yet (an {@link UnknownPageTypeError}) — or any read/fold failure — is logged
    * and skipped, never aborting the caller.

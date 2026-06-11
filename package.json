@@ -6,16 +6,20 @@
     "wiki",
     "wiki-models",
     "wiki-server",
-    "wiki-mcp"
+    "wiki-mcp",
+    "wiki-mirror"
   ],
   "scripts": {
-    "typecheck": "npm run typecheck -w wiki -w wiki-models -w wiki-server -w wiki-mcp",
-    "test": "npm run test -w wiki -w wiki-models -w wiki-server -w wiki-mcp",
-    "build": "npm run build -w wiki -w wiki-models -w wiki-server -w wiki-mcp",
-    "start": "npm run start:all -w wiki-server"
+    "typecheck": "npm run typecheck -w wiki -w wiki-models -w wiki-server -w wiki-mcp -w wiki-mirror",
+    "test": "npm run test -w wiki -w wiki-models -w wiki-server -w wiki-mcp -w wiki-mirror",
+    "build": "npm run build -w wiki -w wiki-models -w wiki-server -w wiki-mcp -w wiki-mirror",
+    "start": "concurrently -k -n server,mirror -c blue,green \"npm:start:server\" \"npm:start:mirror\"",
+    "start:server": "npm run start:all -w wiki-server",
+    "start:mirror": "tsx wiki-mirror/src/bin.ts --config wiki-mirror.config.json"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "concurrently": "^9.1.0",
     "tsdown": "^0.22.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",

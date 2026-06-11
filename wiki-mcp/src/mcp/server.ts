@@ -37,7 +37,6 @@ import {
 import { WikiError, decodeToken, type ISearchIndex, type WorkspaceId } from "wiki";
 
 import { asWorkspaceId, type EmbeddedEngine } from "../engine.js";
-import type { EmitterConfigStore } from "../emitters/config-store.js";
 import type { ModelRegistry } from "../models/registry.js";
 import type { Logger } from "../logger.js";
 import type { SqlReadModel } from "../readmodel/readmodel.js";
@@ -54,8 +53,6 @@ export interface McpServerDeps {
   readonly readModel: SqlReadModel;
   /** The engine's full-text search index backing the `search` tool. */
   readonly searchIndex: ISearchIndex;
-  /** The runtime emitter config store backing the configure/list/removeEmitter tools. */
-  readonly emitters?: EmitterConfigStore;
   /** The live model registry backing the `listModelSkills` tool. */
   readonly models?: ModelRegistry;
   readonly namespace: string;
@@ -188,7 +185,6 @@ export class WikiMcpServer {
         engine: this.deps.engine,
         readModel: this.deps.readModel,
         searchIndex: this.deps.searchIndex,
-        ...(this.deps.emitters !== undefined ? { emitters: this.deps.emitters } : {}),
         ...(this.deps.models !== undefined ? { models: this.deps.models } : {}),
         tokens: this.tokens,
         sessionId: extra.sessionId,

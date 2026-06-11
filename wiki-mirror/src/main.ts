@@ -1,0 +1,122 @@
+/**
+ * `wiki-mirror` library API + standalone runtime. {@link startMirror} assembles the engine
+ * (pointed at a possibly-remote Durable Streams host), loads the model bundles, and starts one
+ * {@link WorkspaceMirror} tail loop per configured emitter. It is the headless, disk-writing
+ * sibling of wiki-ui: a parallel consumer of the engine that tails the stream and authors
+ * nothing back. The standalone {@link main} resolves config from flags/env/file and runs until
+ * a signal; a fatal boot error (bad config, unreachable stream, unknown model) exits nonzero.
+ */
+import { createWiki } from "wiki";
+import type { IWiki, WorkspaceId } from "wiki";
+import { Registry } from "wiki/registry";
+
+import { consoleLogger, type Logger } from "./logger.js";
+import { resolveConfig, type IMirrorConfig } from "./config.js";
+import { loadModels } from "./models.js";
+import { MarkdownDiskProjector } from "./markdown-projection.js";
+import { WorkspaceMirror } from "./mirror.js";
+
+/** A running mirror: every workspace tail loop, plus a `close()` that tears them all down. */
+export interface RunningMirror {
+  readonly wiki: IWiki;
+  readonly mirrors: readonly WorkspaceMirror[];
+  close(): Promise<void>;
+}
+
+/**
+ * Build the engine + registry from the loaded models, then start one {@link WorkspaceMirror}
+ * per emitter entry (one process, N workspaces). Throws if a model bundle can't load or a
+ * workspace can't be opened — a fatal boot condition the caller surfaces as a nonzero exit.
+ */
+export async function startMirror(
+  config: IMirrorConfig,
+  logger: Logger = consoleLogger(),
+): Promise<RunningMirror> {
+  const pageTypes = await loadModels(config.models);
+  const registry = new Registry(pageTypes);
+  const wiki = createWiki({
+    stream: { baseUrl: config.streamBaseUrl, namespace: config.namespace },
+    pageTypes,
+  });
+
+  const mirrors: WorkspaceMirror[] = [];
+  for (const entry of config.emitters) {
+    const handle = await wiki.openWorkspace(entry.workspaceId as WorkspaceId);
+    const sink = new MarkdownDiskProjector(
+      { enabled: true, root: entry.root, workspaces: [entry.workspaceId], layout: "tree" },
+      logger.child?.({ subsystem: "markdown-disk", workspace: entry.workspaceId, root: entry.root }) ?? logger,
+    );
+    const mirror = new WorkspaceMirror(
+      handle,
+      registry,
+      sink,
+      entry.workspaceId as WorkspaceId,
+      logger.child?.({ subsystem: "mirror", workspace: entry.workspaceId }) ?? logger,
+    );
+    await mirror.start();
+    mirrors.push(mirror);
+    logger.info("wiki-mirror: mirroring workspace", { workspace: entry.workspaceId, root: entry.root });
+  }
+
+  return {
+    wiki,
+    mirrors,
+    async close(): Promise<void> {
+      for (const m of mirrors) await m.stop();
+      await wiki.close();
+    },
+  };
+}
+
+/**
+ * Poll the stream host until it answers (any HTTP response counts as reachable), so the mirror
+ * tolerates the server still booting — the single-command dev loop starts both at once. A host
+ * that never comes up within `timeoutMs` is a fatal boot error (nonzero exit). Host-side
+ * wall-clock — the engine-determinism rule applies to reducers/renderers, not this loop.
+ */
+async function waitForStreamHost(baseUrl: string, logger: Logger, timeoutMs = 30_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await fetch(baseUrl, { method: "GET" });
+      return; // any response (even a 404) means the host is up
+    } catch (err) {
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `wiki-mirror: stream host at ${baseUrl} is unreachable after ${Math.round(timeoutMs / 1000)}s: ` +
+            (err instanceof Error ? err.message : String(err)),
+        );
+      }
+      if (attempt === 0) logger.warn("wiki-mirror: waiting for stream host", { baseUrl });
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  }
+}
+
+/**
+ * Standalone runtime: resolve config from `process.argv`/`process.env`/the config file, start
+ * the mirror, and run until SIGINT/SIGTERM. A boot error rejects (the `./bin` wrapper exits
+ * nonzero).
+ */
+export async function main(argv = process.argv.slice(2), env = process.env): Promise<void> {
+  const logger = consoleLogger();
+  const config = resolveConfig(argv, env);
+  if (config.emitters.length === 0) {
+    throw new Error(
+      "wiki-mirror: no emitters configured — add them to wiki-mirror.config.json, or pass --workspace <id> --root <dir>",
+    );
+  }
+
+  await waitForStreamHost(config.streamBaseUrl, logger);
+  const running = await startMirror(config, logger);
+  const shutdown = (): void => {
+    void running.close().finally(() => process.exit(0));
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+  logger.info("wiki-mirror started", {
+    namespace: config.namespace,
+    streamBaseUrl: config.streamBaseUrl,
+    workspaces: config.emitters.length,
+  });
+}
