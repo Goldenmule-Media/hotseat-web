@@ -1,6 +1,6 @@
 # Spec — Local markdown mirror (wiki-mirror)
 
-**Status:** drafting
+**Status:** sealed
 
 ## Overview
 Markdown emission is inherently a local concern: it writes a specific developer's checkout at a specific absolute path. That was invisible while wiki-server always ran on the same machine as the checkout; making the server deployable surfaces it. The resolution is to treat emission as a stream client, not a host responsibility — the headless analog of wiki-ui — and to move it, and its per-machine config, out of the shared server and onto the local machine. This spec records the decided design; the parent brief holds the deliberation trail.

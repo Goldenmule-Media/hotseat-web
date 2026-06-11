@@ -1,6 +1,6 @@
 # Testing plan — Local markdown mirror (wiki-mirror)
 
-**Status:** draft
+**Status:** ready
 
 ## Planned
 _None._

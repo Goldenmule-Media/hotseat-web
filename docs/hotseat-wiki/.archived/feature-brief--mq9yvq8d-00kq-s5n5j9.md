@@ -1,6 +1,6 @@
 # Feature: Local markdown mirror (wiki-mirror)
 
-**Status:** building
+**Status:** shipped
 
 ## Summary
 A deployed wiki-server cannot write Markdown into a developer's local git checkout: the emitter's roots are absolute filesystem paths meaningful only on the machine that owns the disk. This feature extracts Markdown emission out of the wiki-mcp host into a new locally-run process, `wiki-mirror`, that tails a (possibly remote) server's durable stream, folds + renders each commit with the engine, and writes deterministic Markdown to a local root — the headless, disk-writing sibling of wiki-ui. The embedded emitter is retired (emission lives only in the mirror) and emitter config moves from the server-side `_emitter-config` stream to a local config file the mirror owns. This unblocks deploying wiki-server to shared infrastructure while each developer keeps their own checkout mirrored locally. Out of scope: cloud stream storage, endpoint auth/TLS, and cloud model availability — none of which markdown emission depends on.

@@ -1,6 +1,6 @@
 # Implementation plan — Local markdown mirror (wiki-mirror)
 
-**Status:** draft
+**Status:** ready
 
 ## Steps
 - [x] Scaffold the `wiki-mirror` workspace package: package.json (`type:module`, tsdown build, tsx start; deps `wiki` + `wiki-models` + `@durable-streams/client`), tsconfig, and add it to the root `workspaces` array and the root typecheck/test/build scripts. Match wiki-mcp's conventions (`.js` relative imports, compiled-and-run-as-Node).
