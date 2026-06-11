@@ -36,6 +36,8 @@ import type {
 } from "../api";
 import {
   BatchCommandError,
+  BatchCommandsError,
+  type BatchFailure,
   ConcurrencyError,
   FieldKindError,
   InvariantViolationError,
@@ -313,6 +315,7 @@ export class CommandBus {
     const foldNow = this.services.now();
     const events: DomainEvent[] = [];
     const results: unknown[] = [];
+    const failures: BatchFailure[] = [];
     for (let i = 0; i < req.commands.length; i++) {
       const { command, args } = req.commands[i]!;
       let outcome: { events: DomainEvent[]; result: unknown };
@@ -325,10 +328,15 @@ export class CommandBus {
           ...(req.commandId !== undefined ? { commandId: req.commandId } : {}),
         });
       } catch (cause) {
-        // Atomic: nothing has been appended (we only mutated the throwaway clone), so
-        // the whole batch aborts. Pin the failing index for the caller to self-correct.
-        if (cause instanceof WikiError) throw new BatchCommandError(i, command, cause);
-        throw cause;
+        // A non-WikiError is a bug, not a caller-fixable rejection — fail hard now.
+        if (!(cause instanceof WikiError)) throw cause;
+        // Atomic: nothing is ever appended (we only mutate the throwaway clone), so we can
+        // keep deciding the REMAINING commands to collect every independent failure in one
+        // pass — the caller fixes them all at once instead of resubmitting per error. The
+        // failed command's events are NOT folded, so a later command that depended on them
+        // may fail downstream; that's flagged in the aggregate's message.
+        failures.push({ index: i, command, cause });
+        continue;
       }
       results.push(outcome.result);
       // Fold this command's events into the working copy so the NEXT command decides
@@ -351,6 +359,8 @@ export class CommandBus {
       }
       events.push(...outcome.events);
     }
+    if (failures.length === 1) throw new BatchCommandError(failures[0]!.index, failures[0]!.command, failures[0]!.cause);
+    if (failures.length > 1) throw new BatchCommandsError(failures);
     return { events, result: { results } };
   }
 
@@ -837,15 +847,20 @@ export class CommandBus {
       pageNext: (status, ev) => this.registry.pageGuard(type).next(status, ev),
       elementNext: (elType, status, ev) => this.registry.elementGuard(type, elType)?.next(status, ev),
     });
-    // Validate against a state whose page node reflects the dry-run sections.
+    // Validate against a state whose page node reflects the dry-run sections AND status —
+    // the post-fold status drives the `requiredIn` authored-ness gate (a transition INTO a
+    // gated status must validate against the status being entered, not the one left).
     const node = state.pages.get(view.id);
     if (node === undefined) return;
     const previous = node.sections;
+    const previousStatus = node.status;
     node.sections = clone.sections;
+    node.status = clone.status;
     try {
       validatePage(state, node, this.registry);
     } finally {
       node.sections = previous;
+      node.status = previousStatus;
     }
     void SectionContractError;
     void contentHash;

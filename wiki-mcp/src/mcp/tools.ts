@@ -772,8 +772,9 @@ const mutatePageBatchTool: WikiTool = {
       }
       return { command: entry.command, args: (entry.args ?? {}) as Record<string, unknown> };
     });
-    // Atomic: the engine throws BatchCommandError (with the failing index) on rejection,
-    // committing nothing — server.ts surfaces it as a structured [BATCH_COMMAND_FAILED] error.
+    // Atomic: the engine throws on rejection, committing nothing — BatchCommandError (one
+    // failing index) or BatchCommandsError (every failure, collected in one pass). Both carry
+    // the BATCH_COMMAND_FAILED code, which server.ts surfaces as a structured error.
     const { value, token } = await handle.mutateMany(pageId, commands);
     ctx.tokens.recordWrite(ctx.sessionId, token);
     const next = await summarizeNext(handle, pageId, token);

@@ -483,8 +483,11 @@ export interface IWorkspaceHandle {
    * order-dependent sequence — set a field, then a transition gated on it — works),
    * all the resulting events are appended as one array-message, and the whole batch
    * shares one {@link Committed} token. All-or-nothing: if any command is rejected the
-   * batch aborts with {@link BatchCommandError} (carrying the failing index) and NOTHING
-   * is committed. The token reflects every command, so a read gated on it sees them all.
+   * batch aborts and NOTHING is committed — a single rejection throws
+   * {@link BatchCommandError} (carrying the failing index); when more than one command
+   * fails, the batch collects them in one pass and throws {@link BatchCommandsError}
+   * (carrying every failure) so the caller can fix them all before resubmitting. The token
+   * reflects every command, so a read gated on it sees them all.
    */
   mutateMany(
     pageId: PageId,

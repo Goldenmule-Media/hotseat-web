@@ -302,6 +302,40 @@ export class BatchCommandError extends WikiError {
   }
 }
 
+/** One command's rejection within a batch — the 0-based `index`, the `command` name, and
+ *  the underlying typed `cause`. Carried in bulk by {@link BatchCommandsError}. */
+export interface BatchFailure {
+  readonly index: number;
+  readonly command: string;
+  readonly cause: WikiError;
+}
+
+/**
+ * Thrown when MORE THAN ONE command in a batch fails — the batch's failures collected in a
+ * single pass so the caller can fix them all at once instead of resubmitting to discover the
+ * next one. Shares the `BATCH_COMMAND_FAILED` code with {@link BatchCommandError} (the
+ * single-failure case still throws that), so a `code`-based handler treats both alike. The
+ * batch stays atomic — NOTHING was committed. Each command is decided against the state left
+ * by the prior commands that PASSED (a failed command's effects are not folded), so a failure
+ * AFTER an earlier one may be a downstream effect of it; fix the earliest first. `failures` is
+ * in ascending `index` order; the full enumerated list (each cause's message) rides in the
+ * `message` so a `WikiError`-to-text mapping surfaces it without inspecting `failures`.
+ */
+export class BatchCommandsError extends WikiError {
+  readonly failures: readonly BatchFailure[];
+  constructor(failures: readonly BatchFailure[]) {
+    const total = failures.length;
+    const lines = failures.map((f) => `  [${f.index}] "${f.command}": ${f.cause.message}`).join("\n");
+    super(
+      "BATCH_COMMAND_FAILED",
+      `Batch aborted: ${total} commands failed (nothing was committed). Fix each and resubmit:\n${lines}\n` +
+        `Each command is checked against the state left by the prior commands that passed, so a later ` +
+        `failure may be downstream of an earlier one — fix the earliest first.`,
+    );
+    this.failures = failures;
+  }
+}
+
 /**
  * Thrown when a token-gated read's `waitFor` exceeds its timeout — the read model
  * hasn't applied the requested {@link ConsistencyToken} in time.

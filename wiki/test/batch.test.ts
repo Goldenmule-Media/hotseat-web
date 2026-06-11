@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { IWiki, IWorkspaceHandle, PageId } from "../src/api";
 import { definePageType, t, arg } from "../src/core/define";
-import { BatchCommandError, MutationNotAllowedError } from "../src/core/errors";
+import { BatchCommandError, BatchCommandsError, MutationNotAllowedError } from "../src/core/errors";
 import { zodSchema, z } from "../src/schema/zod-adapter";
 import { featurePageTypes } from "wiki-models/feature";
 import { createTestWiki, type ITestWiki } from "../src/testing";
@@ -96,6 +96,42 @@ describe("mutateMany — atomic, order-dependent single-page batch", () => {
     expect(await after.status()).toBe("a");
     expect(await after.toMarkdown()).not.toContain("doomed");
     expect((await ws.history()).length).toBe(before.length);
+  });
+
+  it("collects EVERY independent failure in one pass: two illegal commands → BatchCommandsError", async () => {
+    const before = await ws.history();
+    // [go2 (illegal from 'a'), setText (legal), go2 (still illegal — go1 never folded)].
+    // Both go2's fail independently; the legal setText between them does not rescue them.
+    const err = await ws
+      .mutateMany(page, [
+        { command: "go2" },
+        { command: "setText", args: { text: "doomed" } },
+        { command: "go2" },
+      ])
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(BatchCommandsError);
+    expect(err.code).toBe("BATCH_COMMAND_FAILED");
+    expect(err.failures.map((f: { index: number }) => f.index)).toEqual([0, 2]);
+    expect(err.failures.every((f: { command: string }) => f.command === "go2")).toBe(true);
+    expect(err.failures[0].cause).toBeInstanceOf(MutationNotAllowedError);
+    // Both failures are enumerated in the message, and the legal set rides through.
+    expect(err.message).toContain("[0]");
+    expect(err.message).toContain("[2]");
+    expect(err.message).toContain("go1");
+    // Atomic: nothing committed.
+    const after = await ws.page(page);
+    expect(await after.status()).toBe("a");
+    expect(await after.toMarkdown()).not.toContain("doomed");
+    expect((await ws.history()).length).toBe(before.length);
+  });
+
+  it("still throws the singular BatchCommandError when exactly ONE command fails", async () => {
+    const err = await ws
+      .mutateMany(page, [{ command: "setText", args: { text: "ok" } }, { command: "go2" }])
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(BatchCommandError);
+    expect(err).not.toBeInstanceOf(BatchCommandsError);
+    expect(err.index).toBe(1);
   });
 
   it("the wrapped error carries the underlying typed cause + legal set", async () => {

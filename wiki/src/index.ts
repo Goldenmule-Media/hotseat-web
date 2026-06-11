@@ -172,8 +172,9 @@ export {
   PreconditionUnmetError,
   StaleEditError,
   BatchCommandError,
+  BatchCommandsError,
 } from "./core/errors";
-export type { SchemaIssue } from "./core/errors";
+export type { SchemaIssue, BatchFailure } from "./core/errors";
 
 // ── Zod schema adapter ────────────────────────────────────────────────────────
 export { zodSchema, z } from "./schema/zod-adapter";
