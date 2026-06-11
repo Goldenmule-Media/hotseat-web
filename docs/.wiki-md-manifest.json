@@ -1,6 +1,6 @@
 {
   "ws:mpzncs2z-0001-2wgv51": {
-    "version": 1805,
+    "version": 1818,
     "files": {
       "hotseat-wiki/architecture/index.md": "fea57d534a3aa7ca70deabb6089650bb28b9562fa7bd01d010cae03f89ebf5cc",
       "hotseat-wiki/feature-specs/index.md": "f39d08db07e0ed57f225cb9f5c595b09681c1f99fbc6753333f70742a6cb5dad",
@@ -96,7 +96,9 @@
       "hotseat-wiki/.archived/implementation-plan--mq858obw-007s-1jyv5l.md": "f3eb994d18495a0a736563c8d6c2de3a2f73a620f20ae8c2da3fabf1f0c18aa2",
       "hotseat-wiki/.archived/testing-plan--mq858obw-007t-um5okl.md": "5662d74c5f1d6587ac2770f209f83f13ca7518bea4bbd6691919c8b0617a7d9b",
       "hotseat-wiki/.archived/feature-spec--mq858obw-007u-czpbbd.md": "a9865de56c482b09ab526f6a725930ab89610afa0bffed8387308255a3b36092",
-      "hotseat-wiki/architecture/wiki-models/bug-report.md": "455f6d15a0d68523c21aca29877f51e5411eb6fbb75975ef81b2f678a5714445"
+      "hotseat-wiki/architecture/wiki-models/bug-report.md": "455f6d15a0d68523c21aca29877f51e5411eb6fbb75975ef81b2f678a5714445",
+      "hotseat-wiki/bugs/index.md": "44dfc512fbe3712d52d16512796de2fc19d1fa204a8852a0b8f36b899e750e98",
+      "hotseat-wiki/bugs/boot-time-emitter-back-fill-races-model-bundle-registration-and-deletes-mirrored-files.md": "5d7605d28ed2c903de2e1d57e0c44949fd92521946a60e3e5c0f30e2e9cc4209"
     },
     "pages": {
       "toc:mpznedyz-0003-pdtcmh": "hotseat-wiki/architecture/index.md",
@@ -193,7 +195,9 @@
       "implementation-plan:mq858obw-007s-1jyv5l": "hotseat-wiki/.archived/implementation-plan--mq858obw-007s-1jyv5l.md",
       "testing-plan:mq858obw-007t-um5okl": "hotseat-wiki/.archived/testing-plan--mq858obw-007t-um5okl.md",
       "feature-spec:mq858obw-007u-czpbbd": "hotseat-wiki/.archived/feature-spec--mq858obw-007u-czpbbd.md",
-      "architecture:mq9mf28s-0001-7bddvs": "hotseat-wiki/architecture/wiki-models/bug-report.md"
+      "architecture:mq9mf28s-0001-7bddvs": "hotseat-wiki/architecture/wiki-models/bug-report.md",
+      "toc:mq9ntno0-000l-gie2eu": "hotseat-wiki/bugs/index.md",
+      "bug-report:mq9ntvvm-000n-d6gkn7": "hotseat-wiki/bugs/boot-time-emitter-back-fill-races-model-bundle-registration-and-deletes-mirrored-files.md"
     }
   }
 }
