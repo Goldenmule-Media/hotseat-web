@@ -1,6 +1,6 @@
 # Bug: Boot-time emitter back-fill races model-bundle registration and deletes mirrored files
 
-**Status:** open
+**Status:** closed
 
 ## Report
 - **Component:** wiki-mcp (MarkdownDiskProjector / projection boot reconcile)
@@ -23,7 +23,8 @@ Boot-time back-fill must not run until every configured model bundle is register
 An early reconcile with a partial registry deleted 95 mirrored files; racing per-generation reconciles rewrote most but left 23 files for live pages missing while the manifest still claimed all 95, and subsequent emitter re-registration was a no-op (back-fill trusted the stale manifest). Mirror integrity silently lost across two separate boots (CLAUDE.md links to architecture/wiki/* were stranded by the earlier occurrence).
 
 ## Resolution
-_None._
+- `f399afc` fix(wiki,wiki-mcp): boot-race emitter back-fill no longer deletes mirrored files — foldWorkspace exposes retired-type skips as state.retired; the Markdown projector freezes unfoldable pages (never sweeps them), serializes all disk mutation behind a per-root lock, and verifies the manifest against disk on init (a partially-wiped tree now self-heals); the model hot-reload stops the live tail before reprojecting so tail runners cannot race rebuilds into the render sinks.
+- `5d14c5f` fix(wiki-mcp): manifest verification hashes file bytes, not just existence — a file restored out-of-band (e.g. a git checkout over the mirror) holds stale bytes behind a current manifest hash; init() now re-hashes every tracked file and drops entries that disagree with disk, so the next reconcile rewrites them.
 
 ## References
 _None._

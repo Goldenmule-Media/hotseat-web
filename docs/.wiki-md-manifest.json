@@ -1,6 +1,6 @@
 {
   "ws:mpzncs2z-0001-2wgv51": {
-    "version": 1831,
+    "version": 1834,
     "files": {
       "hotseat-wiki/architecture/index.md": "fea57d534a3aa7ca70deabb6089650bb28b9562fa7bd01d010cae03f89ebf5cc",
       "hotseat-wiki/feature-specs/index.md": "f39d08db07e0ed57f225cb9f5c595b09681c1f99fbc6753333f70742a6cb5dad",
@@ -98,7 +98,7 @@
       "hotseat-wiki/.archived/feature-spec--mq858obw-007u-czpbbd.md": "a9865de56c482b09ab526f6a725930ab89610afa0bffed8387308255a3b36092",
       "hotseat-wiki/architecture/wiki-models/bug-report.md": "4fb47393435e0661f5b1a83367ad3b639d21cebcf3db43af2b62cf6b16910ecd",
       "hotseat-wiki/bugs/index.md": "44dfc512fbe3712d52d16512796de2fc19d1fa204a8852a0b8f36b899e750e98",
-      "hotseat-wiki/bugs/boot-time-emitter-back-fill-races-model-bundle-registration-and-deletes-mirrored-files.md": "5d7605d28ed2c903de2e1d57e0c44949fd92521946a60e3e5c0f30e2e9cc4209",
+      "hotseat-wiki/bugs/boot-time-emitter-back-fill-races-model-bundle-registration-and-deletes-mirrored-files.md": "18fb0a4b3ce2e49f22bc7480ba30372bc654c706bcbe0a2c83e7bb3b5a9a47ca",
       "hotseat-wiki/decision-records/declared-authored-ness-gates-requiredin-the-engine-enforces-field-completeness-per-status.md": "63bb19248ee7db25f632482a7714a69fe3317aaf69900446410c60ff4490d062"
     },
     "pages": {
