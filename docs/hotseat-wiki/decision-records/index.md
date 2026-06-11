@@ -37,3 +37,4 @@ _No overview yet._
 - [Generic mutations in v1, generated subcommands later](decision-record:mq110ye5-009p-4evl6w)
 - [Cross-workspace operations are an admin/system affordance, not a content read](decision-record:mq5hnpu9-001m-c9yfrl)
 - [Declared authored-ness gates (`requiredIn`): the engine enforces field completeness per status](decision-record:mq9oa2cx-0014-scc7q)
+- [Markdown emission is a local stream-client, not a host responsibility](decision-record:mqa1x5yj-000d-foj09k)
