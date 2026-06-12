@@ -149,6 +149,9 @@ describe("replicateWorkspace: copy a workspace between servers", () => {
     expect(report.copiedEvents).toBe(report.sourceEvents);
     expect(report.copiedEvents).toBeGreaterThan(0);
     expect(report.destHeadAfter).toBe(0);
+    // The catalog count is the real would-copy (the dest has no entry for this ws yet),
+    // computed via non-creating probes — so a dry-run reports it without side effects.
+    expect(report.catalogEventsCopied).toBeGreaterThan(0);
 
     // Nothing landed on the destination: the workspace stream was never even created
     // (a dry-run is side-effect-free), and the workspace does not list.

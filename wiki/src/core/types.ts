@@ -108,6 +108,8 @@ export interface IEventLog {
   // ── namespace catalog stream `…/{namespace}/_catalog` ──
   appendCatalog(event: CatalogEvent): Promise<void>;
   readCatalog(): Promise<CatalogEvent[]>;
+  /** Does the catalog stream exist? A non-creating HEAD probe (`readCatalog` ensures it). */
+  catalogExists(): Promise<boolean>;
 
   /** Release any cached handles / live subscriptions. */
   close(): Promise<void>;

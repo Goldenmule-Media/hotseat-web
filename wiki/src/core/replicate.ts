@@ -27,7 +27,7 @@
  * constructs two `EventLog`s (source + dest) from plain {@link IStreamConfig}s.
  */
 import type { IStreamConfig, WorkspaceId } from "../api";
-import { EventLog, type EventLogConfig } from "../stores/event-log";
+import { EventLog } from "../stores/event-log";
 
 export interface ReplicateWorkspaceOptions {
   /** Where to read the workspace stream from. */
@@ -74,16 +74,6 @@ export class ReplicationConflictError extends Error {
   }
 }
 
-/** Map the public {@link IStreamConfig} onto the internal {@link EventLogConfig}. */
-function toLogConfig(cfg: IStreamConfig): EventLogConfig {
-  return {
-    baseUrl: cfg.baseUrl,
-    namespace: cfg.namespace,
-    ...(cfg.ttlSeconds !== undefined ? { ttlSeconds: cfg.ttlSeconds } : {}),
-    ...(cfg.headers !== undefined ? { headers: cfg.headers } : {}),
-  };
-}
-
 /**
  * Copy a workspace's event stream from `source` to `dest`. Returns a
  * {@link ReplicationReport}; throws {@link ReplicationConflictError} if the
@@ -96,10 +86,14 @@ export async function replicateWorkspace(
   const dryRun = opts.dryRun ?? false;
   const ws = opts.workspaceId;
 
-  const source = new EventLog(toLogConfig(opts.source));
-  const dest = new EventLog(toLogConfig(opts.dest));
+  // `IStreamConfig` is structurally an `EventLogConfig`, so the configs pass straight
+  // through — and a future divergence fails to compile here rather than silently drop a field.
+  const source = new EventLog(opts.source);
+  const dest = new EventLog(opts.dest);
   try {
-    const sourceCommits = await source.readCommits(ws);
+    // Independent cross-server reads: overlap the full source read with the dest probe
+    // (a local↔remote migration makes each a network round-trip).
+    const [sourceCommits, destExists] = await Promise.all([source.readCommits(ws), dest.exists(ws)]);
     const sourceEvents = sourceCommits.flat();
 
     // Defensive: the source stream must be gap-free 0..N-1 in version order, or its
@@ -112,10 +106,10 @@ export async function replicateWorkspace(
       }
     }
 
-    // Find the resume point from the destination's existing commits. Probe with
-    // exists() first so a dry-run (and an apply with nothing to copy) never CREATES an
-    // empty destination stream as a side effect — readCommits would otherwise ensure it.
-    const destEventsBefore = (await dest.exists(ws)) ? (await dest.readCommits(ws)).flat() : [];
+    // Find the resume point from the destination's existing commits. The exists() probe
+    // above means a dry-run (and an apply with nothing to copy) never CREATES an empty
+    // destination stream as a side effect — readCommits would otherwise ensure it.
+    const destEventsBefore = destExists ? (await dest.readCommits(ws)).flat() : [];
     const destHead = destEventsBefore.length;
 
     if (destHead > sourceEvents.length) {
@@ -160,21 +154,23 @@ export async function replicateWorkspace(
       cursor = end;
     }
 
-    // Catalog: copy the source's entries for this workspace that the destination is
-    // missing, so it lists on the destination. A best-effort SECONDARY index (not a
-    // consistency boundary): a catalog failure must NOT fail an otherwise-complete
-    // stream copy, and a dry-run must neither read nor create the destination catalog.
+    // Catalog: a best-effort SECONDARY index (not a consistency boundary) so the
+    // workspace LISTS on the destination. Copy the source's entries for this workspace
+    // only when the destination has NONE — presence-based, so a re-run is a no-op and a
+    // divergent destination catalog is never mis-ordered. catalogExists() is a
+    // non-creating probe, so even a dry-run touches neither catalog stream; appends are
+    // gated by `!dryRun`. A catalog failure must NOT fail an otherwise-complete copy.
     let catalogEventsCopied = 0;
     if (includeCatalog) {
-      const sourceForWs = (await source.readCatalog()).filter((e) => e.id === ws);
-      if (dryRun) {
-        // Upper-bound preview: report what would be copied without touching the dest.
-        catalogEventsCopied = sourceForWs.length;
-      } else {
+      const destHasWs =
+        (await dest.catalogExists()) && (await dest.readCatalog()).some((e) => e.id === ws);
+      if (!destHasWs) {
+        const sourceForWs = (await source.catalogExists())
+          ? (await source.readCatalog()).filter((e) => e.id === ws)
+          : [];
         try {
-          const destForWsCount = (await dest.readCatalog()).filter((e) => e.id === ws).length;
-          for (const event of sourceForWs.slice(destForWsCount)) {
-            await dest.appendCatalog(event);
+          for (const event of sourceForWs) {
+            if (!dryRun) await dest.appendCatalog(event);
             catalogEventsCopied++;
           }
         } catch {

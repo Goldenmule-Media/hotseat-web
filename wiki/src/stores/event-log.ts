@@ -169,6 +169,13 @@ export class EventLog implements IEventLog {
     return res.exists;
   }
 
+  async catalogExists(): Promise<boolean> {
+    // A non-creating HEAD probe (unlike readCatalog, which ensures the stream) so a
+    // caller can check the catalog without the read side-effect of creating it.
+    const res = await DurableStream.head({ url: this.catalogUrl(), ...this.headerOpts() });
+    return res.exists;
+  }
+
   async append(
     ws: WorkspaceId,
     events: IEventEnvelope[],
