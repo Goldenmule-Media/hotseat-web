@@ -203,6 +203,19 @@ export class EventLog implements IEventLog {
     return { events: batches.flat(), nextCursor: res.offset };
   }
 
+  async readCommits(ws: WorkspaceId): Promise<IEventEnvelope[][]> {
+    await this.ensure(ws);
+    const res = await stream<IEventEnvelope[]>({
+      url: this.urlFor(ws),
+      offset: START_OFFSET,
+      live: false,
+      ...this.headerOpts(),
+    });
+    // Each stored message is one commit (a JSON array of envelopes); return them
+    // un-flattened so a caller can re-append each as one atomic message.
+    return res.json();
+  }
+
   async subscribe(
     ws: WorkspaceId,
     onBatch: (events: IEventEnvelope[], cursor: string) => void | Promise<void>,

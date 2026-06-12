@@ -21,6 +21,7 @@
     "start": "tsx src/bin.ts",
     "backfill-titles": "tsx src/backfill-titles.ts",
     "backfill-serials": "tsx src/backfill-serials.ts",
+    "migrate-workspace": "tsx src/migrate-workspace.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

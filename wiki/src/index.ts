@@ -16,6 +16,10 @@ export { createWiki } from "./core/wiki";
 // ── public, pure fold (for external read models) ──────────
 export { foldWorkspace, applyWorkspace } from "./core/workspace";
 
+// ── stream-to-stream workspace replication (copy a workspace between servers) ──
+export { replicateWorkspace, ReplicationConflictError } from "./core/replicate";
+export type { ReplicateWorkspaceOptions, ReplicationReport } from "./core/replicate";
+
 // ── consistency-token codec (the token SHAPE; for external read models) ───
 // An external IReadModel (e.g. wiki-mcp's SQL projection) must encode/decode the
 // SAME opaque `{ workspaceId, version }` token the engine's writes return, so the

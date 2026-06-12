@@ -86,6 +86,14 @@ export interface IEventLog {
   append(ws: WorkspaceId, events: IEventEnvelope[], opts: { expectedVersion: number }): Promise<AppendResult>;
   /** Read flattened events from a coarse cursor (or the start when omitted). */
   read(ws: WorkspaceId, fromCursor?: string): Promise<ReadResult>;
+  /**
+   * Read the stream's COMMITS without flattening — each returned {@link Commit} is one
+   * stored array-message (the events one command appended atomically). The commit
+   * boundaries `read()` discards are load-bearing for faithful stream-to-stream
+   * replication, which must re-append each commit as one message to reproduce the
+   * source's exact OCC sequence. Order is stream order (== version order).
+   */
+  readCommits(ws: WorkspaceId): Promise<Commit[]>;
   /** Live tail: invoke `onBatch` with each batch's flattened events + resume cursor. */
   subscribe(
     ws: WorkspaceId,
