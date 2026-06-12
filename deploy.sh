@@ -91,6 +91,9 @@ ssh $SSH_OPTS "$HOST" "bash -s" <<REMOTE_DEPLOY || fail "Remote build/up failed 
 set -euo pipefail
 cd $REMOTE_DIR
 docker compose up -d --build
+# A Caddyfile edit doesn't trigger a recreate (file content isn't in the compose
+# config hash, and the single-file bind mount pins the old inode) — force it.
+docker compose up -d --force-recreate caddy
 REMOTE_DEPLOY
 
 info "Verifying services are healthy ..."
