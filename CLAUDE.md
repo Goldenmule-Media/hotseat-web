@@ -155,17 +155,33 @@ The load-bearing mental model; full detail in [`architecture/wiki/`](docs/hotsea
 `npm run start -w wiki-server` boots three listeners in one process: the **stream host** (`:4437`), a
 **control listener** (`:4438` — `/_server/health`, `/_server/info`, `/_server/logs`, `/_server/models`),
 and the embedded **wiki-mcp** streamable-HTTP MCP endpoint (`:4439/mcp`). File storage defaults to
-`./.wiki-data`. Config is `flags → env → defaults`: `wiki-server` reads `WIKI_SERVER_*` (host/port/storage/
-data-dir/control-port/mcp-port/models/models-dir) **and** resolves the embedded `wiki-mcp`'s `WIKI_MCP_*`
+`./.wiki-data`. Config is `flags → env → defaults` (a cwd `.env` seeds unset env keys first — see
+`.env.example`): `wiki-server` reads `WIKI_SERVER_*` (host/port/storage/
+data-dir/control-port/mcp-port/models/models-dir/auth) **and** resolves the embedded `wiki-mcp`'s `WIKI_MCP_*`
 (namespace, `WIKI_MCP_DB` = `pglite`|`pg`, `WIKI_MCP_PG_URL`, data-dir), overriding the MCP's stream URL to
 its own. Full surface: [`architecture/wiki-server.md`](docs/hotseat-wiki/architecture/wiki-server.md).
+
+- **GitHub auth (`--auth github` / `WIKI_SERVER_AUTH=github`; default `none`).** An **auth gateway** takes
+  over `:4437` (the stream host moves to an internal loopback port), serving GitHub OAuth at `/auth/*` and
+  reverse-proxying ONLY workspace/catalog stream paths behind a signed bearer session (deny-by-default);
+  the MCP endpoint demands the same token, and the control listener becomes **loopback-only** (its model
+  loads/logs are operator surface, not user surface). Set `WIKI_SERVER_AUTH_USERS` to allowlist who may
+  sign in at all. **Workspace = project:** the CREATOR becomes owner (ledger at
+  `<dataDir>/auth/access.json`); the owner manages members (`/auth/workspaces/{id}/members`, or the
+  wiki-ui Members panel); non-members get 403s + filtered listings; pre-auth workspaces stay open to any
+  signed-in user until `/claim`ed. Needs a GitHub OAuth App (callback
+  `{WIKI_SERVER_PUBLIC_URL}/auth/github/callback`) — copy `.env.example` → `.env` at the repo root (read
+  via npm's `INIT_CWD`). Per-client credentials: wiki-ui signs in interactively; `.mcp.json` adds
+  `"headers": {"Authorization": "Bearer <token>"}`; `wiki-mirror` takes `WIKI_MIRROR_TOKEN` (copy the
+  token from the wiki-ui account menu). The engine seam is `IStreamConfig.headers` (per-request function
+  values, so refreshed tokens take effect live).
 
 - **The server loads NO page types by default.** Provide the schema explicitly:
   `npm run start -w wiki-server -- --models wiki-models/feature` (or `WIKI_SERVER_MODELS=wiki-models/feature`).
   At runtime you can also `POST /_server/models {"id":"feature","specifier":"wiki-models/feature"}`, or list
   with `GET localhost:4438/_server/models`. **Load every bundle at once:** `npm start` (root) boots the
   server with `--models-dir ../wiki-models/src` **and** the local `wiki-mirror` process (via `concurrently`;
-  config `wiki-mirror.config.json` at the repo root). Under `--models-dir`, each `src/<bundle>/` → a bundle,
+  config `~/.wiki/wiki-mirror.config.json`). Under `--models-dir`, each `src/<bundle>/` → a bundle,
   id = dir name; also accepts a built `dist` tree, skipping non-bundle chunks with a warning. An explicit
   `--models` overrides a discovered bundle of the same id (and still hard-fails if it can't load).
 - **Markdown disk mirrors — the `wiki-mirror` process.** A project mirrors a workspace's deterministic
@@ -173,9 +189,10 @@ its own. Full surface: [`architecture/wiki-server.md`](docs/hotseat-wiki/archite
   tails the (possibly remote) server's Durable Stream, folds + renders each commit with the embedded engine,
   and writes the tree to a local root — the disk-writing sibling of `wiki-ui`, built on `wiki`'s public
   surface alone (no `wiki-mcp`/`wiki-server` internals; tails read-only, authors nothing back). Config is a
-  **local file** (`wiki-mirror.config.json`, resolved `flags → env WIKI_MIRROR_* → file → defaults`) mapping
-  each `workspaceId →` **absolute** root (one tail loop each) — per-machine state, never stored on the shared
-  server. It is read once at startup; **restart to reconfigure**. Layout `<root>/<workspace>/<page tree>`
+  **user-level local file** (`~/.wiki/wiki-mirror.config.json` by default — ONE per machine, shared by every
+  project; override with `--config` / `WIKI_MIRROR_CONFIG`; resolved `flags → env WIKI_MIRROR_* → file →
+  defaults`) mapping each `workspaceId →` **absolute** root (one tail loop each) — per-machine state, never
+  stored on the shared server or a checkout. It is read once at startup; **restart to reconfigure**. Layout `<root>/<workspace>/<page tree>`
   (folder + `index.md` per page-with-children), content-hashed so the git diff stays honest, atomic
   temp+rename writes, an on-disk manifest (`.wiki-md-manifest.json`), and a boot back-fill that self-heals a
   wiped output dir. **Archiving never deletes a mirrored file:** archiving a page (or the whole workspace)

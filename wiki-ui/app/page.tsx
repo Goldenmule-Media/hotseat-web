@@ -2,6 +2,7 @@
 
 /** Landing: list all workspaces (Q4) and link into them. */
 import Link from "next/link";
+import { AccountMenu } from "../components/AccountMenu";
 import { useWorkspaces } from "../lib/live";
 import { workspaceHref } from "../lib/routes";
 
@@ -11,7 +12,11 @@ export default function Home(): React.JSX.Element {
   return (
     <main className="landing">
       <header className="landing-header">
-        <h1>wiki-ui</h1>
+        <div className="landing-header-row">
+          <h1>wiki-ui</h1>
+          {/* Renders nothing when auth is disabled. */}
+          <AccountMenu />
+        </div>
         <p className="muted">Read-only, live-updating browser for a wiki-server.</p>
       </header>
 

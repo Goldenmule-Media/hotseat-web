@@ -89,6 +89,7 @@ export type {
   TextEdit,
   // entry point & configuration
   IStreamConfig,
+  IStreamHeaders,
   IWikiConfig,
   // IWiki
   IWorkspaceSummary,

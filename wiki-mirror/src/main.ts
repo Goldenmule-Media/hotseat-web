@@ -35,7 +35,14 @@ export async function startMirror(
   const pageTypes = await loadModels(config.models);
   const registry = new Registry(pageTypes);
   const wiki = createWiki({
-    stream: { baseUrl: config.streamBaseUrl, namespace: config.namespace },
+    stream: {
+      baseUrl: config.streamBaseUrl,
+      namespace: config.namespace,
+      // A configured session token rides every stream request as a bearer Authorization
+      // header (the engine's IStreamHeaders seam); without one the shape is identical to
+      // before — no headers key at all. The token value itself is never logged.
+      ...(config.token !== undefined ? { headers: { authorization: `Bearer ${config.token}` } } : {}),
+    },
     pageTypes,
   });
 
@@ -116,9 +123,20 @@ export async function main(argv = process.argv.slice(2), env = process.env): Pro
   const logger = consoleLogger();
   const config = resolveConfig(argv, env);
   if (config.emitters.length === 0) {
-    throw new Error(
-      "wiki-mirror: no emitters configured — add them to wiki-mirror.config.json, or pass --workspace <id> --root <dir>",
+    // An EXPLICITLY named config with nothing to do is a misconfiguration — fail loud.
+    // The implicit per-machine default simply not existing means "this machine mirrors
+    // nothing": idle instead of exiting, because the root `npm start` runs us under
+    // `concurrently -k`, where ANY exit (even 0) kills the wiki-server alongside.
+    if (config.configWasExplicit === true) {
+      throw new Error(
+        "wiki-mirror: no emitters configured — add them to the --config file, or pass --workspace <id> --root <dir>",
+      );
+    }
+    logger.warn(
+      "wiki-mirror: no emitters configured (no ~/.wiki/wiki-mirror.config.json on this machine) — idling; add emitters and restart to mirror",
+      {},
     );
+    await new Promise<never>(() => {});
   }
 
   await waitForStreamHost(config.streamBaseUrl, logger);

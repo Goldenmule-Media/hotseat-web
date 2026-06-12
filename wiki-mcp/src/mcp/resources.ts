@@ -16,6 +16,7 @@ import type { WorkspaceId } from "wiki";
 
 import { asPageId, asWorkspaceId, type EmbeddedEngine } from "../engine.js";
 import type { SqlReadModel } from "../readmodel/readmodel.js";
+import type { AccessView } from "./auth.js";
 import type { SessionTokenManager } from "./tokens.js";
 
 /** A listed resource (what `resources/list` returns per entry). */
@@ -41,6 +42,8 @@ export interface WikiResourceContext {
   readonly sessionId: string | undefined;
   /** The single namespace this instance serves — the `wiki://{ns}/…` authority. */
   readonly namespace: string;
+  /** The caller's access view (auth mode only; absent → trusted). */
+  readonly access?: AccessView;
 }
 
 const MARKDOWN = "text/markdown";
@@ -61,7 +64,9 @@ export function pageUri(namespace: string, workspaceId: string, pageId: string):
  * enumerate via the `tree` tool, then read `wiki://…/page/…`).
  */
 export async function listResources(ctx: WikiResourceContext): Promise<readonly WikiResourceEntry[]> {
-  const rows = await ctx.readModel.listWorkspaces();
+  const all = await ctx.readModel.listWorkspaces();
+  // Auth mode: enumerate only workspaces the caller can access.
+  const rows = ctx.access !== undefined ? all.filter((w) => ctx.access?.canAccess(w.id) === true) : all;
   return rows.map((w) => ({
     uri: workspaceUri(ctx.namespace, w.id),
     name: `${w.name} (workspace)`,
@@ -108,6 +113,9 @@ function parseUri(uri: string, namespace: string): ParsedUri {
  */
 export async function readResource(uri: string, ctx: WikiResourceContext): Promise<WikiResourceContents> {
   const parsed = parseUri(uri, ctx.namespace);
+  if (ctx.access !== undefined && !ctx.access.canAccess(parsed.workspaceId)) {
+    throw new Error(`access denied: not a member of workspace ${parsed.workspaceId}`);
+  }
   const token = ctx.tokens.consistentWith(ctx.sessionId, parsed.workspaceId);
   const opts = token !== undefined ? { consistentWith: token } : undefined;
   const handle = await ctx.engine.open(parsed.workspaceId);

@@ -39,11 +39,17 @@ export type ConnectionState = "connecting" | "live" | "reconnecting" | "error";
  * Why a workspace view could not be built. The crucial distinction:
  * - `connection` — the wiki-server is unreachable (network/fetch failure). Retryable; the
  *   worker's probe keeps trying and the view recovers on its own.
+ * - `unauthorized` — the server WAS reached but rejected our bearer token (HTTP 401 /
+ *   code "UNAUTHORIZED"). Not retryable here: the AuthProvider clears the token and the
+ *   gate falls back to the login page.
+ * - `forbidden` — the server WAS reached and the SESSION IS VALID, but this user is not a
+ *   member of the workspace (HTTP 403 / code "FORBIDDEN"). Deterministic for this session
+ *   — never retried, and never routed through the sign-out path (the token is fine).
  * - `unknown-page-type` / `engine` — the server WAS reached and returned data, but this
  *   build's bundled page types can't fold it. Not a connection problem.
  * - `unsupported` — this browser lacks SharedWorker; the engine never started (tab-side only).
  */
-export type LoadErrorKind = "connection" | "unknown-page-type" | "engine" | "unsupported";
+export type LoadErrorKind = "connection" | "unauthorized" | "forbidden" | "unknown-page-type" | "engine" | "unsupported";
 
 export interface LoadError {
   readonly kind: LoadErrorKind;
@@ -81,13 +87,21 @@ export type SnapshotCallback = (snapshot: WorkspaceSnapshot) => void;
  * value with no string `code` (a `fetch` rejection) is a transport/connection failure.
  */
 export function classifyError(e: unknown): LoadError {
-  const err = e as { code?: unknown; types?: unknown; message?: unknown } | null;
+  const err = e as { code?: unknown; types?: unknown; message?: unknown; status?: unknown } | null;
   const code = typeof err?.code === "string" ? err.code : undefined;
   const message = e instanceof Error ? e.message : typeof err?.message === "string" ? err.message : String(e);
   if (code === "UNKNOWN_PAGE_TYPE") {
     const types = Array.isArray(err?.types) ? (err.types as string[]) : [];
     return { kind: "unknown-page-type", message, unknownTypes: types };
   }
+  // The durable-streams client surfaces an auth rejection as `FetchError.status === 401`
+  // or `DurableStreamError.code === "UNAUTHORIZED"` — distinct from both transport loss
+  // (retryable) and a schema problem (deterministic).
+  if (err?.status === 401 || code === "UNAUTHORIZED") return { kind: "unauthorized", message, unknownTypes: [] };
+  // The gateway's membership rejection ("forbidden: not a member") — the session is
+  // VALID, so it must never funnel through notifyUnauthorized; deterministic, so it is
+  // never retried either. Checked before the generic code branch (code "FORBIDDEN").
+  if (err?.status === 403 || code === "FORBIDDEN") return { kind: "forbidden", message, unknownTypes: [] };
   if (code !== undefined) return { kind: "engine", message, unknownTypes: [] };
   return { kind: "connection", message, unknownTypes: [] };
 }
@@ -110,6 +124,15 @@ export interface HandshakeResult {
  * returns plain data; rejections are {@link WikiErrorDTO} objects (see file header).
  */
 export interface WikiHostApi {
+  /** Supply/refresh (or clear) the bearer token for the SHARED engine. Every connecting
+   *  tab calls this BEFORE its handshake so the first boot's stream config already
+   *  carries the authorization header; later calls retarget the per-request header
+   *  function without rebuilding the wiki — unless the engine booted WITHOUT the header
+   *  function (a pre-auth boot), in which case the worker tears it down so the next call
+   *  re-boots with the header installed. Never called when auth is disabled (no token
+   *  stored), so the header is omitted entirely on that path. */
+  setAuthToken(token: string | null): Promise<void>;
+
   handshake(): Promise<HandshakeResult>;
 
   listWorkspaces(): Promise<readonly IWorkspaceSummary[]>;
@@ -150,6 +173,9 @@ export interface WikiErrorDTO {
   /** Stable engine code, e.g. "UNKNOWN_PAGE_TYPE", "VALIDATION"; `undefined` for a
    *  non-engine failure (a `fetch` rejection), which classifies as a connection error. */
   readonly code?: string;
+  /** HTTP status off a transport-level rejection (`FetchError`/`DurableStreamError`) —
+   *  carried so the tab can classify a 401 from an auth-gated server. */
+  readonly status?: number;
   readonly message: string;
   /** `UnknownPageTypeError.types` — the unresolved page/event types. */
   readonly types?: readonly string[];
@@ -162,11 +188,14 @@ export interface WikiErrorDTO {
 /** Read the engine's typed fields off a live error instance and marshal a plain DTO. Run
  *  worker-side, where the prototype + own-props are intact. Accepts any thrown value. */
 export function toWikiErrorDTO(e: unknown): WikiErrorDTO {
-  const err = e as { code?: unknown; message?: unknown; types?: unknown; issues?: unknown; unmet?: unknown } | null;
+  const err = e as
+    | { code?: unknown; status?: unknown; message?: unknown; types?: unknown; issues?: unknown; unmet?: unknown }
+    | null;
   const code = typeof err?.code === "string" ? err.code : undefined;
   return {
     __wikiError: true,
     ...(code !== undefined ? { code } : {}),
+    ...(typeof err?.status === "number" ? { status: err.status } : {}),
     message: e instanceof Error ? e.message : typeof err?.message === "string" ? err.message : String(e),
     ...(Array.isArray(err?.types) ? { types: err.types as readonly string[] } : {}),
     ...(err?.issues !== undefined ? { issues: err.issues } : {}),

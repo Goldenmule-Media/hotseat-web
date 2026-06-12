@@ -21,22 +21,33 @@
  * same three subsystems and `stop()` them as a unit; the `bin` guard at the bottom
  * resolves config, starts them, and traps signals.
  */
+import type { IncomingMessage } from "node:http";
+import { join } from "node:path";
+
 import { DurableStreamTestServer, type StreamLifecycleEvent } from "@durable-streams/server";
-import { createWikiMcp, resolveConfig as resolveMcpConfig, type McpTransport, type WikiMcp, type WikiMcpConfig } from "wiki-mcp";
+import { createWikiMcp, resolveConfig as resolveMcpConfig, type McpAuth, type McpTransport, type WikiMcp, type WikiMcpConfig } from "wiki-mcp";
 
 // NOTE: `.js` extensions are required because wiki-server is COMPILED and run via
 // `node dist/main.js` (raw Node ESM needs explicit extensions). This differs from
 // `wiki/`, which is consumed as TS source and so imports extensionless. The
 // `wiki-mcp` / `@durable-streams/server` imports above are bare package specifiers.
-import { configWarnings, discoverModelBundles, resolveConfig, type WikiServerConfig } from "./config.js";
+import { applyDotEnv, configWarnings, discoverModelBundles, resolveConfig, type WikiServerConfig } from "./config.js";
 import { createLogger, type IConsolidatingLogger } from "./logger.js";
 import { startControlServer, type ControlServer } from "./control.js";
+import { AccessStore } from "./auth/access.js";
+import { startGateway, type Gateway } from "./auth/gateway.js";
+import { ensureSessionSecret, ephemeralSessionSecret } from "./auth/secret.js";
+import { bearerSession } from "./auth/tokens.js";
 
-/** Build the stream-host options, selecting storage mode by `dataDir` presence. */
-function serverOptions(c: WikiServerConfig, streamLog: IConsolidatingLogger) {
+/**
+ * Build the stream-host options, selecting storage mode by `dataDir` presence.
+ * In auth mode the host binds `bind` (an internal loopback ephemeral port — the
+ * gateway owns the public address); otherwise `bind` is the public config address.
+ */
+function serverOptions(c: WikiServerConfig, bind: { host: string; port: number }, streamLog: IConsolidatingLogger) {
   return {
-    host: c.host,
-    port: c.port,
+    host: bind.host,
+    port: bind.port,
     longPollTimeout: c.longPollTimeout,
     // The stream host's own lifecycle hooks feed the consolidating logger
     // — the operationally meaningful stream events.
@@ -69,6 +80,7 @@ export interface WikiServerDeps {
     baseUrl: string,
     logger: IConsolidatingLogger,
     transport: McpTransport,
+    auth?: McpAuth,
   ) => Promise<{ readonly mcp?: WikiMcp; readonly config: WikiMcpConfig }>;
   /** Process start time (ms epoch) for `uptimeMs`; defaults to "now". */
   readonly startedAt?: number;
@@ -95,6 +107,7 @@ async function defaultStartMcp(
   baseUrl: string,
   logger: IConsolidatingLogger,
   transport: McpTransport,
+  auth?: McpAuth,
 ): Promise<{ mcp: WikiMcp; config: WikiMcpConfig }> {
   // Derive wiki-mcp's wire config from env/flags via its own resolver, then point its
   // `streamBaseUrl` at THIS host's localhost URL (read back from `server.url`, robust
@@ -103,7 +116,7 @@ async function defaultStartMcp(
   // `transport` (streamable HTTP, built from cfg) makes the MCP endpoint network-
   // reachable — an embedded host can't use stdio (that's its own terminal).
   const config: WikiMcpConfig = { ...resolveMcpConfig(process.argv.slice(2), process.env), streamBaseUrl: baseUrl };
-  const mcp = await createWikiMcp({ config, pageTypes: [], logger, transport });
+  const mcp = await createWikiMcp({ config, pageTypes: [], logger, transport, ...(auth !== undefined ? { auth } : {}) });
   return { mcp, config };
 }
 
@@ -119,6 +132,7 @@ export async function startWikiServer(
 ): Promise<RunningWikiServer> {
   const startedAt = deps.startedAt ?? Date.now();
   const startMcp = deps.startMcp ?? defaultStartMcp;
+  const authEnabled = cfg.auth === "github";
 
   // ── 1. the consolidating logger ──
   const logger = createLogger({ bufferSize: cfg.logBuffer, format: cfg.logFormat });
@@ -128,13 +142,53 @@ export async function startWikiServer(
   for (const warning of configWarnings(cfg)) serverLog.warn(warning);
 
   // ── 2. start the stream host ──
-  const server = new DurableStreamTestServer(serverOptions(cfg, streamLog));
-  const baseUrl = await server.start();
+  // Auth mode: the host hides on an internal loopback ephemeral port and the auth
+  // gateway (started below) takes the PUBLIC `cfg.host:cfg.port` in its place. The
+  // in-process consumers (wiki-mcp's engine) keep talking to the internal URL — they
+  // enforce the same ledger at their own surface, so no request loops back through
+  // the gateway.
+  const streamBind = authEnabled ? { host: "127.0.0.1", port: 0 } : { host: cfg.host, port: cfg.port };
+  const server = new DurableStreamTestServer(serverOptions(cfg, streamBind, streamLog));
+  const internalBaseUrl = await server.start();
   serverLog.info("stream host up", {
-    baseUrl,
+    baseUrl: internalBaseUrl,
+    internal: authEnabled,
     storage: cfg.storage,
     dataDir: cfg.storage === "file" ? cfg.dataDir : undefined,
   });
+
+  // ── 2b. the auth plane (github mode): session secret, access ledger, McpAuth ──
+  // `storage=memory` keeps auth state ephemeral too (no disk writes): a persisted
+  // ledger over vanished streams would hold claims on workspace ids that no longer
+  // exist, and dataDir is documented as ignored in memory mode.
+  const authDir = join(cfg.dataDir, "auth");
+  const persistAuth = cfg.storage === "file";
+  const sessionSecret = authEnabled
+    ? (cfg.sessionSecret ?? (persistAuth ? ensureSessionSecret(authDir) : ephemeralSessionSecret()))
+    : undefined;
+  const store = authEnabled ? new AccessStore(authDir, { persist: persistAuth }) : undefined;
+  const nowSeconds = (): number => Math.floor(Date.now() / 1000);
+  const mcpAuth: McpAuth | undefined =
+    authEnabled && sessionSecret !== undefined && store !== undefined
+      ? {
+          authenticate: (headers) => {
+            const session = bearerSession(sessionSecret, headers.authorization, nowSeconds());
+            return session !== undefined
+              ? { login: session.login, ...(session.name !== undefined ? { name: session.name } : {}) }
+              : undefined;
+          },
+          canAccess: (user, workspaceId) => store.canAccess(user.login, workspaceId),
+          // Unclaimed workspaces have NO owner, and member-level users can already
+          // rewrite their content — so admin verbs stay open there too (mirrors the
+          // gateway's open-until-claimed policy; claiming then locks them down).
+          canAdmin: (user, workspaceId) => store.isOwner(user.login, workspaceId) || store.record(workspaceId) === undefined,
+          onWorkspaceCreated: (user, workspaceId) => {
+            if (store.claim(user.login, workspaceId)) {
+              logger.forSource("auth").info("workspace created and claimed", { workspace: workspaceId, owner: user.login });
+            }
+          },
+        }
+      : undefined;
 
   // ── 3. start wiki-mcp in-process over streamable HTTP ──
   // The embedded MCP is served over HTTP — NOT stdio — on its own listener so a
@@ -142,8 +196,11 @@ export async function startWikiServer(
   // own terminal, unreachable by a separate client.)
   const mcpTransport: McpTransport = { kind: "http", host: cfg.host, port: cfg.mcpPort, path: "/mcp" };
   const mcpUrl = `http://${cfg.host}:${cfg.mcpPort}/mcp`;
-  const started = await startMcp(baseUrl, logger.forSource("mcp"), mcpTransport);
+  const started = await startMcp(internalBaseUrl, logger.forSource("mcp"), mcpTransport, mcpAuth);
   const mcp = started.mcp;
+  if (authEnabled && started.config.namespace === "auth") {
+    throw new Error(`the MCP namespace may not be "auth" when --auth is on (it would shadow the gateway's /auth/* routes)`);
+  }
   serverLog.info("wiki-mcp up", {
     namespace: started.config.namespace,
     streamBaseUrl: started.config.streamBaseUrl,
@@ -183,14 +240,46 @@ export async function startWikiServer(
     }
   }
 
-  // ── 4. start the control listener ──
+  // ── 4. start the auth gateway (github mode) — the public stream address ──
+  let gateway: Gateway | undefined;
+  if (authEnabled && sessionSecret !== undefined && store !== undefined) {
+    gateway = await startGateway({
+      host: cfg.host,
+      port: cfg.port,
+      internalBaseUrl,
+      publicUrl: cfg.publicUrl,
+      uiOrigins: cfg.uiOrigins,
+      github: {
+        // resolveConfig guarantees both when `auth === "github"`.
+        clientId: cfg.githubClientId ?? "",
+        clientSecret: cfg.githubClientSecret ?? "",
+        callbackUrl: `${cfg.publicUrl}/auth/github/callback`,
+      },
+      ...(cfg.authUsers !== undefined ? { allowedUsers: cfg.authUsers } : {}),
+      sessionSecret,
+      sessionTtlSeconds: cfg.sessionTtlDays * 86_400,
+      store,
+      logger,
+    });
+  }
+  /** What clients point at: the gateway when auth is on, the raw host otherwise. */
+  const baseUrl = gateway?.url ?? internalBaseUrl;
+
+  // ── 5. start the control listener ──
+  // Auth mode binds it LOOPBACK-ONLY regardless of cfg.host: its privileged
+  // surface (model loads = arbitrary dynamic import, unregisters, full logs) is
+  // host administration, and "holds any valid session" is not "operator". The
+  // bearer gate below stays as defense in depth for local processes.
   const control: ControlServer = await startControlServer({
-    host: cfg.host,
+    host: authEnabled ? "127.0.0.1" : cfg.host,
     port: cfg.controlPort,
     logger,
     info: { version: serverVersion(), storage: cfg.storage, baseUrl, mcpUrl },
     startedAt,
     models,
+    ...(authEnabled && sessionSecret !== undefined
+      ? { authenticate: (req: IncomingMessage) => bearerSession(sessionSecret, req.headers.authorization, nowSeconds()) !== undefined }
+      : {}),
   });
   serverLog.info("control listener up", { url: control.url });
 
@@ -200,6 +289,7 @@ export async function startWikiServer(
     mcpUrl,
     storage: cfg.storage,
     namespace: started.config.namespace,
+    auth: cfg.auth,
   });
 
   return {
@@ -209,14 +299,14 @@ export async function startWikiServer(
     logger,
     mcp,
     /**
-     * Stop wiki-mcp, the control listener, and the stream host. wiki-mcp drains its
-     * tailer + MCP server and closes the engine + read-model store; the stream host
-     * drains connections, cancels long-polls/SSE, and closes the store (each append
-     * is already fsynced in file mode, so there is no final-flush window to lose).
-     * Surfaces the first failure once all three have settled.
+     * Stop wiki-mcp, the control listener, the gateway, and the stream host.
+     * wiki-mcp drains its tailer + MCP server and closes the engine + read-model
+     * store; the stream host drains connections, cancels long-polls/SSE, and closes
+     * the store (each append is already fsynced in file mode, so there is no
+     * final-flush window to lose). Surfaces the first failure once all have settled.
      */
     async stop(): Promise<void> {
-      const results = await Promise.allSettled([mcp?.close(), control.stop(), server.stop()]);
+      const results = await Promise.allSettled([mcp?.close(), control.stop(), gateway?.stop(), server.stop(), store?.flush()]);
       const failed = results.find((r) => r.status === "rejected");
       if (failed !== undefined) throw (failed as PromiseRejectedResult).reason;
     },
@@ -229,6 +319,14 @@ export async function startWikiServer(
 
 /** Run as the standalone host: boot everything and shut down cleanly on SIGINT/SIGTERM. */
 async function main(): Promise<void> {
+  // Seed unset env keys from a `.env` BEFORE any resolution, so both this
+  // resolver and the embedded wiki-mcp's (`WIKI_MCP_*`) see the same file. Two
+  // candidates: the script cwd (wiki-server/ under npm workspaces) AND npm's
+  // INIT_CWD — the directory `npm start` was typed in, which is where the
+  // repo-root `.env` documented by `.env.example` actually lives. Unset-keys-only
+  // semantics make the double application safe.
+  applyDotEnv(process.env);
+  if (process.env.INIT_CWD !== undefined) applyDotEnv(process.env, join(process.env.INIT_CWD, ".env"));
   const cfg = resolveConfig(process.argv.slice(2), process.env);
   const running = await startWikiServer(cfg);
 

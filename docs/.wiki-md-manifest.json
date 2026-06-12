@@ -1,6 +1,6 @@
 {
   "ws:mpzncs2z-0001-2wgv51": {
-    "version": 1994,
+    "version": 2015,
     "files": {
       "hotseat-wiki/architecture/index.md": "5213acdc1038077e77d636e752170d48a0efdbf3a8639b6e6d795f4fde277015",
       "hotseat-wiki/feature-specs/index.md": "f39d08db07e0ed57f225cb9f5c595b09681c1f99fbc6753333f70742a6cb5dad",
@@ -47,7 +47,7 @@
       "hotseat-wiki/.archived/implementation-plan--mq0z8mvy-008g-bglkr7.md": "884fb36efa34ab04dad0ccf5bd3f3514f1fcd2f0c69d333b6c546a5a89291bd2",
       "hotseat-wiki/.archived/testing-plan--mq0z8mvz-008i-1dmape.md": "2e482867e58fa657daeeb0eddd511474649debbfa2f3f038c251c24a828ef651",
       "hotseat-wiki/.archived/feature-spec--mq0z8mvz-008j-22lx4e.md": "4a139424b08c2a8a75f4e0ea1001028e83d5bf65af678a5632804b57119ed4ae",
-      "hotseat-wiki/decision-records/index.md": "218089d730f16ed7d9dcd7e0c6ad111594820a7f53e8b76b8d9c2dcfa7c3ad80",
+      "hotseat-wiki/decision-records/index.md": "7948190f355a489aff054f62eb0a899da04c7115a0436d9a8b5c177b8ae05b63",
       "hotseat-wiki/decision-records/design-decisions-live-in-the-wiki.md": "d1089191baf724c3b59f77839e6b5a94735b11822ce27619f7161cdcb68ae8bd",
       "hotseat-wiki/decision-records/use-durable-streams-directly-no-storage-port.md": "44029f6a7d78681a461e83a6af0ec1dc2e3e0b5f277a14fdf4451210a680379f",
       "hotseat-wiki/decision-records/workspace-as-the-aggregate-one-stream.md": "5c7dea8a89a387cd236d13a2d9d2fc6d52d68c2e6311e6efcf6e34d6bb41669f",
@@ -104,8 +104,9 @@
       "hotseat-wiki/.archived/implementation-plan--mq9yvq8d-00kr-qdpkzg.md": "ba86e4ecac182637b86422a8bbe17dafcedc09ab11c2d5ac7cec3aec3141f929",
       "hotseat-wiki/.archived/testing-plan--mq9yvq8d-00ks-7dkr41.md": "009d7b58baef4f1860da55f7a31776189254c24d8eb6139d37e38767d05e6632",
       "hotseat-wiki/.archived/feature-spec--mq9yvq8d-00kt-chirbk.md": "541082b78b2c56956cd21211b06e7382cf989d0299d34f41bcbdcec6944c2125",
-      "hotseat-wiki/architecture/wiki-mirror.md": "bdebf8996091c22feb572e0b1dc78104318852ef0df66eac2550c0270dae3eb1",
-      "hotseat-wiki/decision-records/markdown-emission-is-a-local-stream-client-not-a-host-responsibility.md": "4c785f47e6a804090a777b8963574743a94d3783f53d6c3c093e3ed4b59c7d35"
+      "hotseat-wiki/architecture/wiki-mirror.md": "971b1eb98eb317737758da55297d3d0796a54f9f9ecc61f7a73bb5b47f802fcb",
+      "hotseat-wiki/decision-records/markdown-emission-is-a-local-stream-client-not-a-host-responsibility.md": "c4932df9f189bb3ce7d2ccaed0b9bc8c46afe76fc9da1221221e057203745f34",
+      "hotseat-wiki/decision-records/github-auth-at-the-host-edge-an-auth-gateway-per-surface-injected-enforcement.md": "ff60995174e9d2376a84709564b4af7f83ff3a5673e6ff954fd8e9dafd7746f8"
     },
     "pages": {
       "toc:mpznedyz-0003-pdtcmh": "hotseat-wiki/architecture/index.md",
@@ -211,7 +212,8 @@
       "testing-plan:mq9yvq8d-00ks-7dkr41": "hotseat-wiki/.archived/testing-plan--mq9yvq8d-00ks-7dkr41.md",
       "feature-spec:mq9yvq8d-00kt-chirbk": "hotseat-wiki/.archived/feature-spec--mq9yvq8d-00kt-chirbk.md",
       "architecture:mqa0p1qp-00po-bgsbah": "hotseat-wiki/architecture/wiki-mirror.md",
-      "decision-record:mqa1x5yj-000d-foj09k": "hotseat-wiki/decision-records/markdown-emission-is-a-local-stream-client-not-a-host-responsibility.md"
+      "decision-record:mqa1x5yj-000d-foj09k": "hotseat-wiki/decision-records/markdown-emission-is-a-local-stream-client-not-a-host-responsibility.md",
+      "decision-record:mqazxkh2-0001-vnogwy": "hotseat-wiki/decision-records/github-auth-at-the-host-edge-an-auth-gateway-per-surface-injected-enforcement.md"
     }
   }
 }

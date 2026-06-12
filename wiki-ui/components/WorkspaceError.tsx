@@ -20,6 +20,16 @@ function describe(error: LoadError): { title: string; detail: string } {
     }
     case "engine":
       return { title: "Couldn't load workspace", detail: error.message };
+    case "unauthorized":
+      return {
+        title: "Signed out",
+        detail: "The server rejected this session's token. Sign in again to continue.",
+      };
+    case "forbidden":
+      return {
+        title: "No access",
+        detail: "You're not a member of this workspace — ask the owner to add you.",
+      };
     case "connection":
       return {
         title: "Disconnected",

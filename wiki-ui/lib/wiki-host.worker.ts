@@ -43,6 +43,26 @@ interface ConnectEvent extends Event {
 }
 const scope = self as unknown as { onconnect: ((e: ConnectEvent) => void) | null };
 
+// ── auth token (worker-scoped, tab-supplied) ────────────────────────────────────
+// ONE token for the whole worker — every tab of one browser profile shares the same
+// localStorage session. Tabs push it via `setAuthToken` BEFORE their handshake (so the
+// first boot's stream config sees it) and again whenever it changes; a token arriving
+// AFTER a header-less boot tears the engine down (the idle path) so the next call
+// re-boots with the header function installed.
+
+let currentToken: string | null = null;
+/** Flips on the first non-null token and stays true: from then on the stream config
+ *  carries the authorization header (whose function reads {@link currentToken} per
+ *  request, so a cleared token sends an empty bearer the gated server rejects — by
+ *  design). Never flips when auth is disabled, so that path omits headers entirely. */
+let tokenProvided = false;
+
+/** The probe's mirror of the engine's stream auth. `undefined` when no token was ever
+ *  supplied (auth disabled) so the HEAD request is byte-identical to the old one. */
+function probeHeaders(): Record<string, string> | undefined {
+  return tokenProvided ? { authorization: `Bearer ${currentToken ?? ""}` } : undefined;
+}
+
 // ── one-time engine boot ────────────────────────────────────────────────────────
 
 interface Booted {
@@ -52,14 +72,31 @@ interface Booted {
 }
 
 let bootP: Promise<Booted> | null = null;
+/** Whether the CURRENT boot's stream config carries the auth-header function. A token
+ *  arriving later (via `setAuthToken`) while this is false means the engine would 401
+ *  forever — that call tears the boot down so the next one re-installs the header. */
+let bootedWithHeaders = false;
+/** The in-flight engine/PGlite teardown from {@link shutdownIdle}; the next boot awaits
+ *  it so a fresh PGlite never opens the `idb://` store while the old one is closing. */
+let teardownP: Promise<void> | null = null;
 
 function boot(): Promise<Booted> {
   if (bootP !== null) return bootP;
+  const withHeaders = tokenProvided;
+  bootedWithHeaders = withHeaders;
   bootP = (async (): Promise<Booted> => {
+    if (teardownP !== null) await teardownP;
     const cfg = getConfig();
     const db = await openSearchDb();
     const wiki = createWiki({
-      stream: { baseUrl: cfg.streamBaseUrl, namespace: cfg.namespace },
+      stream: {
+        baseUrl: cfg.streamBaseUrl,
+        namespace: cfg.namespace,
+        // The header FUNCTION is re-evaluated per request, so a token refreshed by any
+        // tab (`setAuthToken`) takes effect without rebuilding the wiki. Omitted entirely
+        // when no tab ever supplied a token (auth disabled) — wiring identical to before.
+        ...(withHeaders ? { headers: { authorization: () => `Bearer ${currentToken ?? ""}` } } : {}),
+      },
       pageTypes: cfg.pageTypes,
       search: { db },
     });
@@ -120,6 +157,11 @@ class WorkspaceHost {
     return this.subs.size > 0;
   }
 
+  /** The current snapshot — read by `setAuthToken` to drop hosts a stale 401 poisoned. */
+  snapshot(): WorkspaceSnapshot {
+    return this.snap;
+  }
+
   /** The shared engine handle, opened once. A failed open clears the cache so a probe-driven
    *  retry can re-open instead of replaying a permanently-rejected promise. */
   handle(): Promise<IWorkspaceHandle> {
@@ -151,8 +193,9 @@ class WorkspaceHost {
       this.scheduleProbe(PROBE_INTERVAL_MS);
     } catch (e) {
       this.fail(e, "error");
-      // A transport failure can recover — keep probing. A content/schema error is
-      // deterministic for this build, so polling would never clear it.
+      // A transport failure can recover — keep probing. A content/schema/membership
+      // (`forbidden`) error is deterministic for this build/session, so polling would
+      // never clear it.
       if (this.snap.error?.kind === "connection") this.scheduleProbe(PROBE_BACKOFF_MS);
     }
   }
@@ -216,7 +259,9 @@ class WorkspaceHost {
     const base = this.cfg.streamBaseUrl.replace(/\/+$/, "");
     const url = `${base}/${this.cfg.namespace}/workspace/${encodeURIComponent(this.id)}`;
     try {
-      await fetch(url, { method: "HEAD" }); // any HTTP response = reachable
+      // Any HTTP response = reachable (even a 401 — the auth failure surfaces through the
+      // engine's own stream calls, classified as `unauthorized`, not as transport loss).
+      await fetch(url, { method: "HEAD", headers: probeHeaders() });
       if (this.down || this.unsub === null || this.snap.connection !== "live") {
         try {
           await this.resume();
@@ -286,15 +331,16 @@ function dropPort(conn: PortConn): void {
   if (ports.size === 0) shutdownIdle();
 }
 
-/** Last tab gone: tear down every workspace host, close the engine + PGlite, and reset the boot
- *  so the next connecting tab cold-starts (re-folds, re-opens PGlite) on a fresh engine. */
+/** The full teardown: dispose every workspace host, close the engine + PGlite, and reset the
+ *  boot so the next call cold-starts (re-folds, re-opens PGlite) on a fresh engine. Run when
+ *  the last tab disconnects, and by `setAuthToken` when a token reaches a header-less boot. */
 function shutdownIdle(): void {
   for (const host of workspaceHosts.values()) host.dispose();
   workspaceHosts.clear();
   primed = false;
   const b = bootP;
   bootP = null;
-  void (async () => {
+  teardownP = (async () => {
     try {
       if (b !== null) await (await b).wiki.close();
     } finally {
@@ -316,6 +362,33 @@ setInterval(() => {
 
 function makeApi(conn: PortConn): WikiHostApi {
   return {
+    async setAuthToken(token: string | null) {
+      // Deliberately does NOT boot(): tabs call this before their handshake so the
+      // engine's first boot already sees the token; afterwards the per-request header
+      // function simply reads the updated value.
+      currentToken = token;
+      if (token === null) return;
+      tokenProvided = true;
+      if (bootP !== null && !bootedWithHeaders) {
+        // The engine booted WITHOUT the header function (a pre-auth tab, a transient
+        // /auth/config failure, a reload inside the heartbeat window) — it would ignore
+        // this token forever: every call 401s and notifyUnauthorized clears the freshly
+        // minted token, an endless sign-in loop. Tear down exactly like the idle reaper
+        // (full reset); the next handshake/RPC re-boots with the header installed.
+        shutdownIdle();
+        return;
+      }
+      // A cached host that 401'd under the OLD token would replay its unauthorized
+      // snapshot to a freshly authenticated subscriber (seed-on-subscribe), tripping the
+      // sign-out path and clearing the NEW token. Drop such hosts; the next subscribe
+      // recreates them with the updated header.
+      for (const [ws, host] of [...workspaceHosts]) {
+        if (host.snapshot().error?.kind === "unauthorized") {
+          host.dispose();
+          workspaceHosts.delete(ws);
+        }
+      }
+    },
     async handshake() {
       const { fsm } = await boot();
       return { fsm };

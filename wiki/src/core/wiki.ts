@@ -131,6 +131,7 @@ export function createWiki(config: IWikiConfig): IWiki {
     baseUrl: config.stream.baseUrl,
     namespace: config.stream.namespace,
     ...(config.stream.ttlSeconds !== undefined ? { ttlSeconds: config.stream.ttlSeconds } : {}),
+    ...(config.stream.headers !== undefined ? { headers: config.stream.headers } : {}),
   });
   const busConfig: CommandBusConfig = {
     snapshotEvery: config.snapshotEvery ?? DEFAULT_SNAPSHOT_EVERY,

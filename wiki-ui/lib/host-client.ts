@@ -20,7 +20,8 @@
  */
 import * as Comlink from "comlink";
 import type { FsmDescriptor, IMutationDescriptor, IWorkspaceSummary, PageId, SearchHit, WorkspaceId } from "wiki";
-import type { HostSearchOpts, SnapshotCallback, WikiHostApi } from "./wiki-host-api";
+import { getToken, notifyUnauthorized } from "./auth";
+import { classifyError, type HostSearchOpts, type SnapshotCallback, type WikiHostApi } from "./wiki-host-api";
 
 /** Thrown when SharedWorker (or its module-worker form) is unavailable. The app renders a
  *  clear unsupported-browser notice rather than degrading. */
@@ -66,6 +67,28 @@ let fsmReadyFlag = false;
 
 let hostP: Promise<WikiHost> | null = null;
 
+// The raw Comlink remote of this tab's connection — kept so a token change can be pushed
+// to the (shared, possibly already-booted) worker without re-connecting.
+let remoteRef: Comlink.Remote<WikiHostApi> | null = null;
+
+/**
+ * Push a refreshed/cleared bearer token to an ALREADY-connected worker (it is shared
+ * across tabs, so any tab may re-supply it). No-op when this tab has no worker connection
+ * yet — the next {@link getHost} passes the stored token before its handshake.
+ */
+export function pushAuthToken(token: string | null): void {
+  void remoteRef?.setAuthToken(token).catch(() => {});
+}
+
+/** Funnel an RPC rejection past the 401 check: a dead/expired bearer token anywhere
+ *  (engine handle, search, mutate) flips the AuthProvider back to the login page. */
+function guard<T>(p: Promise<T>): Promise<T> {
+  return p.catch((e: unknown) => {
+    if (classifyError(e).kind === "unauthorized") notifyUnauthorized();
+    throw e;
+  });
+}
+
 /** Connect to (and, on first call, construct) the shared worker. Memoised — one worker per
  *  tab. Awaits the handshake so the FSM cache is populated before the caller proceeds. */
 export function getHost(): Promise<WikiHost> {
@@ -97,6 +120,13 @@ async function connect(): Promise<WikiHost> {
 
   worker.port.start();
   const remote = Comlink.wrap<WikiHostApi>(worker.port);
+  remoteRef = remote;
+
+  // Supply the stored bearer token BEFORE the handshake (which boots the engine), so the
+  // first boot's stream config already carries the authorization header. Auth disabled →
+  // no token in storage → the worker keeps its header-less config, exactly as before.
+  const token = getToken();
+  if (token !== null) await remote.setAuthToken(token);
 
   const { fsm } = await remote.handshake();
   for (const [type, descriptor] of Object.entries(fsm)) fsmCache.set(type, descriptor);
@@ -109,19 +139,19 @@ async function connect(): Promise<WikiHost> {
   ping();
 
   return {
-    listWorkspaces: () => remote.listWorkspaces(),
-    search: (query, opts) => remote.search(query, opts),
-    primeSearchIndex: () => remote.primeSearchIndex(),
-    ensureWorkspace: (ws) => remote.ensureWorkspace(ws),
-    toMarkdown: (ws, page) => remote.toMarkdown(ws, page),
-    describeMutations: (ws, page) => remote.describeMutations(ws, page),
-    mutate: (ws, page, command, args) => remote.mutate(ws, page, command, args),
-    archivePage: (ws, page) => remote.archivePage(ws, page),
-    unarchivePage: (ws, page) => remote.unarchivePage(ws, page),
-    renameWorkspace: (ws, name) => remote.renameWorkspace(ws, name),
+    listWorkspaces: () => guard(remote.listWorkspaces()),
+    search: (query, opts) => guard(remote.search(query, opts)),
+    primeSearchIndex: () => guard(remote.primeSearchIndex()),
+    ensureWorkspace: (ws) => guard(remote.ensureWorkspace(ws)),
+    toMarkdown: (ws, page) => guard(remote.toMarkdown(ws, page)),
+    describeMutations: (ws, page) => guard(remote.describeMutations(ws, page)),
+    mutate: (ws, page, command, args) => guard(remote.mutate(ws, page, command, args)),
+    archivePage: (ws, page) => guard(remote.archivePage(ws, page)),
+    unarchivePage: (ws, page) => guard(remote.unarchivePage(ws, page)),
+    renameWorkspace: (ws, name) => guard(remote.renameWorkspace(ws, name)),
     subscribe: async (ws, onSnapshot) => {
       // Comlink.proxy lets the worker invoke this tab-side callback across the port.
-      const subId = await remote.subscribe(ws, Comlink.proxy(onSnapshot));
+      const subId = await guard(remote.subscribe(ws, Comlink.proxy(onSnapshot)));
       return () => void remote.unsubscribe(ws, subId).catch(() => {});
     },
   };

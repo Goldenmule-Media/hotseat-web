@@ -99,6 +99,11 @@ export interface ControlServerOptions {
   readonly startedAt?: number;
   /** The model registry `/_server/models` proxies into (ADR-M6). Omit → the route 503s. */
   readonly models?: ModelsControl;
+  /**
+   * When set (auth mode), every route except `/_server/health` requires this to
+   * accept the request (a valid bearer session) — else 401. Omit → open (local dev).
+   */
+  readonly authenticate?: (req: IncomingMessage) => boolean;
 }
 
 /** A started control listener; `stop()` closes it and drains SSE tails. */
@@ -122,6 +127,14 @@ export function startControlServer(options: ControlServerOptions): Promise<Contr
   const openTails = new Set<ServerResponse>();
 
   const server = createServer((req, res) => {
+    // Auth mode: the health probe stays open (load balancers can't sign in);
+    // everything else — logs, info, the model registry — needs a valid session.
+    const path = (req.url ?? "/").split("?")[0];
+    if (options.authenticate !== undefined && path !== "/_server/health" && !options.authenticate(req)) {
+      res.setHeader("www-authenticate", 'Bearer realm="wiki-server"');
+      sendJson(res, 401, { error: "unauthenticated" });
+      return;
+    }
     handle(req, res, { logger, info, isReady, startedAt, openTails, models });
   });
 
@@ -272,7 +285,7 @@ function parseQuery(url: URL): LogHistoryQuery {
   const level = p.get("level");
   if (level === "info" || level === "warn" || level === "error") query.level = level;
   const source = p.get("source");
-  if (source === "server" || source === "stream" || source === "mcp") query.source = source;
+  if (source === "server" || source === "stream" || source === "mcp" || source === "auth") query.source = source;
   return query;
 }
 

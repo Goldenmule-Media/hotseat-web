@@ -30,8 +30,8 @@ The skill talks to a running `wiki-server`; the plugin only carries the client w
    `npm start` (or `npm run start -w wiki-server -- --models wiki-models/feature`).
 2. The MCP endpoint defaults to `http://127.0.0.1:4439/mcp`; override with the
    `WIKI_MCP_URL` env var if your server lives elsewhere.
-3. If the target repo should mirror wiki Markdown to disk, run the `wiki-mirror` process with a
-   local `wiki-mirror.config.json` mapping the workspace to a root — the plugin does not do this for you.
+3. If the target repo should mirror wiki Markdown to disk, run the `wiki-mirror` process with the
+   workspace mapped to a root in `~/.wiki/wiki-mirror.config.json` — the plugin does not do this for you.
 
 ## Contents
 

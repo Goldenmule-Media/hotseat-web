@@ -16,8 +16,9 @@ every page renders **deterministically** to Markdown. Agents reach it over **MCP
   server by reference — the engine ships none baked in.
 - **Renders back to disk (optional, per project).** A separate local process, **`wiki-mirror`**, tails a
   (possibly remote) server's Durable Stream and writes a workspace's deterministic Markdown into a local root,
-  content-hashed so the git diff stays honest. It is configured by a local `wiki-mirror.config.json`
-  (`workspaceId → absolute root`), per machine — never server state. The wiki stays the source of truth; each
+  content-hashed so the git diff stays honest. It is configured by the user-level
+  `~/.wiki/wiki-mirror.config.json` (`workspaceId → absolute root`) — one file per machine, shared by every
+  project, never server state. The wiki stays the source of truth; each
   repo gets a faithful, always-current rendered copy.
 
 ### The packages

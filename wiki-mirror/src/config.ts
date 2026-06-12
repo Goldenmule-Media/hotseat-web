@@ -1,16 +1,21 @@
 /**
  * `wiki-mirror` configuration. The stream the engine tails, the namespace it lives in, the
- * model bundles to load, and the per-workspace on-disk roots to mirror to. Resolved from
- * **flags → env (`WIKI_MIRROR_*`) → config file (`wiki-mirror.config.json`) → defaults**.
+ * model bundles to load, the per-workspace on-disk roots to mirror to, and an optional
+ * bearer `token` for an auth-gated server. Resolved from
+ * **flags → env (`WIKI_MIRROR_*`) → config file → defaults**.
  *
  * The `workspaceId → root` mapping is inherently PER-MACHINE state (two developers tailing
  * the same server have different checkouts at different paths), which is exactly why it lives
- * in a LOCAL file rather than on the shared server. Roots are resolved to ABSOLUTE paths (a
- * file-entry root relative to the config file's directory, a flag/env root relative to cwd),
- * so the projector always receives an absolute root.
+ * in a LOCAL file rather than on the shared server — and why the default location is the
+ * user-level **`~/.wiki/wiki-mirror.config.json`**, ONE file shared by every project's mirror
+ * rather than a copy per checkout (`--config` / `WIKI_MIRROR_CONFIG` still point anywhere).
+ * Roots are resolved to ABSOLUTE paths (a file-entry root relative to the config file's
+ * directory, a flag/env root relative to cwd), so the projector always receives an absolute
+ * root — entries in the shared file should simply be absolute.
  */
 import { readFileSync } from "node:fs";
-import { dirname, isAbsolute, resolve as resolvePath } from "node:path";
+import { homedir } from "node:os";
+import { dirname, isAbsolute, join as joinPath, resolve as resolvePath } from "node:path";
 
 /** One workspace mirrored to one absolute on-disk root. */
 export interface IEmitterEntry {
@@ -29,6 +34,20 @@ export interface IMirrorConfig {
   readonly models: readonly string[];
   /** The workspace → absolute-root mirrors; one tail loop each. */
   readonly emitters: readonly IEmitterEntry[];
+  /**
+   * Optional bearer token sent as `Authorization: Bearer <token>` on every stream request —
+   * a wiki-server session token (copy from the wiki-ui account menu), used when the server
+   * has auth enabled. Resolved `--token` → `WIKI_MIRROR_TOKEN` → file `token`. NEVER log it.
+   */
+  readonly token?: string;
+  /**
+   * Was the config file named EXPLICITLY (`--config` / `WIKI_MIRROR_CONFIG`)? Misconfiguring
+   * an explicit file is a hard error; an absent/empty IMPLICIT default (`~/.wiki/…`) just
+   * means "this machine mirrors nothing" — `main` idles instead of dying, so the root
+   * `npm start` (concurrently -k) doesn't take the server down on unprovisioned machines.
+   * Optional so hand-built configs (tests, embedders) need not care; absent = implicit.
+   */
+  readonly configWasExplicit?: boolean;
 }
 
 /** The on-disk `wiki-mirror.config.json` shape (everything optional; merged under flags/env). */
@@ -37,11 +56,21 @@ interface IMirrorConfigFile {
   namespace?: string;
   models?: string[];
   emitters?: { workspaceId?: string; root?: string }[];
+  token?: string;
 }
 
-export const DEFAULT_CONFIG_PATH = "wiki-mirror.config.json";
+export const DEFAULT_CONFIG_FILENAME = "wiki-mirror.config.json";
 export const DEFAULT_STREAM_BASE_URL = "http://127.0.0.1:4437";
 export const DEFAULT_NAMESPACE = "default";
+
+/**
+ * The default config location: the per-machine `~/.wiki/wiki-mirror.config.json`, shared by
+ * every project's mirror. `env.HOME` (when set) wins over `os.homedir()` so tests and callers
+ * can redirect it without touching the real home directory.
+ */
+export function defaultConfigPath(env: Record<string, string | undefined>): string {
+  return joinPath(env.HOME ?? homedir(), ".wiki", DEFAULT_CONFIG_FILENAME);
+}
 
 /** Parse `--key value` and `--key=value` flags into a flat record. */
 function parseFlags(argv: readonly string[]): Record<string, string> {
@@ -84,7 +113,8 @@ export function resolveConfig(
 
   // ── config file (the base layer; roots in it resolve against its own directory) ──
   const explicitConfig = flags["config"] ?? env.WIKI_MIRROR_CONFIG;
-  const configPath = resolvePath(cwd, explicitConfig ?? DEFAULT_CONFIG_PATH);
+  const configPath =
+    explicitConfig !== undefined ? resolvePath(cwd, explicitConfig) : defaultConfigPath(env);
   const configDir = dirname(configPath);
   let file: IMirrorConfigFile = {};
   try {
@@ -102,6 +132,7 @@ export function resolveConfig(
   const streamBaseUrl =
     flags["stream-url"] ?? env.WIKI_MIRROR_STREAM_URL ?? file.streamBaseUrl ?? DEFAULT_STREAM_BASE_URL;
   const namespace = flags["namespace"] ?? env.WIKI_MIRROR_NAMESPACE ?? file.namespace ?? DEFAULT_NAMESPACE;
+  const token = flags["token"] ?? env.WIKI_MIRROR_TOKEN ?? file.token;
 
   const modelsRaw = flags["models"] ?? env.WIKI_MIRROR_MODELS;
   const models =
@@ -148,5 +179,5 @@ export function resolveConfig(
     return { workspaceId: e.workspaceId, root };
   });
 
-  return { streamBaseUrl, namespace, models, emitters };
+  return { streamBaseUrl, namespace, models, emitters, token, configWasExplicit: explicitConfig !== undefined };
 }

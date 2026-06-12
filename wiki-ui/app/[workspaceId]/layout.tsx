@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import type { ReactNode } from "react";
 import type { WorkspaceId } from "wiki";
+import { AccountMenu } from "../../components/AccountMenu";
 import { LiveIndicator } from "../../components/LiveIndicator";
 import { TreeNav } from "../../components/TreeNav";
 import { WorkspaceError } from "../../components/WorkspaceError";
@@ -36,6 +37,8 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }): 
             <TreeNav tree={ws.tree} workspaceId={workspaceId} />
           )}
         </nav>
+        {/* Renders nothing when auth is disabled (no stray footer chrome). */}
+        <AccountMenu className="account-footer" />
       </aside>
       <main className="content">{children}</main>
     </div>

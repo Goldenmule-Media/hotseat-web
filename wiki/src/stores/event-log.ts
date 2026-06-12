@@ -15,7 +15,7 @@
  */
 import { DurableStream, FetchError, stream } from "@durable-streams/client";
 
-import type { IEventEnvelope, Unsubscribe, WorkspaceId } from "../api";
+import type { IEventEnvelope, IStreamHeaders, Unsubscribe, WorkspaceId } from "../api";
 import {
   type AppendResult,
   type CatalogEvent,
@@ -38,6 +38,8 @@ export interface EventLogConfig {
   readonly baseUrl: string;
   readonly namespace: string;
   readonly ttlSeconds?: number;
+  /** Headers attached to every stream request; function values re-evaluate per request. */
+  readonly headers?: IStreamHeaders;
 }
 
 /**
@@ -69,6 +71,7 @@ export class EventLog implements IEventLog {
   private readonly baseUrl: string;
   private readonly namespace: string;
   private readonly ttlSeconds: number | undefined;
+  private readonly headers: IStreamHeaders | undefined;
 
   /** Workspace stream handles, keyed by workspace id. */
   private readonly handles = new Map<string, DurableStream>();
@@ -84,6 +87,12 @@ export class EventLog implements IEventLog {
     this.baseUrl = cfg.baseUrl.replace(/\/+$/, "");
     this.namespace = cfg.namespace;
     this.ttlSeconds = cfg.ttlSeconds;
+    this.headers = cfg.headers;
+  }
+
+  /** Spread-ready `{ headers }` for a client call, or `{}` when none are configured. */
+  private headerOpts(): { headers?: Record<string, string | (() => string | Promise<string>)> } {
+    return this.headers !== undefined ? { headers: { ...this.headers } } : {};
   }
 
   // ── URLs ──────────────────────────────────────────────────────────────────
@@ -138,11 +147,12 @@ export class EventLog implements IEventLog {
         url,
         contentType: JSON_CONTENT_TYPE,
         ...(this.ttlSeconds !== undefined ? { ttlSeconds: this.ttlSeconds } : {}),
+        ...this.headerOpts(),
       });
     } catch (e) {
       if (isConflict(e)) {
         // Stream already exists — a cold handle on the same url is equivalent.
-        return new DurableStream({ url, contentType: JSON_CONTENT_TYPE });
+        return new DurableStream({ url, contentType: JSON_CONTENT_TYPE, ...this.headerOpts() });
       }
       throw e;
     }
@@ -155,7 +165,7 @@ export class EventLog implements IEventLog {
   }
 
   async exists(ws: WorkspaceId): Promise<boolean> {
-    const res = await DurableStream.head({ url: this.urlFor(ws) });
+    const res = await DurableStream.head({ url: this.urlFor(ws), ...this.headerOpts() });
     return res.exists;
   }
 
@@ -187,6 +197,7 @@ export class EventLog implements IEventLog {
       url: this.urlFor(ws),
       offset: fromCursor ?? START_OFFSET,
       live: false,
+      ...this.headerOpts(),
     });
     const batches = await res.json();
     return { events: batches.flat(), nextCursor: res.offset };
@@ -202,6 +213,7 @@ export class EventLog implements IEventLog {
       url: this.urlFor(ws),
       offset: opts?.fromCursor ?? START_OFFSET,
       live: true,
+      ...this.headerOpts(),
     });
     this.liveSessions.add(res);
     const unsub = res.subscribeJson((batch) => {
@@ -228,6 +240,7 @@ export class EventLog implements IEventLog {
       url: this.snapshotUrlFor(ws),
       offset: START_OFFSET,
       live: false,
+      ...this.headerOpts(),
     });
     const items = await res.json();
     return items.length > 0 ? items[items.length - 1] : undefined;
@@ -246,6 +259,7 @@ export class EventLog implements IEventLog {
       url: this.catalogUrl(),
       offset: START_OFFSET,
       live: false,
+      ...this.headerOpts(),
     });
     // Each append is one CatalogEvent object → one item per message; no flatten
     // needed, but tolerate accidental nesting defensively.

@@ -279,6 +279,13 @@ export interface PageState {
 // Entry point & configuration
 // ────────────────────────────────────────────────────────────────────────────
 
+/**
+ * HTTP headers attached to every stream request. A value may be a string or a
+ * (sync/async) function — functions are re-evaluated **per request**, so a
+ * refreshed auth token takes effect on the next poll without rebuilding the wiki.
+ */
+export type IStreamHeaders = Readonly<Record<string, string | (() => string | Promise<string>)>>;
+
 export interface IStreamConfig {
   /** Base URL of the Durable Streams server, e.g. "http://127.0.0.1:4437". */
   readonly baseUrl: string;
@@ -286,6 +293,11 @@ export interface IStreamConfig {
   readonly namespace: string;
   /** Optional stream TTL (seconds). Omit for infinite retention (the default). */
   readonly ttlSeconds?: number;
+  /**
+   * Optional headers on every stream request (e.g. `authorization` against an
+   * auth-gated server). See {@link IStreamHeaders} for per-request evaluation.
+   */
+  readonly headers?: IStreamHeaders;
 }
 
 export interface IWikiConfig {

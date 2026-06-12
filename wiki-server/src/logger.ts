@@ -25,7 +25,7 @@ import type { Logger as ILogger } from "wiki-mcp";
 // import above is a bare package specifier, so it needs none.
 
 /** Telemetry origin — which plane emitted the record. */
-export type LogSource = "server" | "stream" | "mcp";
+export type LogSource = "server" | "stream" | "mcp" | "auth";
 
 /** A severity level, matching the three {@link ILogger} methods. */
 export type LogLevel = "info" | "warn" | "error";
@@ -210,7 +210,7 @@ function makeView(core: LoggerCore, source: LogSource, bound: Record<string, unk
 /** Extract a `LogSource` from a fields bag if it carries a valid `source`. */
 function pickSource(fields: Record<string, unknown>): LogSource | undefined {
   const s = fields.source;
-  return s === "server" || s === "stream" || s === "mcp" ? s : undefined;
+  return s === "server" || s === "stream" || s === "mcp" || s === "auth" ? s : undefined;
 }
 
 /** Apply a {@link LogHistoryQuery} against the ring buffer. */

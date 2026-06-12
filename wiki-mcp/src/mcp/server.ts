@@ -40,6 +40,7 @@ import { asWorkspaceId, type EmbeddedEngine } from "../engine.js";
 import type { ModelRegistry } from "../models/registry.js";
 import type { Logger } from "../logger.js";
 import type { SqlReadModel } from "../readmodel/readmodel.js";
+import { bindAccess, type AccessView, type AuthUser, type McpAuth } from "./auth.js";
 import { listResources, readResource, type WikiResourceContext } from "./resources.js";
 import { SessionTokenManager } from "./tokens.js";
 import { wikiTools, type WikiTool, type WikiToolContext } from "./tools.js";
@@ -63,6 +64,13 @@ export interface McpServerDeps {
    * this to `ProjectionService.notify` to project THIS process's writes promptly.
    */
   readonly onWrite?: (workspace: WorkspaceId) => void;
+  /**
+   * Host-injected auth (HTTP transport only). When set, every HTTP request must
+   * authenticate (else 401), workspace-scoped tools/resources are gated per user,
+   * and `createWorkspace` attributes ownership. Absent → trusted/anonymous (stdio,
+   * local dev) — behavior unchanged.
+   */
+  readonly auth?: McpAuth;
 }
 
 /** The transport to listen on. */
@@ -80,6 +88,11 @@ export class WikiMcpServer {
   private readonly toolsByName = new Map<string, WikiTool>();
   /** Live streamable-HTTP sessions, keyed by MCP session id — one transport + Server each. */
   private readonly sessions = new Map<string, { server: Server; transport: StreamableHTTPServerTransport }>();
+  /**
+   * The authenticated user behind each HTTP session (auth mode only). Refreshed on
+   * every authenticated request, so a session always acts as its CURRENT bearer.
+   */
+  private readonly sessionUsers = new Map<string, AuthUser>();
   private httpServer: HttpServer | undefined;
   /** The stdio-mode Server, when started that way (a single ambient session). */
   private stdioServer: Server | undefined;
@@ -181,6 +194,29 @@ export class WikiMcpServer {
       if (tool === undefined) {
         return errorResult(`Unknown tool: ${request.params.name}`);
       }
+      // Auth mode: resolve the session's user and gate any workspace-scoped call.
+      // The gate is GENERIC: it reads `workspaceId` from the args (an engine concept,
+      // never a model one) and applies the tool's declared level (`member` default,
+      // `owner` for workspace administration).
+      let access: AccessView | undefined;
+      if (this.deps.auth !== undefined) {
+        const user = extra.sessionId !== undefined ? this.sessionUsers.get(extra.sessionId) : undefined;
+        if (user === undefined) {
+          return errorResult("[UNAUTHENTICATED] This server requires authentication; the session has no user.");
+        }
+        access = bindAccess(this.deps.auth, user);
+        const ws = (request.params.arguments ?? {})["workspaceId"];
+        if (typeof ws === "string") {
+          const allowed = (tool.access ?? "member") === "owner" ? access.canAdmin(ws) : access.canAccess(ws);
+          if (!allowed) {
+            this.deps.logger.warn("tool access denied", { tool: tool.name, user: user.login, workspace: ws });
+            return errorResult(
+              `[ACCESS_DENIED] ${user.login} is not ${(tool.access ?? "member") === "owner" ? "the owner" : "a member"} of workspace ${ws}.`,
+              { code: "ACCESS_DENIED", workspaceId: ws },
+            );
+          }
+        }
+      }
       const ctx: WikiToolContext = {
         engine: this.deps.engine,
         readModel: this.deps.readModel,
@@ -188,6 +224,7 @@ export class WikiMcpServer {
         ...(this.deps.models !== undefined ? { models: this.deps.models } : {}),
         tokens: this.tokens,
         sessionId: extra.sessionId,
+        ...(access !== undefined ? { access } : {}),
       };
       try {
         const result = await tool.handle(request.params.arguments ?? {}, ctx);
@@ -212,12 +249,25 @@ export class WikiMcpServer {
   }
 
   private resourceCtx(sessionId: string | undefined): WikiResourceContext {
+    // Auth mode: bind the session's user so resources filter/gate by workspace; a
+    // session with no user gets a view that can access nothing (the HTTP layer
+    // 401s such requests before they reach here — this is defense in depth).
+    let access: AccessView | undefined;
+    if (this.deps.auth !== undefined) {
+      const auth = this.deps.auth;
+      const user = sessionId !== undefined ? this.sessionUsers.get(sessionId) : undefined;
+      access =
+        user !== undefined
+          ? bindAccess(auth, user)
+          : { user: { login: "" }, canAccess: () => false, canAdmin: () => false, onWorkspaceCreated: () => {} };
+    }
     return {
       engine: this.deps.engine,
       readModel: this.deps.readModel,
       tokens: this.tokens,
       sessionId,
       namespace: this.deps.namespace,
+      ...(access !== undefined ? { access } : {}),
     };
   }
 
@@ -295,6 +345,7 @@ export class WikiMcpServer {
   private removeSession(sessionId: string): void {
     if (this.sessions.delete(sessionId)) {
       this.tokens.forget(sessionId);
+      this.sessionUsers.delete(sessionId);
       this.deps.logger.info("MCP session closed", { sessionId });
     }
   }
@@ -314,6 +365,22 @@ export class WikiMcpServer {
     }
     const sessionId = headerValue(req.headers["mcp-session-id"]);
     const method = req.method ?? "GET";
+
+    // Auth mode: every request must carry a valid credential (401 otherwise), and the
+    // session it belongs to acts as that credential's user from here on. Re-recorded
+    // per request, so a refreshed token swaps the user without re-initializing.
+    let user: AuthUser | undefined;
+    if (this.deps.auth !== undefined) {
+      user = this.deps.auth.authenticate(req.headers);
+      if (user === undefined) {
+        res.setHeader("www-authenticate", 'Bearer realm="wiki-mcp"');
+        sendRpcError(res, 401, -32000, "Unauthenticated: provide a valid bearer token");
+        return;
+      }
+      if (sessionId !== undefined && this.sessions.has(sessionId)) {
+        this.sessionUsers.set(sessionId, user);
+      }
+    }
 
     // GET (SSE) / DELETE (terminate) act on an existing session and carry no body.
     if (method === "GET" || method === "DELETE") {
@@ -358,6 +425,11 @@ export class WikiMcpServer {
     }
     const transport = await this.openSession();
     await transport.handleRequest(req, res, body);
+    // The transport minted the session id during `initialize` — bind the
+    // authenticated user to the brand-new session now that the id exists.
+    if (user !== undefined && transport.sessionId !== undefined) {
+      this.sessionUsers.set(transport.sessionId, user);
+    }
   }
 }
 

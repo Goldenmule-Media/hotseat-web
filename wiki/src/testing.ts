@@ -14,7 +14,7 @@
  */
 import { DurableStreamTestServer } from "@durable-streams/server";
 
-import type { IPageType, IWiki } from "./api";
+import type { IPageType, IStreamHeaders, IWiki } from "./api";
 import { createWiki } from "./core/wiki";
 
 /** Injected determinism knobs shared by the test-wiki factories. */
@@ -27,6 +27,8 @@ export interface ITestWikiOptions {
   readonly namespace?: string;
   /** Default actor stamped on event metadata. */
   readonly actor?: string;
+  /** Headers on every stream request (e.g. a bearer token against an auth-gated host). */
+  readonly headers?: IStreamHeaders;
 }
 
 /** A started in-memory test server plus its base URL and a teardown. */
@@ -97,7 +99,11 @@ export function wikiOn(
   opts?: ITestWikiOptions,
 ): IWiki {
   return createWiki({
-    stream: { baseUrl: url, namespace: opts?.namespace ?? "test" },
+    stream: {
+      baseUrl: url,
+      namespace: opts?.namespace ?? "test",
+      ...(opts?.headers !== undefined ? { headers: opts.headers } : {}),
+    },
     pageTypes,
     clock: opts?.clock ?? deterministicClock(),
     ids: opts?.ids ?? deterministicIds(),

@@ -15,7 +15,7 @@
     "build": "npm run build -w wiki -w wiki-models -w wiki-server -w wiki-mcp -w wiki-mirror",
     "start": "concurrently -k -n server,mirror -c blue,green \"npm:start:server\" \"npm:start:mirror\"",
     "start:server": "npm run start:all -w wiki-server",
-    "start:mirror": "tsx wiki-mirror/src/bin.ts --config wiki-mirror.config.json"
+    "start:mirror": "tsx wiki-mirror/src/bin.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

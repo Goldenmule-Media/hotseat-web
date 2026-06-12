@@ -38,3 +38,4 @@ _No overview yet._
 - [Cross-workspace operations are an admin/system affordance, not a content read](decision-record:mq5hnpu9-001m-c9yfrl)
 - [Declared authored-ness gates (`requiredIn`): the engine enforces field completeness per status](decision-record:mq9oa2cx-0014-scc7q)
 - [Markdown emission is a local stream-client, not a host responsibility](decision-record:mqa1x5yj-000d-foj09k)
+- [GitHub auth at the host edge: an auth gateway + per-surface injected enforcement](decision-record:mqazxkh2-0001-vnogwy)

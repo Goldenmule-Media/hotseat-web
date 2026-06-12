@@ -23,6 +23,7 @@ import { SqlReadModel } from "./readmodel/readmodel.js";
 import { ProjectionService } from "./tail/projection.js";
 import { engineEventSource } from "./tail/engine-source.js";
 import { ModelRegistry } from "./models/registry.js";
+import type { McpAuth } from "./mcp/auth.js";
 import { WikiMcpServer, type McpTransport } from "./mcp/server.js";
 import { SqlSearchIndex, migrateSearchToLatest, type ISearchIndex, type WikiSearchDatabase } from "wiki";
 import type { Kysely } from "kysely";
@@ -32,6 +33,7 @@ export { consoleLogger, silentLogger } from "./logger.js";
 export type { WikiMcpConfig, DbConfig } from "./config.js";
 export { resolveConfig, resolveRuntime } from "./config.js";
 export type { McpTransport } from "./mcp/server.js";
+export type { McpAuth, AuthUser, AccessView } from "./mcp/auth.js";
 export type { RenderSink } from "./tail/render-sink.js";
 export { ModelRegistry } from "./models/registry.js";
 export type { ModelRegistryEvent, BundleInfo, BundleSkillInfo } from "./models/registry.js";
@@ -63,6 +65,12 @@ export interface CreateWikiMcpOptions {
    * later by other clients. @default 1000
    */
   readonly discoverPollMs?: number;
+  /**
+   * Host-injected auth + per-workspace access control (HTTP transport). When set,
+   * unauthenticated MCP requests 401, workspace-scoped tools/resources are gated per
+   * user, and `createWorkspace` attributes ownership. Absent → trusted (unchanged).
+   */
+  readonly auth?: McpAuth;
 }
 
 /** A running wiki-mcp instance — its parts, plus a `close()` that tears everything down. */
@@ -189,6 +197,7 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
     // A local commit doesn't fan out to its own handle's subscribers, so push each
     // write tool's workspace to the tailer for prompt read-your-writes.
     onWrite: (workspace) => projection.notify(workspace),
+    ...(options.auth !== undefined ? { auth: options.auth } : {}),
   });
   await server.start(transport);
 

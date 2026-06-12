@@ -85,8 +85,35 @@ npm run dev      # http://localhost:3000
 Open the app and pick a workspace. Edits from any other client (e.g. the `wiki` MCP
 tools) stream in live — and you can drive a page's FSM transitions right in the browser.
 
-## Security
+## Authentication
 
-No auth. The app assumes **trusted-network** access to the wiki-server, matching the
-server's local-dev posture — note it can **write** (issue FSM transitions), not only read.
-Gated/authenticated access is out of scope for this version.
+Auth is **optional and server-driven**; the UI holds **no secrets** and needs no extra
+env vars. On load the app asks the server `GET {base}/auth/config`:
+
+- **Auth off** (the server has no `/auth` routes — any failure counts): the app renders
+  exactly as before, assuming trusted-network access. Note it can **write** (issue FSM
+  transitions), not only read.
+- **Auth on** (`{"enabled":true,"provider":"github"}`): the whole app — including the
+  SharedWorker connection — gates behind a "Sign in with GitHub" page. Signing in is a
+  full-page redirect to `{base}/auth/github?redirect=…/auth/complete`; after the OAuth
+  dance the server 302s back to `/auth/complete#token=<bearer>`. The token travels in
+  the URL **fragment** (never sent to a server), is stored in
+  `localStorage["wiki.authToken"]`, and is scrubbed from the URL/history.
+
+The bearer token is the only credential. The SharedWorker attaches it as an
+`Authorization` header on every Durable-Stream request — the header value is a function
+re-evaluated **per request**, so a refreshed token (from any tab) takes effect without
+rebuilding the engine (one exception: a token reaching an engine that booted
+**header-less** — e.g. a pre-auth tab started the worker — tears it down so the next
+call re-boots with the header installed). `/auth/me` is the validity authority at gate
+time, and any 401 surfaced later (gateway or stream) clears the token and falls back to
+the login page. A 403 is different: the session is valid but the workspace is
+members-only — the view shows "No access" and nobody is signed out.
+The account menu (sidebar foot / landing header) shows the signed-in user and can copy
+the raw token for other clients of the same gated server (`.mcp.json`, `wiki-mirror`).
+
+Per-workspace access lives on the server: an **unclaimed** workspace is open to every
+signed-in user (anyone may claim ownership); a **claimed** one is visible to its owner
+and members only — others have it hidden from the workspace list. The owner manages
+members from the panel behind the ⚙ button next to the workspace title (add by GitHub
+login, remove, claim).

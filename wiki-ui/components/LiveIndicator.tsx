@@ -32,10 +32,18 @@ export function LiveIndicator({
 
   // A schema/engine error means the server is reachable but unrenderable — don't claim
   // "Live", and don't claim "Disconnected" either. Connection-kind errors fall through
-  // to the transport label (e.g. "Disconnected"/"Reconnecting…").
+  // to the transport label (e.g. "Disconnected"/"Reconnecting…"). An auth rejection is
+  // labelled honestly for the moment before the gate falls back to the login page; a
+  // membership rejection ("forbidden") is a valid session without access — "No access".
   const schemaError = error !== null && error.kind !== "connection";
   const state = schemaError ? "schema" : connection;
-  const label = schemaError ? "Schema error" : LABEL[connection];
+  const label = schemaError
+    ? error.kind === "unauthorized"
+      ? "Signed out"
+      : error.kind === "forbidden"
+        ? "No access"
+        : "Schema error"
+    : LABEL[connection];
 
   return (
     <span className="live-indicator" data-state={state} title={schemaError ? error.message : label}>

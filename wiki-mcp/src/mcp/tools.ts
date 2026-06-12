@@ -41,6 +41,7 @@ import type { SqlReadModel } from "../readmodel/readmodel.js";
 import { createLanguageRegistry } from "../models/analyzers/index.js";
 import type { LanguageRegistry, RenameTarget } from "../models/language-registry.js";
 import type { ModelRegistry } from "../models/registry.js";
+import type { AccessView } from "./auth.js";
 import type { SessionTokenManager } from "./tokens.js";
 
 /**
@@ -80,6 +81,13 @@ export interface WikiToolContext {
   readonly tokens: SessionTokenManager;
   /** The MCP session id (undefined for stdio) — the token-manager key. */
   readonly sessionId: string | undefined;
+  /**
+   * The authenticated caller's access view (auth mode only; absent → trusted).
+   * `server.ts` already gates workspace-scoped calls before they reach a handler;
+   * this is for tools that ENUMERATE workspaces (filter to accessible ones) and
+   * for `createWorkspace` to attribute ownership.
+   */
+  readonly access?: AccessView;
 }
 
 /** One MCP tool: a name, a description, a JSON-Schema input, and a handler. */
@@ -90,6 +98,11 @@ export interface WikiTool {
   readonly inputSchema: JsonSchema;
   /** True for tools that mutate (so `server.ts` records the returned token). */
   readonly write: boolean;
+  /**
+   * Access level enforced (auth mode) on the tool's `workspaceId` arg: `"member"`
+   * (the default — any workspace member) or `"owner"` (workspace administration).
+   */
+  readonly access?: "member" | "owner";
   handle(args: Record<string, unknown>, ctx: WikiToolContext): Promise<ToolResult>;
 }
 
@@ -512,6 +525,8 @@ const createWorkspaceTool: WikiTool = {
   write: true,
   async handle(args, ctx) {
     const handle = await ctx.engine.createWorkspace({ name: reqStr(args, "name") });
+    // Auth mode: the creator becomes the workspace's owner (first-wins in the host store).
+    ctx.access?.onWorkspaceCreated(handle.id);
     // `IWiki.createWorkspace` returns a handle, not a Committed token. Derive the
     // high-water token from the workspace head:
     // stream length == head event `version` + 1 == the projection's applied position.
@@ -532,6 +547,7 @@ const renameWorkspaceTool: WikiTool = {
     "to the current name is a no-op.",
   inputSchema: obj({ workspaceId: STR, name: str("The new workspace name.") }, ["workspaceId", "name"]),
   write: true,
+  access: "owner",
   async handle(args, ctx) {
     const ws = asWorkspaceId(reqStr(args, "workspaceId"));
     const name = reqStr(args, "name");
@@ -550,6 +566,7 @@ const archiveWorkspaceTool: WikiTool = {
     "are preserved untouched.",
   inputSchema: obj({ workspaceId: STR }, ["workspaceId"]),
   write: true,
+  access: "owner",
   async handle(args, ctx) {
     const ws = asWorkspaceId(reqStr(args, "workspaceId"));
     const handle = await ctx.engine.open(ws);
@@ -566,6 +583,7 @@ const unarchiveWorkspaceTool: WikiTool = {
     "listings. Runnable while the workspace is archived (it is the way back).",
   inputSchema: obj({ workspaceId: STR }, ["workspaceId"]),
   write: true,
+  access: "owner",
   async handle(args, ctx) {
     const ws = asWorkspaceId(reqStr(args, "workspaceId"));
     const handle = await ctx.engine.open(ws);
@@ -847,7 +865,9 @@ const listWorkspacesTool: WikiTool = {
   write: false,
   async handle(_args, ctx) {
     await awaitAllConsistency(ctx);
-    const rows = await ctx.readModel.listWorkspaces();
+    const all = await ctx.readModel.listWorkspaces();
+    // Auth mode: list only workspaces the caller can access (owner/member/unclaimed).
+    const rows = ctx.access !== undefined ? all.filter((r) => ctx.access?.canAccess(r.id) === true) : all;
     const lines = rows.map((r) => `- ${r.id} — ${r.name} [${r.status}]`);
     return { text: rows.length === 0 ? "No workspaces." : lines.join("\n"), data: rows };
   },

@@ -15,7 +15,7 @@ Treat Markdown emission as a stream **client**, not a host responsibility — th
 
 Retire the embedded emitter entirely so emission has **one home**: remove the render-sink wiring, the `_emitter-config` stream, and the configure/list/removeEmitter MCP tools from wiki-mcp/wiki-server. `MarkdownDiskProjector` moves to wiki-mirror unchanged (its on-disk behavior + manifest format are byte-for-byte identical, so an existing mirror self-heals and continues).
 
-Emitter configuration is a **local file** (`wiki-mirror.config.json`, resolved `flags → env WIKI_MIRROR_* → file → defaults`) mapping each `workspaceId → absolute root` — per-machine state that must never live in shared server storage. One process tails N workspaces; single-writer-per-root is enforced; config is read once at startup (restart to reconfigure).
+Emitter configuration is a **user-level local file** — `~/.wiki/wiki-mirror.config.json` by default, ONE per-machine file shared by every project's mirror rather than a copy per checkout (`--config` / `WIKI_MIRROR_CONFIG` point elsewhere; resolved `flags → env WIKI_MIRROR_* → file → defaults`) — mapping each `workspaceId → absolute root`: per-machine state that must never live in shared server storage or a checkout. One process tails N workspaces; single-writer-per-root is enforced; config is read once at startup (restart to reconfigure).
 
 Generalize the principle: per-machine, **local-only concerns belong in a local stream-client**, keeping the engine + host filesystem-free and deployable. Markdown emission is the first such concern moved out; git operations on the mirror (stage/commit/push) are the natural next addition, and the mirror already owns the checkout path that seam needs.
 

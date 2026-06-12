@@ -1,14 +1,16 @@
 /**
  * wiki-server configuration. A small, flat config resolved from
- * **flags → env → defaults** (first wins). Every field has a working default, so
- * `wiki-server` runs with none.
+ * **flags → env → defaults** (first wins; `main` seeds unset env keys from a
+ * `.env` in the cwd first, so secrets stay out of shell history). Every field
+ * has a working default, so `wiki-server` runs with none.
  *
- * The host knobs map directly onto `@durable-streams/server`'s `TestServerOptions`;
- * there are deliberately no auth/TLS/body knobs here — the wrapped
- * server has no request middleware, so those live in a reverse proxy.
+ * The host knobs map directly onto `@durable-streams/server`'s `TestServerOptions`.
+ * The wrapped server has no request middleware, so when `--auth github` is on the
+ * AUTH GATEWAY takes over the public port and the stream host moves to an internal
+ * loopback port (see `auth/gateway.ts`); TLS still belongs to a fronting proxy.
  */
 
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, extname, join, resolve } from "node:path";
 
 /** Fully-resolved server configuration. */
@@ -59,6 +61,39 @@ export interface WikiServerConfig {
    * load time, never aborting boot. Undefined = scan nothing.
    */
   readonly modelsDir?: string;
+  /**
+   * Authentication mode. `"github"` puts the auth gateway on the public `port`
+   * (GitHub OAuth + bearer sessions + per-workspace membership), moving the raw
+   * stream host to an internal loopback port. `"none"` (default) is the open
+   * local-dev wiring. Requires {@link githubClientId}/{@link githubClientSecret}.
+   */
+  readonly auth: "none" | "github";
+  /** GitHub OAuth App client id (required when `auth === "github"`). */
+  readonly githubClientId?: string;
+  /** GitHub OAuth App client secret (required when `auth === "github"`). */
+  readonly githubClientSecret?: string;
+  /**
+   * HMAC secret signing session tokens. Optional: when unset, one is generated
+   * and persisted at `<dataDir>/auth/session-secret` (rotating it signs everyone out).
+   */
+  readonly sessionSecret?: string;
+  /**
+   * The gateway's EXTERNAL base URL — the host clients (and GitHub's OAuth
+   * callback) reach it at. Default `http://{host}:{port}`; set it when the server
+   * sits behind DNS/TLS. The OAuth app's callback must be `{publicUrl}/auth/github/callback`.
+   */
+  readonly publicUrl: string;
+  /** Origins allowed as post-login redirect targets (the wiki-ui origins). */
+  readonly uiOrigins: readonly string[];
+  /** Session token lifetime in days. */
+  readonly sessionTtlDays: number;
+  /**
+   * GitHub logins allowed to sign in (CSV, case-insensitive). Unset → ANY GitHub
+   * account may establish a session — workspace membership still gates content,
+   * but the catalog and unclaimed workspaces are open to every signed-in user,
+   * so set this on any deployment that isn't intentionally public.
+   */
+  readonly authUsers?: readonly string[];
 }
 
 /** Loopback hosts that need no reverse proxy / auth to stay private. */
@@ -210,7 +245,85 @@ export function resolveConfig(
   const models = parseModels(pick("models", "WIKI_SERVER_MODELS", ""));
   const modelsDir = flags["models-dir"] ?? env.WIKI_SERVER_MODELS_DIR;
 
-  return { host, port, storage, dataDir, longPollTimeout, logFormat, controlPort, mcpPort, models, modelsDir, logBuffer };
+  const auth = pick("auth", "WIKI_SERVER_AUTH", "none");
+  if (auth !== "none" && auth !== "github") {
+    throw new Error(`invalid --auth "${auth}" (expected "none" or "github")`);
+  }
+  const githubClientId = flags["github-client-id"] ?? env.WIKI_SERVER_GITHUB_CLIENT_ID;
+  const githubClientSecret = flags["github-client-secret"] ?? env.WIKI_SERVER_GITHUB_CLIENT_SECRET;
+  if (auth === "github" && (githubClientId === undefined || githubClientSecret === undefined)) {
+    throw new Error(
+      `--auth github requires a GitHub OAuth App: set WIKI_SERVER_GITHUB_CLIENT_ID and ` +
+        `WIKI_SERVER_GITHUB_CLIENT_SECRET (or the --github-client-id/--github-client-secret flags)`,
+    );
+  }
+  const sessionSecret = flags["session-secret"] ?? env.WIKI_SERVER_SESSION_SECRET;
+  const publicUrl = pick("public-url", "WIKI_SERVER_PUBLIC_URL", `http://${host}:${port}`).replace(/\/+$/, "");
+  const uiOrigins = pick("ui-origins", "WIKI_SERVER_UI_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
+    .split(",")
+    .map((s) => s.trim().replace(/\/+$/, ""))
+    .filter((s) => s.length > 0);
+  const sessionTtlDays = toInt(pick("session-ttl-days", "WIKI_SERVER_SESSION_TTL_DAYS", "30"), "--session-ttl-days");
+  const authUsersRaw = flags["auth-users"] ?? env.WIKI_SERVER_AUTH_USERS;
+  const authUsers =
+    authUsersRaw !== undefined
+      ? authUsersRaw
+          .split(",")
+          .map((s) => s.trim().toLowerCase())
+          .filter((s) => s.length > 0)
+      : undefined;
+
+  return {
+    host,
+    port,
+    storage,
+    dataDir,
+    longPollTimeout,
+    logFormat,
+    controlPort,
+    mcpPort,
+    models,
+    modelsDir,
+    logBuffer,
+    auth,
+    ...(githubClientId !== undefined ? { githubClientId } : {}),
+    ...(githubClientSecret !== undefined ? { githubClientSecret } : {}),
+    ...(sessionSecret !== undefined ? { sessionSecret } : {}),
+    publicUrl,
+    uiOrigins,
+    sessionTtlDays,
+    ...(authUsers !== undefined ? { authUsers } : {}),
+  };
+}
+
+/**
+ * Seed UNSET keys of `env` from a `.env` file (`KEY=VALUE` lines; `#` comments
+ * and blank lines ignored; surrounding single/double quotes stripped; no
+ * interpolation). Real environment always wins; a missing file is a no-op.
+ * `main` applies this to `process.env` before ANY config resolution so the
+ * embedded wiki-mcp's own `WIKI_MCP_*` resolver sees the same file.
+ */
+export function applyDotEnv(env: Record<string, string | undefined>, path = ".env"): void {
+  let raw: string;
+  try {
+    raw = readFileSync(resolve(path), "utf8");
+  } catch {
+    return;
+  }
+  for (const line of raw.split("\n")) {
+    // Tolerate the shell-style `export KEY=VALUE` form — without this the key
+    // would silently become "export KEY" and the real key stays unset.
+    const trimmed = line.trim().replace(/^export\s+/, "");
+    if (trimmed.length === 0 || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let value = trimmed.slice(eq + 1).trim();
+    if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
+      value = value.slice(1, -1);
+    }
+    if (env[key] === undefined) env[key] = value;
+  }
 }
 
 /**
@@ -219,10 +332,23 @@ export function resolveConfig(
  */
 export function configWarnings(cfg: WikiServerConfig): string[] {
   const warnings: string[] = [];
-  if (!isLoopback(cfg.host)) {
+  if (!isLoopback(cfg.host) && cfg.auth === "none") {
     warnings.push(
-      `host is bound to ${cfg.host} (non-loopback), but this server cannot authenticate requests. ` +
-        `Put a reverse proxy in front (TLS + bearer token) or restrict to a private network.`,
+      `host is bound to ${cfg.host} (non-loopback) with --auth none, so anyone who can reach it ` +
+        `can read and write every stream. Enable --auth github, or restrict to a private network.`,
+    );
+  }
+  if (!isLoopback(cfg.host) && cfg.auth === "github" && cfg.publicUrl.startsWith("http://")) {
+    warnings.push(
+      `auth is on but publicUrl is plain http (${cfg.publicUrl}); bearer tokens cross the network ` +
+        `unencrypted. Front the gateway with TLS and set WIKI_SERVER_PUBLIC_URL to the https URL.`,
+    );
+  }
+  if (cfg.auth === "github" && cfg.authUsers === undefined) {
+    warnings.push(
+      `auth is on with no WIKI_SERVER_AUTH_USERS allowlist: ANY GitHub account can sign in. ` +
+        `Workspace membership still gates content, but the catalog and unclaimed (pre-auth) ` +
+        `workspaces are open to every signed-in user until claimed.`,
     );
   }
   if (cfg.storage === "memory") {

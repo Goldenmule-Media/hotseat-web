@@ -19,8 +19,10 @@
  * archive/unarchive) are coarse RPCs to the worker, keyed off the live snapshot's
  * `lastEventAt` so the open page re-projects on every commit.
  */
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { IMutationDescriptor, IWorkspaceSummary, PageId, WorkspaceId } from "wiki";
+import { notifyUnauthorized } from "./auth";
+import { useAuth } from "./auth-context";
 import { getHost, UnsupportedBrowserError, type WikiHost } from "./host-client";
 import { classifyError, type LoadError, type WorkspaceSnapshot } from "./wiki-host-api";
 
@@ -37,6 +39,8 @@ class WorkspaceSession {
   private snap: LiveWorkspace;
   private unsub: (() => void) | null = null;
   private disposed = false;
+  /** True once the worker's seed-on-subscribe snapshot has been delivered. */
+  private seeded = false;
 
   constructor(readonly id: WorkspaceId) {
     this.snap = { id, tree: null, connection: "connecting", version: null, lastEventAt: null, error: null };
@@ -64,7 +68,16 @@ class WorkspaceSession {
       const host = await getHost();
       if (this.disposed) return;
       this.unsub = await host.subscribe(this.id, (snap) => {
-        if (!this.disposed) this.emit(snap);
+        if (this.disposed) return;
+        // A 401 pushed through the live tail (token expired mid-session) must also fall
+        // back to login — RPC rejections are guarded in host-client, pushes are here.
+        // Only on a TRANSITION into unauthorized, though: the seed-on-subscribe replay of
+        // a snapshot cached before sign-in must not clear a freshly-minted valid token
+        // (the worker drops 401-poisoned hosts on a new token; this guards the race).
+        const wasUnauthorized = this.snap.error?.kind === "unauthorized";
+        if (this.seeded && !wasUnauthorized && snap.error?.kind === "unauthorized") notifyUnauthorized();
+        this.seeded = true;
+        this.emit(snap);
       });
     } catch (e) {
       if (this.disposed) return;
@@ -172,6 +185,7 @@ export interface WorkspaceList {
 }
 
 export function useWorkspaces(): WorkspaceList {
+  const { me } = useAuth();
   const [state, setState] = useState<{
     items: readonly IWorkspaceSummary[];
     loading: boolean;
@@ -206,7 +220,19 @@ export function useWorkspaces(): WorkspaceList {
     return () => window.removeEventListener("focus", onFocus);
   }, []);
 
-  return { ...state, refresh: () => setNonce((n) => n + 1) };
+  // When auth is on, hide workspaces the server marked restricted (owned by someone else,
+  // caller not a member). Filtered here — the single point every consumer (landing list,
+  // switcher, title) already reads — and reactive to /auth/me refreshes after ACL changes.
+  const restricted = me?.workspaces.restricted;
+  const items = useMemo(
+    () =>
+      restricted === undefined || restricted.length === 0
+        ? state.items
+        : state.items.filter((w) => !restricted.includes(w.id)),
+    [state.items, restricted],
+  );
+
+  return { items, loading: state.loading, error: state.error, refresh: () => setNonce((n) => n + 1) };
 }
 
 export interface PageMutations {
