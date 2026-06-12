@@ -8,3 +8,6 @@ coverage/
 .vitest/
 wiki/probe/
 .claude/skills/build-feature/workflows/.runs/
+
+# Host-side model bundles staged for the /models volume mount (populated by deploy.sh).
+/models/

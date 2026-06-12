@@ -1,0 +1,59 @@
+# Postgres + wiki-server + Caddy (TLS). Boots with: docker compose up -d --build
+# Needs a gitignored .env (copy from .env.example) with POSTGRES_PASSWORD, WIKI_DOMAIN,
+# and the WIKI_SERVER_* settings. See DEPLOY.md.
+
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: wiki
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: wiki
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wiki -d wiki"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  wiki-server:
+    build:
+      context: .
+      dockerfile: wiki-server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      WIKI_MCP_DB: pg
+      WIKI_MCP_PG_URL: postgresql://wiki:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/wiki
+    ports:
+      - "127.0.0.1:4437:4437"   # loopback only; public access via caddy
+    volumes:
+      - wikidata:/data
+      - ./models:/models:ro     # built wiki-models bundles, rsynced by deploy.sh
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - wiki-server
+    environment:
+      WIKI_DOMAIN: ${WIKI_DOMAIN:?Set WIKI_DOMAIN in .env (e.g. hotseat.thegoldenmule.com)}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  wikidata:
+  caddy_data:
+  caddy_config:

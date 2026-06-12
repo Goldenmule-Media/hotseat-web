@@ -1,0 +1,6 @@
+# TLS for the wiki-server gateway. Caddy auto-provisions/renews a Let's Encrypt cert for
+# $WIKI_DOMAIN (needs ports 80+443 and a DNS A record → this host) and proxies to the
+# gateway over the compose network. Certs persist in the caddy_data volume.
+{$WIKI_DOMAIN} {
+	reverse_proxy wiki-server:4437
+}
