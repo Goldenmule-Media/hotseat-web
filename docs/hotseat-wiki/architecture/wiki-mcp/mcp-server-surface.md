@@ -12,7 +12,7 @@ The agent-facing MCP server built on the SDK's low-level `Server`, exposing the 
 Turns the engine into agent-callable tools / resources and threads consistency tokens automatically, so an agent always reads its own prior writes without managing tokens, while distinct sessions stay independent.
 
 ## Design notes
-_No design notes._
+Host-injected auth (HTTP transport only): an optional McpAuth gates every request — 401 without a valid bearer, per-user workspace access checks on every tool, and ownership attribution on createWorkspace. An optional authDiscovery on the transport makes that 401 advertise an OAuth resource_metadata URL and serves a host-authored protected-resource document at /.well-known/oauth-protected-resource on the MCP listener, so an MCP client can bootstrap its login from the 401 alone. Both are opaque host-supplied values: this package stays auth-mechanism-agnostic and learns no OAuth concepts — wiki-server authors them from its gateway config.
 
 ## Components
 _No components._
@@ -26,6 +26,7 @@ _No components._
 - class `WikiMcpServer` in `wiki-mcp/src/mcp/server.ts`
 - function `wikiTools` in `wiki-mcp/src/mcp/tools.ts`
 - class `SessionTokenManager` in `wiki-mcp/src/mcp/tokens.ts`
+- interface `McpAuth` in `wiki-mcp/src/mcp/auth.ts`
 
 ## Data model
 Owns a `SessionTokenManager` (per-session high-water `{workspaceId→version}` marks), a `WikiTool` catalog, and a live HTTP session map. Write tools: `createWorkspace` / `createPage` / `reparent` / `setPageTitle` / `archivePage` / `link` / `unlink` / `mutatePage` / `renameSymbol`. Read tools: `describeMutations` / `getPage` / `tree` / `renderPage` / `search` / `openQuestions` / `outline` / `symbols` / `references`. Resources: `wiki://{ns}/workspace/{id}` and `wiki://{ns}/page/{wsId}/{pageId}`.
@@ -39,4 +40,4 @@ Constructed by `createWikiMcp` and started over stdio (one ambient session) or s
 - The full catalog is always exposed; the engine's guard rejects illegal calls and a `WikiError` maps to a structured tool result (`isError: true`) with a stable `code` the agent self-corrects on. A session is the unit of consistency — a close drops its high-water marks.
 
 ## Synced commit
-e357aa7
+d5bdd9b

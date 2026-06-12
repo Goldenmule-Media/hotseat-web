@@ -42,11 +42,13 @@ _No design notes._
 The aggregate is the **workspace** (`IWorkspaceState`): a `Map` of pages by id, an ordered `children` map (the tree, keyed by parent id or the `@root` sentinel), `links` (graph edges beyond the tree), and `version` == the per-workspace event count. A page (`PageState` / `IPageNode`) is a tree of typed **sections** (`ISection`), each holding typed **fields** (`IField`; the closed `FieldKind` set: `scalar` / `prose` / `code` / `attachment-ref` / `ref` / `blocks` / `list`); a `list` field holds **items** (`IItem`) with their own id / status / fields. All content writes are the single event `SectionOpsApplied`, carrying an ordered list from the closed `SectionOp` vocabulary (`setField`, `addElement`, `moveElement`, `transition`, `addSection`, …). A command's events are one atomic array-message; reads flatten array-messages back to a flat event list, folded in `version` order.
 
 ## Usage
-Consumed as **TypeScript source** (`moduleResolution: "Bundler"`; extensionless relative imports). Entry point `createWiki(config: IWikiConfig)` takes the stream config, the `pageTypes` array, and injected `clock` / `ids` for determinism. The public surface is the barrel `wiki/src/index.ts` plus three subpaths:
+Consumed as **TypeScript source** (`moduleResolution: "Bundler"`; extensionless relative imports). Entry point `createWiki(config: IWikiConfig)` takes the stream config, the `pageTypes` array, and injected `clock` / `ids` for determinism. The public surface is the barrel `wiki/src/index.ts` plus five subpaths:
 
 - **`wiki/authoring`** — `definePageType`, `arg`, `t`, `zodSchema` / `z` (what `wiki-models` builds on);
 - **`wiki/registry`** — the `Registry` + the public `foldWorkspace`, so an external read model can fold history itself;
-- **`wiki/testing`** — `createTestWiki`, `startTestServer`, `wikiOn` (an in-process Durable Streams test server).
+- **`wiki/testing`** — `createTestWiki`, `startTestServer`, `wikiOn` (an in-process Durable Streams test server);
+- **`wiki/admin`** — `replicateWorkspace`: schema-agnostic stream-to-stream workspace replication between servers (idempotent, refuses a divergent destination);
+- **`wiki/auth-client`** — Node-only OAuth 2.1 client for CLIs: `loginLoopback` (RFC 8252 loopback sign-in with PKCE), `CredentialsStore` (`~/.wiki/credentials.json`, mode 0600), and `oauthHeaders` / `resolveAuthorization` yielding per-request **refreshing** authorization header functions for the `IStreamConfig.headers` seam.
 
 Every write returns `Committed<T>` (value + opaque consistency token); reads are async and token-gated — pass `consistentWith` a write's token for read-your-writes, or omit it for eventually-consistent state.
 
@@ -58,6 +60,7 @@ Every write returns `Committed<T>` (value + opaque consistency token); reads are
 - A mutation is legal iff the FSM declares the transition from the current status (self-transitions included). Structural invariants — acyclic tree, unique sibling title, link target exists — are checked in handlers.
 - OCC via `Stream-Seq` (strict-greater): a stale append → HTTP 409 → rebase-and-retry. `version` is the 0-based per-workspace event count and drives fold order.
 - Schema evolution is upcast-to-latest: events carry `schemaVersion`; the fold chains a type's `upcasters` up to its current `version`, then one head `apply` runs. Field-level schemas and required fields are enforced on every command path (incl. auto-generated structural commands).
+- Node-only subpaths (wiki/testing, wiki/auth-client) are opt-in and never imported by browser surfaces — the engine core stays transport-free. The headers seam (IStreamConfig.headers) accepts per-request function values, so a refreshed token takes effect on the next stream request without rebuilding the wiki.
 
 ## Synced commit
-e357aa7
+d5bdd9b
