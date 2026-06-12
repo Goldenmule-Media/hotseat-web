@@ -18,12 +18,8 @@
  *
  * Run via the package script: `npm run migrate-workspace -w wiki-mcp -- --workspace ws:… --dest-url … --apply`.
  */
-import {
-  replicateWorkspace,
-  ReplicationConflictError,
-  type IStreamConfig,
-  type WorkspaceId,
-} from "wiki";
+import { replicateWorkspace, ReplicationConflictError } from "wiki/admin";
+import type { IStreamConfig, WorkspaceId } from "wiki";
 
 interface Flags {
   workspace: string;
