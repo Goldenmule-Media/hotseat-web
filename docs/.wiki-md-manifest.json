@@ -1,9 +1,9 @@
 {
   "ws:mpzncs2z-0001-2wgv51": {
-    "version": 2087,
+    "version": 2204,
     "files": {
       "hotseat-wiki/architecture/index.md": "5213acdc1038077e77d636e752170d48a0efdbf3a8639b6e6d795f4fde277015",
-      "hotseat-wiki/feature-specs/index.md": "ecb13938e3ee7fa1278d1aa9c2e98a536e9bf8e180e385efe94f49b2ccb22583",
+      "hotseat-wiki/feature-specs/index.md": "84c4b657185ac5413e0e551285ae6020cbbe7e9601a3789c838b14bde1d24c25",
       "hotseat-wiki/architecture/wiki/index.md": "c6ec4be94906f20cfa597bc55fa2374dcb2e372d75261e64d6445d2621e5cdd9",
       "hotseat-wiki/architecture/wiki-models/index.md": "acec0870b92ee856c5cb0edb135ccae625d159a6aee93c18439e8b310ec50d66",
       "hotseat-wiki/architecture/wiki-mcp/index.md": "d588057a56c0b7550e7aa4afc64a4eebecfc6cef113028ebe07bc95bdc494c4d",
@@ -47,7 +47,7 @@
       "hotseat-wiki/.archived/implementation-plan--mq0z8mvy-008g-bglkr7.md": "884fb36efa34ab04dad0ccf5bd3f3514f1fcd2f0c69d333b6c546a5a89291bd2",
       "hotseat-wiki/.archived/testing-plan--mq0z8mvz-008i-1dmape.md": "2e482867e58fa657daeeb0eddd511474649debbfa2f3f038c251c24a828ef651",
       "hotseat-wiki/.archived/feature-spec--mq0z8mvz-008j-22lx4e.md": "4a139424b08c2a8a75f4e0ea1001028e83d5bf65af678a5632804b57119ed4ae",
-      "hotseat-wiki/decision-records/index.md": "7948190f355a489aff054f62eb0a899da04c7115a0436d9a8b5c177b8ae05b63",
+      "hotseat-wiki/decision-records/index.md": "d0da44b0839c674307443b7bd79e73d3b2bc65c229326368eba39d5c611b0675",
       "hotseat-wiki/decision-records/design-decisions-live-in-the-wiki.md": "d1089191baf724c3b59f77839e6b5a94735b11822ce27619f7161cdcb68ae8bd",
       "hotseat-wiki/decision-records/use-durable-streams-directly-no-storage-port.md": "44029f6a7d78681a461e83a6af0ec1dc2e3e0b5f277a14fdf4451210a680379f",
       "hotseat-wiki/decision-records/workspace-as-the-aggregate-one-stream.md": "5c7dea8a89a387cd236d13a2d9d2fc6d52d68c2e6311e6efcf6e34d6bb41669f",
@@ -107,10 +107,15 @@
       "hotseat-wiki/architecture/wiki-mirror.md": "971b1eb98eb317737758da55297d3d0796a54f9f9ecc61f7a73bb5b47f802fcb",
       "hotseat-wiki/decision-records/markdown-emission-is-a-local-stream-client-not-a-host-responsibility.md": "c4932df9f189bb3ce7d2ccaed0b9bc8c46afe76fc9da1221221e057203745f34",
       "hotseat-wiki/decision-records/github-auth-at-the-host-edge-an-auth-gateway-per-surface-injected-enforcement.md": "ff60995174e9d2376a84709564b4af7f83ff3a5673e6ff954fd8e9dafd7746f8",
-      "hotseat-wiki/feature-specs/stream-to-stream-migration-copy-a-workspace-between-servers/index.md": "2265f5721d10f434b0bc825638da2a9fda9d15b6910f4bbb283fab1946ed7bc5",
-      "hotseat-wiki/feature-specs/stream-to-stream-migration-copy-a-workspace-between-servers/implementation-plan-stream-to-stream-migration-copy-a-workspace-between-servers.md": "409e0826a9598b7c804fbda1ee93b1b977fbed8068e8521b2ae573a385e7cb9a",
-      "hotseat-wiki/feature-specs/stream-to-stream-migration-copy-a-workspace-between-servers/testing-plan-stream-to-stream-migration-copy-a-workspace-between-servers.md": "e4d955bb730c01a77e5941b9bec8f66e94d8342221f6f89f1262a4ce2c5176ca",
-      "hotseat-wiki/feature-specs/stream-to-stream-migration-copy-a-workspace-between-servers/spec-stream-to-stream-migration-copy-a-workspace-between-servers.md": "9c8ee3b0fb69b9b453895e37f000d67d2c9b40e82e9fcce397c38b3f04216c53"
+      "hotseat-wiki/.archived/feature-brief--mqb9074t-001e-7brxvi.md": "2265f5721d10f434b0bc825638da2a9fda9d15b6910f4bbb283fab1946ed7bc5",
+      "hotseat-wiki/.archived/implementation-plan--mqb9074t-001f-yd818n.md": "409e0826a9598b7c804fbda1ee93b1b977fbed8068e8521b2ae573a385e7cb9a",
+      "hotseat-wiki/.archived/testing-plan--mqb9074t-001g-h9zcu7.md": "e4d955bb730c01a77e5941b9bec8f66e94d8342221f6f89f1262a4ce2c5176ca",
+      "hotseat-wiki/.archived/feature-spec--mqb9074t-001h-9hawnj.md": "9c8ee3b0fb69b9b453895e37f000d67d2c9b40e82e9fcce397c38b3f04216c53",
+      "hotseat-wiki/feature-specs/oauth-2-1-login-for-mcp-and-cli-clients/index.md": "d0532cf653946bcc9fd16cb8b440eeeae96daf4e5d8d348abddff68d66139a72",
+      "hotseat-wiki/feature-specs/oauth-2-1-login-for-mcp-and-cli-clients/implementation-plan-oauth-2-1-login-for-mcp-and-cli-clients.md": "e5fc254cee0ebd2b963e3573d95b4b6ef768a56ecc61898cdc2f02989bfe5d27",
+      "hotseat-wiki/feature-specs/oauth-2-1-login-for-mcp-and-cli-clients/testing-plan-oauth-2-1-login-for-mcp-and-cli-clients.md": "a4a6604d83db73aa3648d2c9523320de083b6af70a9a6cb2cb21bbb43d646a29",
+      "hotseat-wiki/feature-specs/oauth-2-1-login-for-mcp-and-cli-clients/spec-oauth-2-1-login-for-mcp-and-cli-clients.md": "a38d2550b5a6eeaed19a80eb4d6ee29de3c789cf11febbd76004d552a6152a20",
+      "hotseat-wiki/decision-records/oauth-2-1-fa-ade-over-the-stateless-gateway-signed-blob-codes-and-refresh-tokens.md": "9abeedb3434e294bf77be4ca5e51d82a7e2f7bc17008224d11bdd8ab6bbac510"
     },
     "pages": {
       "toc:mpznedyz-0003-pdtcmh": "hotseat-wiki/architecture/index.md",
@@ -218,10 +223,15 @@
       "architecture:mqa0p1qp-00po-bgsbah": "hotseat-wiki/architecture/wiki-mirror.md",
       "decision-record:mqa1x5yj-000d-foj09k": "hotseat-wiki/decision-records/markdown-emission-is-a-local-stream-client-not-a-host-responsibility.md",
       "decision-record:mqazxkh2-0001-vnogwy": "hotseat-wiki/decision-records/github-auth-at-the-host-edge-an-auth-gateway-per-surface-injected-enforcement.md",
-      "feature-brief:mqb9074t-001e-7brxvi": "hotseat-wiki/feature-specs/stream-to-stream-migration-copy-a-workspace-between-servers/index.md",
-      "implementation-plan:mqb9074t-001f-yd818n": "hotseat-wiki/feature-specs/stream-to-stream-migration-copy-a-workspace-between-servers/implementation-plan-stream-to-stream-migration-copy-a-workspace-between-servers.md",
-      "testing-plan:mqb9074t-001g-h9zcu7": "hotseat-wiki/feature-specs/stream-to-stream-migration-copy-a-workspace-between-servers/testing-plan-stream-to-stream-migration-copy-a-workspace-between-servers.md",
-      "feature-spec:mqb9074t-001h-9hawnj": "hotseat-wiki/feature-specs/stream-to-stream-migration-copy-a-workspace-between-servers/spec-stream-to-stream-migration-copy-a-workspace-between-servers.md"
+      "feature-brief:mqb9074t-001e-7brxvi": "hotseat-wiki/.archived/feature-brief--mqb9074t-001e-7brxvi.md",
+      "implementation-plan:mqb9074t-001f-yd818n": "hotseat-wiki/.archived/implementation-plan--mqb9074t-001f-yd818n.md",
+      "testing-plan:mqb9074t-001g-h9zcu7": "hotseat-wiki/.archived/testing-plan--mqb9074t-001g-h9zcu7.md",
+      "feature-spec:mqb9074t-001h-9hawnj": "hotseat-wiki/.archived/feature-spec--mqb9074t-001h-9hawnj.md",
+      "feature-brief:mqbcdn7z-00b7-r7zj1u": "hotseat-wiki/feature-specs/oauth-2-1-login-for-mcp-and-cli-clients/index.md",
+      "implementation-plan:mqbcdn80-00b8-a57ne7": "hotseat-wiki/feature-specs/oauth-2-1-login-for-mcp-and-cli-clients/implementation-plan-oauth-2-1-login-for-mcp-and-cli-clients.md",
+      "testing-plan:mqbcdn80-00b9-txt1sq": "hotseat-wiki/feature-specs/oauth-2-1-login-for-mcp-and-cli-clients/testing-plan-oauth-2-1-login-for-mcp-and-cli-clients.md",
+      "feature-spec:mqbcdn80-00ba-y7lv8n": "hotseat-wiki/feature-specs/oauth-2-1-login-for-mcp-and-cli-clients/spec-oauth-2-1-login-for-mcp-and-cli-clients.md",
+      "decision-record:mqbdi1vx-00en-9zdj8q": "hotseat-wiki/decision-records/oauth-2-1-fa-ade-over-the-stateless-gateway-signed-blob-codes-and-refresh-tokens.md"
     }
   }
 }

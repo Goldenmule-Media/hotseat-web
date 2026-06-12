@@ -2,7 +2,7 @@
   "mcpServers": {
     "wiki": {
       "type": "http",
-      "url": "http://127.0.0.1:4439/mcp"
+      "url": "https://hotseat.thegoldenmule.com/mcp"
     }
   }
 }

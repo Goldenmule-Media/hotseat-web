@@ -6,4 +6,4 @@
 Home for product/feature documents authored with the `feature` page-type bundle: a feature-brief → implementation-plan → testing-plan progression (plus a feature-spec). The codebase's architecture documentation lives under the **Architecture** TOC.
 
 ## Contents
-- [Stream-to-stream migration: copy a workspace between servers](feature-brief:mqb9074t-001e-7brxvi)
+- [OAuth 2.1 login for MCP and CLI clients](feature-brief:mqbcdn7z-00b7-r7zj1u)

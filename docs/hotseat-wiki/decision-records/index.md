@@ -39,3 +39,4 @@ _No overview yet._
 - [Declared authored-ness gates (`requiredIn`): the engine enforces field completeness per status](decision-record:mq9oa2cx-0014-scc7q)
 - [Markdown emission is a local stream-client, not a host responsibility](decision-record:mqa1x5yj-000d-foj09k)
 - [GitHub auth at the host edge: an auth gateway + per-surface injected enforcement](decision-record:mqazxkh2-0001-vnogwy)
+- [OAuth 2.1 façade over the stateless gateway — signed-blob codes and refresh tokens](decision-record:mqbdi1vx-00en-9zdj8q)
