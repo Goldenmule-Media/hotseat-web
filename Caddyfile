@@ -2,5 +2,11 @@
 # $WIKI_DOMAIN (needs ports 80+443 and a DNS A record → this host) and proxies to the
 # gateway over the compose network. Certs persist in the caddy_data volume.
 {$WIKI_DOMAIN} {
+	# The MCP endpoint is its OWN listener inside the container (:4439, streamable
+	# HTTP) — route it there; everything else (the auth gateway fronting the stream
+	# data plane + /auth/* + /.well-known/*) is the gateway on :4437. OAuth discovery
+	# stays on the gateway origin: the MCP 401's resource_metadata points at
+	# https://{$WIKI_DOMAIN}/.well-known/oauth-protected-resource, served by :4437.
+	reverse_proxy /mcp wiki-server:4439
 	reverse_proxy wiki-server:4437
 }
