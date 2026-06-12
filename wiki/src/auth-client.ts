@@ -35,7 +35,11 @@ export interface ServerCredentials {
   readonly accessTokenExp: number;
   /** The current refresh token (`wsr1.…`, replaced on each rotation). */
   readonly refreshToken: string;
-  /** Refresh-token expiry, unix seconds; once passed, a new login is required. */
+  /**
+   * Refresh-token expiry, unix seconds; once passed, a new login is required
+   * ({@link oauthHeaders} fails fast instead of attempting a doomed refresh).
+   * `0` = unknown (the blob didn't decode) — the check is skipped.
+   */
   readonly refreshTokenExp: number;
   /** The token endpoint the grant came from (re-used for refresh). */
   readonly tokenEndpoint: string;
@@ -200,7 +204,10 @@ const newCodeVerifier = (): string => randomBytes(32).toString("base64url");
 /** The S256 challenge for a verifier. */
 const s256 = (verifier: string): string => createHash("sha256").update(verifier, "utf8").digest("base64url");
 
-/** Best-effort decode of a signed blob's payload expiry (our own token shape). */
+/**
+ * Best-effort decode of a signed blob's payload expiry (our own token shape).
+ * `fallback` should be `0` ("unknown") unless a better prior exists.
+ */
 function tokenExp(token: string, fallback: number): number {
   try {
     const payload = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8")) as { exp?: unknown };
@@ -308,7 +315,7 @@ export async function loginLoopback(opts: LoginOptions): Promise<ServerCredentia
       accessToken: tokens.access_token,
       accessTokenExp: nowSeconds + tokens.expires_in,
       refreshToken: tokens.refresh_token,
-      refreshTokenExp: tokenExp(tokens.refresh_token, nowSeconds),
+      refreshTokenExp: tokenExp(tokens.refresh_token, 0),
       tokenEndpoint: meta.tokenEndpoint,
       user: tokenUser(tokens.access_token),
     };
@@ -369,9 +376,13 @@ export interface OAuthHeadersOptions {
  * An `IStreamHeaders`-compatible `authorization` value for a server with stored
  * credentials: returns the cached access token while fresh, refreshing through
  * the token endpoint (rotating the stored refresh token) when within
- * `skewSeconds` of expiry. Concurrent callers share one in-flight refresh.
- * Throws (failing the stream request, not the process) when no credentials
- * exist or the refresh grant itself has expired — both mean "run login again".
+ * `skewSeconds` of expiry. The grant is read from disk ONCE and held in memory
+ * from then on — header functions run on EVERY stream request, and a live tail
+ * must not pay a file read per poll (a rotation written by another process is
+ * harmless: superseded refresh tokens stay valid until their capped expiry).
+ * Concurrent callers share one in-flight refresh. Throws (failing the stream
+ * request, not the process) when no credentials exist or the refresh grant
+ * itself has expired — both mean "run login again".
  */
 export function oauthHeaders(
   serverUrl: string,
@@ -381,6 +392,7 @@ export function oauthHeaders(
   const fetchImpl = opts.fetchImpl ?? fetch;
   const skew = opts.skewSeconds ?? 60;
   const now = opts.nowSeconds ?? ((): number => Math.floor(Date.now() / 1000));
+  let cached: ServerCredentials | undefined;
   let inFlight: Promise<string> | undefined;
 
   async function refresh(stale: ServerCredentials): Promise<string> {
@@ -390,29 +402,52 @@ export function oauthHeaders(
       client_id: stale.clientId,
     });
     const nowSeconds = now();
-    store.set(serverUrl, {
+    cached = {
       ...stale,
       accessToken: tokens.access_token,
       accessTokenExp: nowSeconds + tokens.expires_in,
       refreshToken: tokens.refresh_token,
       refreshTokenExp: tokenExp(tokens.refresh_token, stale.refreshTokenExp),
-    });
+    };
+    store.set(serverUrl, cached);
     return tokens.access_token;
   }
 
   return {
     authorization: async (): Promise<string> => {
-      const credentials = store.get(serverUrl);
-      if (credentials === undefined) {
+      cached ??= store.get(serverUrl);
+      if (cached === undefined) {
         throw new Error(`no stored credentials for ${originOf(serverUrl)} — sign in first (wiki-mirror login)`);
       }
-      if (now() < credentials.accessTokenExp - skew) {
-        return `Bearer ${credentials.accessToken}`;
+      if (now() < cached.accessTokenExp - skew) {
+        return `Bearer ${cached.accessToken}`;
       }
-      inFlight ??= refresh(credentials).finally(() => {
+      // A known-expired refresh grant fails fast with the actionable message
+      // instead of a doomed network round-trip per request.
+      if (cached.refreshTokenExp > 0 && now() >= cached.refreshTokenExp) {
+        throw new Error(`the stored grant for ${originOf(serverUrl)} has expired — sign in again (wiki-mirror login)`);
+      }
+      inFlight ??= refresh(cached).finally(() => {
         inFlight = undefined;
       });
       return `Bearer ${await inFlight}`;
     },
   };
+}
+
+/**
+ * The CLI auth precedence, shared by every consumer (wiki-mirror,
+ * migrate-workspace): an EXPLICIT static token wins verbatim; else a stored
+ * OAuth grant for the server's origin becomes a refreshing header function;
+ * else `undefined` (an open server — send no header at all).
+ */
+export function resolveAuthorization(
+  serverUrl: string,
+  explicitToken: string | undefined,
+  opts: OAuthHeadersOptions = {},
+): string | (() => Promise<string>) | undefined {
+  if (explicitToken !== undefined && explicitToken.length > 0) return `Bearer ${explicitToken}`;
+  const store = opts.store ?? new CredentialsStore();
+  if (store.get(serverUrl) === undefined) return undefined;
+  return oauthHeaders(serverUrl, { ...opts, store }).authorization;
 }

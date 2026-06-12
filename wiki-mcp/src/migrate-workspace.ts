@@ -19,7 +19,7 @@
  * Run via the package script: `npm run migrate-workspace -w wiki-mcp -- --workspace ws:… --dest-url … --apply`.
  */
 import { replicateWorkspace, ReplicationConflictError } from "wiki/admin";
-import { CredentialsStore, oauthHeaders } from "wiki/auth-client";
+import { resolveAuthorization } from "wiki/auth-client";
 import type { IStreamConfig, WorkspaceId } from "wiki";
 
 interface Flags {
@@ -61,19 +61,15 @@ function parseFlags(argv: readonly string[]): Flags {
 }
 
 /**
- * A stream config with authorization, by precedence: an explicit static token
- * (flag/env) wins; else a stored OAuth grant for the server's origin
- * (`wiki-mirror login`, in `~/.wiki/credentials.json`) becomes a refreshing
- * header function; else unauthenticated (an open server).
+ * A stream config with authorization, by the shared CLI precedence
+ * ({@link resolveAuthorization}): an explicit static token (flag/env) wins;
+ * else a stored OAuth grant for the server's origin (`wiki-mirror login`, in
+ * `~/.wiki/credentials.json`) becomes a refreshing header function; else
+ * unauthenticated (an open server).
  */
 function streamConfig(baseUrl: string, namespace: string, token: string | undefined): IStreamConfig {
-  if (token !== undefined && token.length > 0) {
-    return { baseUrl, namespace, headers: { authorization: `Bearer ${token}` } };
-  }
-  if (new CredentialsStore().get(baseUrl) !== undefined) {
-    return { baseUrl, namespace, headers: { authorization: oauthHeaders(baseUrl).authorization } };
-  }
-  return { baseUrl, namespace };
+  const authorization = resolveAuthorization(baseUrl, token);
+  return { baseUrl, namespace, ...(authorization !== undefined ? { headers: { authorization } } : {}) };
 }
 
 async function main(): Promise<void> {

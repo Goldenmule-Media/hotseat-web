@@ -271,12 +271,8 @@ function authorizationCodeGrant(cfg: OAuthConfig, form: URLSearchParams, nowSeco
   if (!userAllowed(cfg, parsed.login)) {
     return oauthError(400, "invalid_grant", "user is no longer allowed on this server");
   }
-  const user: SessionUser = {
-    login: parsed.login,
-    ...(parsed.name !== undefined ? { name: parsed.name } : {}),
-    ...(parsed.avatarUrl !== undefined ? { avatarUrl: parsed.avatarUrl } : {}),
-  };
-  return mintTokens(cfg, user, parsed.cid, nowSeconds);
+  // The parsed code IS a SessionUser (login/name/avatarUrl) — mint from it directly.
+  return mintTokens(cfg, parsed, parsed.cid, nowSeconds);
 }
 
 function refreshTokenGrant(cfg: OAuthConfig, form: URLSearchParams, nowSeconds: number): TokenResponse | OAuthError {
@@ -293,12 +289,8 @@ function refreshTokenGrant(cfg: OAuthConfig, form: URLSearchParams, nowSeconds: 
   if (!userAllowed(cfg, parsed.login)) {
     return oauthError(400, "invalid_grant", "user is no longer allowed on this server");
   }
-  const user: SessionUser = {
-    login: parsed.login,
-    ...(parsed.name !== undefined ? { name: parsed.name } : {}),
-    ...(parsed.avatarUrl !== undefined ? { avatarUrl: parsed.avatarUrl } : {}),
-  };
   // Rotation: the new refresh token's expiry is capped at the OLD one's, so a
-  // refresh chain never outlives its original grant.
-  return mintTokens(cfg, user, parsed.cid, nowSeconds, parsed.exp);
+  // refresh chain never outlives its original grant. The parsed token IS a
+  // SessionUser — mint from it directly.
+  return mintTokens(cfg, parsed, parsed.cid, nowSeconds, parsed.exp);
 }

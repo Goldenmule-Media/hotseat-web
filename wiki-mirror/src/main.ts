@@ -8,7 +8,7 @@
  */
 import { createWiki } from "wiki";
 import type { IWiki, WorkspaceId } from "wiki";
-import { CredentialsStore, loginLoopback, oauthHeaders } from "wiki/auth-client";
+import { loginLoopback, resolveAuthorization } from "wiki/auth-client";
 import { Registry } from "wiki/registry";
 
 import { consoleLogger, type Logger } from "./logger.js";
@@ -35,18 +35,12 @@ export async function startMirror(
 ): Promise<RunningMirror> {
   const pageTypes = await loadModels(config.models);
   const registry = new Registry(pageTypes);
-  // Authorization, by precedence: an explicit static token (flags → WIKI_MIRROR_TOKEN →
-  // config file) rides every request verbatim; else a stored OAuth grant for this server
-  // (`wiki-mirror login`) becomes a REFRESHING header function — the engine's IStreamHeaders
-  // seam evaluates it per request, so a near-expiry access token renews itself mid-tail;
-  // else no headers key at all (an open server). Token values are never logged.
-  const storedGrant = config.token === undefined && new CredentialsStore().get(config.streamBaseUrl) !== undefined;
-  const authorization =
-    config.token !== undefined
-      ? `Bearer ${config.token}`
-      : storedGrant
-        ? oauthHeaders(config.streamBaseUrl).authorization
-        : undefined;
+  // Authorization, by precedence (shared with migrate-workspace): an explicit static token
+  // (flags → WIKI_MIRROR_TOKEN → config file) rides every request verbatim; else a stored
+  // OAuth grant for this server (`wiki-mirror login`) becomes a REFRESHING header function —
+  // the engine's IStreamHeaders seam evaluates it per request, so a near-expiry access token
+  // renews itself mid-tail; else no headers key at all (an open server). Never logged.
+  const authorization = resolveAuthorization(config.streamBaseUrl, config.token);
   const wiki = createWiki({
     stream: {
       baseUrl: config.streamBaseUrl,

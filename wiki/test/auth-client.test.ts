@@ -18,6 +18,7 @@ import {
   discoverAuthServer,
   loginLoopback,
   oauthHeaders,
+  resolveAuthorization,
   type ServerCredentials,
 } from "../src/auth-client";
 
@@ -249,5 +250,43 @@ describe("wiki/auth-client", () => {
   it("oauthHeaders throws a run-login error when no credentials exist", async () => {
     const headers = oauthHeaders(as.url, { store: new CredentialsStore(join(dir, "empty.json")) });
     await expect(headers.authorization()).rejects.toThrow(/sign in first/);
+  });
+
+  it("oauthHeaders fails fast (no network) when the refresh grant itself has expired", async () => {
+    const store = new CredentialsStore(join(dir, "expired.json"));
+    let clock = 2_000_000;
+    store.set(as.url, {
+      clientId: "wsid1.c.s",
+      accessToken: "wsv1.stale.s",
+      accessTokenExp: clock - 10, // access already stale → would need a refresh
+      refreshToken: "wsr1.dead.s",
+      refreshTokenExp: clock - 5, // …but the grant is gone too
+      tokenEndpoint: `${as.url}/auth/token`,
+      user: "alice",
+    });
+    const before = as.grants.refresh;
+    const headers = oauthHeaders(as.url, { store, nowSeconds: () => clock });
+    await expect(headers.authorization()).rejects.toThrow(/sign in again/);
+    expect(as.grants.refresh).toBe(before); // no doomed round-trip
+  });
+
+  it("resolveAuthorization honors the shared precedence: static token, stored grant, open", () => {
+    const store = new CredentialsStore(join(dir, "precedence.json"));
+    // Static token wins even with a stored grant present.
+    store.set(as.url, {
+      clientId: "wsid1.c.s",
+      accessToken: "wsv1.a.s",
+      accessTokenExp: Math.floor(Date.now() / 1000) + 3600,
+      refreshToken: "wsr1.r.s",
+      refreshTokenExp: 0,
+      tokenEndpoint: `${as.url}/auth/token`,
+      user: "alice",
+    });
+    expect(resolveAuthorization(as.url, "static-token", { store })).toBe("Bearer static-token");
+    // Stored grant → a refreshing function.
+    expect(typeof resolveAuthorization(as.url, undefined, { store })).toBe("function");
+    // Neither → undefined (no header at all).
+    expect(resolveAuthorization(as.url, undefined, { store: new CredentialsStore(join(dir, "none.json")) })).toBeUndefined();
+    expect(resolveAuthorization(as.url, "", { store: new CredentialsStore(join(dir, "none.json")) })).toBeUndefined();
   });
 });
