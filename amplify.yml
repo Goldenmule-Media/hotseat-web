@@ -18,6 +18,13 @@ applications:
           commands:
             # Node ≥20 (repo engines requirement; @types/node ^24, Next 15).
             - nvm use 20 || nvm install 20
+            # Root workspace install FIRST. wiki-ui transpiles wiki-models source, and
+            # wiki-models imports `wiki/authoring` — webpack resolves that from wiki-models'
+            # location, i.e. <repo-root>/node_modules/wiki. That symlink only exists after a
+            # root workspace install (workspaces: wiki, wiki-models, …). Without it the build
+            # fails "Can't resolve 'wiki/authoring'". wiki-ui is NOT a workspace member, so this
+            # does not install its deps — hence the second, wiki-ui-local install below.
+            - cd .. && npm ci && cd wiki-ui
             - npm ci
         build:
           commands:
