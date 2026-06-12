@@ -363,6 +363,54 @@ describe("setPageTitle — unique among siblings", () => {
   });
 });
 
+describe("title entity decoding — pre-escaped titles are normalized on write", () => {
+  it("createPage decodes HTML entities in the stored title", () => {
+    const { events } = createPage(
+      baseState(),
+      { type: "feature-brief", title: "Build &amp; Distribution &lt;x&gt; &#38; &#x27;q&#x27;", parentId: null },
+      makeServices(),
+      registry,
+    );
+    expect((events[0].payload as { title: string }).title).toBe("Build & Distribution <x> & 'q'");
+  });
+
+  it("propagates the decoded title into auto-created required children", () => {
+    const { events } = createPage(
+      baseState(),
+      { type: "feature-brief", title: "Player Profile &amp; Settings", parentId: null },
+      makeServices(),
+      registry,
+    );
+    // brief + 3 required children; every derived title carries the decoded parent name.
+    expect(events.map((e) => (e.payload as { title: string }).title)).toEqual([
+      "Player Profile & Settings",
+      "Implementation plan — Player Profile & Settings",
+      "Testing plan — Player Profile & Settings",
+      "Spec — Player Profile & Settings",
+    ]);
+  });
+
+  it("setPageTitle decodes HTML entities on rename", () => {
+    const { events } = setPageTitle(
+      baseState(),
+      { pageId: siblingId, title: "Crypto &amp; Signing" },
+      makeServices(),
+      registry,
+    );
+    expect(events[0].payload).toMatchObject({ pageId: siblingId, title: "Crypto & Signing" });
+  });
+
+  it("leaves a bare ampersand and unrecognized entities untouched", () => {
+    const { events } = setPageTitle(
+      baseState(),
+      { pageId: siblingId, title: "AT&T &widget; R&D" },
+      makeServices(),
+      registry,
+    );
+    expect((events[0].payload as { title: string }).title).toBe("AT&T &widget; R&D");
+  });
+});
+
 describe("link — endpoint integrity", () => {
   it("rejects a link whose target page does not exist", () => {
     const state = baseState();

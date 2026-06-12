@@ -34,7 +34,7 @@ import {
   ParentNotFoundError,
 } from "./errors";
 import { SECTION_OPS_EVENT } from "./workspace";
-import { titleCase } from "./labels";
+import { decodeTitleEntities, titleCase } from "./labels";
 import type { Registry } from "./registry";
 import type { Services } from "./types";
 
@@ -177,11 +177,15 @@ function isSelfOrDescendant(state: IWorkspaceState, pageId: PageId, candidate: P
  * top-level page's id.
  */
 export const createPage: StructureHandler = (state, args, services, registry) => {
-  const { type, title, parentId } = args as {
+  const { type, parentId } = args as {
     type: string;
     title: string;
     parentId: PageId | null;
   };
+  // Titles are plain text; decode any HTML entities the caller passed pre-escaped so the
+  // stored title (and the derived required-child titles below) are byte-clean. See
+  // decodeTitleEntities.
+  const title = decodeTitleEntities((args as { title: string }).title);
   const normalizedParent: PageId | null = parentId ?? null;
 
   // The registry must know the type (also throws UnknownPageTypeError on miss).
@@ -378,7 +382,9 @@ export const reorder: StructureHandler = (state, args) => {
 
 /** Rename a page; the new title must be unique among its siblings. */
 export const setPageTitle: StructureHandler = (state, args) => {
-  const { pageId, title } = args as { pageId: PageId; title: string };
+  const { pageId } = args as { pageId: PageId; title: string };
+  // Decode pre-escaped HTML entities so the rename stores plain text (see decodeTitleEntities).
+  const title = decodeTitleEntities((args as { title: string }).title);
 
   const node = requirePage(state, pageId);
   assertPageActive(node);
