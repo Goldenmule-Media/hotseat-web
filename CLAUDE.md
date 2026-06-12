@@ -171,10 +171,14 @@ its own. Full surface: [`architecture/wiki-server.md`](docs/hotseat-wiki/archite
   wiki-ui Members panel); non-members get 403s + filtered listings; pre-auth workspaces stay open to any
   signed-in user until `/claim`ed. Needs a GitHub OAuth App (callback
   `{WIKI_SERVER_PUBLIC_URL}/auth/github/callback`) — copy `.env.example` → `.env` at the repo root (read
-  via npm's `INIT_CWD`). Per-client credentials: wiki-ui signs in interactively; `.mcp.json` adds
-  `"headers": {"Authorization": "Bearer <token>"}`; `wiki-mirror` takes `WIKI_MIRROR_TOKEN` (copy the
-  token from the wiki-ui account menu). The engine seam is `IStreamConfig.headers` (per-request function
-  values, so refreshed tokens take effect live).
+  via npm's `INIT_CWD`). Per-client credentials: wiki-ui signs in interactively; MCP clients and CLIs sign
+  in via the gateway's **OAuth 2.1 façade** (discovery on the 401's `resource_metadata`, dynamic client
+  registration, PKCE; all tokens are stateless signed blobs) — Claude Code authenticates from `/mcp` with
+  NO header in `.mcp.json` and refreshes itself, and `wiki-mirror login` stores a self-refreshing grant at
+  `~/.wiki/credentials.json` shared by `wiki-mirror` and `migrate-workspace`. A manually copied token
+  (wiki-ui account menu) still works and takes precedence: `.mcp.json` `"headers": {"Authorization":
+  "Bearer <token>"}`; `wiki-mirror` takes `WIKI_MIRROR_TOKEN`. The engine seam is `IStreamConfig.headers`
+  (per-request function values, so refreshed tokens take effect live).
 
 - **The server loads NO page types by default.** Provide the schema explicitly:
   `npm run start -w wiki-server -- --models wiki-models/feature` (or `WIKI_SERVER_MODELS=wiki-models/feature`).

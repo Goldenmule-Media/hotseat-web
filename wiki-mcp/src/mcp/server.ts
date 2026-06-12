@@ -73,10 +73,29 @@ export interface McpServerDeps {
   readonly auth?: McpAuth;
 }
 
+/**
+ * Host-injected auth discovery for an auth-gated HTTP transport (opaque to
+ * wiki-mcp — the host decides what these say, keeping this package
+ * auth-mechanism-agnostic): the URL advertised on every 401 via the
+ * `WWW-Authenticate` header's `resource_metadata` parameter, and the document
+ * served at `/.well-known/oauth-protected-resource` on this listener so
+ * origin-based discovery works against the MCP port directly.
+ */
+export interface McpAuthDiscovery {
+  readonly resourceMetadataUrl: string;
+  readonly protectedResourceDocument: Readonly<Record<string, unknown>>;
+}
+
 /** The transport to listen on. */
 export type McpTransport =
   | { readonly kind: "stdio" }
-  | { readonly kind: "http"; readonly host?: string; readonly port: number; readonly path?: string };
+  | {
+      readonly kind: "http";
+      readonly host?: string;
+      readonly port: number;
+      readonly path?: string;
+      readonly authDiscovery?: McpAuthDiscovery;
+    };
 
 /**
  * The wiki MCP server: builds the protocol surface once and connects it to a chosen
@@ -94,6 +113,8 @@ export class WikiMcpServer {
    */
   private readonly sessionUsers = new Map<string, AuthUser>();
   private httpServer: HttpServer | undefined;
+  /** Host-injected discovery for the HTTP transport (set by {@link startHttp}). */
+  private authDiscovery: McpAuthDiscovery | undefined;
   /** The stdio-mode Server, when started that way (a single ambient session). */
   private stdioServer: Server | undefined;
 
@@ -301,6 +322,7 @@ export class WikiMcpServer {
   private async startHttp(transport: Extract<McpTransport, { kind: "http" }>): Promise<void> {
     const path = transport.path ?? "/mcp";
     const host = transport.host ?? "127.0.0.1";
+    this.authDiscovery = transport.authDiscovery;
 
     const httpServer = createServer((req, res) => {
       void this.handleHttp(req, res, path).catch((err: unknown) => {
@@ -358,7 +380,21 @@ export class WikiMcpServer {
    * then does the MCP framing.
    */
   private async handleHttp(req: IncomingMessage, res: ServerResponse, path: string): Promise<void> {
-    if ((req.url ?? "").split("?")[0] !== path) {
+    const pathname = (req.url ?? "").split("?")[0];
+    // Auth-gated hosts inject a protected-resource document (RFC 9728) served
+    // publicly on this listener, so clients can discover the login flow from
+    // the MCP origin alone. Opaque to this package — the host authored it.
+    if (this.authDiscovery !== undefined && pathname === "/.well-known/oauth-protected-resource") {
+      if ((req.method ?? "GET") !== "GET" && req.method !== "HEAD") {
+        res.statusCode = 405;
+        res.end("Method Not Allowed");
+        return;
+      }
+      res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*" });
+      res.end(JSON.stringify(this.authDiscovery.protectedResourceDocument));
+      return;
+    }
+    if (pathname !== path) {
       res.statusCode = 404;
       res.end("Not Found");
       return;
@@ -373,7 +409,14 @@ export class WikiMcpServer {
     if (this.deps.auth !== undefined) {
       user = this.deps.auth.authenticate(req.headers);
       if (user === undefined) {
-        res.setHeader("www-authenticate", 'Bearer realm="wiki-mcp"');
+        // `resource_metadata` (when the host injected discovery) lets an MCP
+        // client bootstrap its OAuth login from this bare 401.
+        res.setHeader(
+          "www-authenticate",
+          this.authDiscovery !== undefined
+            ? `Bearer realm="wiki-mcp", resource_metadata="${this.authDiscovery.resourceMetadataUrl}"`
+            : 'Bearer realm="wiki-mcp"',
+        );
         sendRpcError(res, 401, -32000, "Unauthenticated: provide a valid bearer token");
         return;
       }

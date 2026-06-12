@@ -61,6 +61,8 @@ describe("auth gateway", () => {
       github: { clientId: "cid", clientSecret: "csecret", callbackUrl: "http://127.0.0.1:4437/auth/github/callback", fetchImpl: githubStub },
       sessionSecret: SECRET,
       sessionTtlSeconds: 3600,
+      accessTokenTtlSeconds: 3600,
+      refreshTokenTtlSeconds: 86_400,
       store,
       logger: createLogger({ bufferSize: 100, format: "json" }),
     });
@@ -265,6 +267,8 @@ describe("auth gateway", () => {
       allowedUsers: ["someone-else"],
       sessionSecret: SECRET,
       sessionTtlSeconds: 3600,
+      accessTokenTtlSeconds: 3600,
+      refreshTokenTtlSeconds: 86_400,
       store,
       logger: createLogger({ bufferSize: 100, format: "json" }),
     });

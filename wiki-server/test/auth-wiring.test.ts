@@ -16,6 +16,7 @@ import type { McpAuth, WikiMcpConfig } from "wiki-mcp";
 
 import { resolveConfig } from "../src/config";
 import { startWikiServer, type RunningWikiServer } from "../src/main";
+import type { McpTransport } from "wiki-mcp";
 import { signSession } from "../src/auth/tokens";
 
 const SECRET = "wiring-test-secret-wiring-test-secret";
@@ -47,9 +48,11 @@ describe("auth-mode wiring", () => {
       },
     );
 
+    let mcpTransport: McpTransport | undefined;
     const server = await startWikiServer(cfg, {
-      startMcp: async (baseUrl, _logger, _transport, auth) => {
+      startMcp: async (baseUrl, _logger, transport, auth) => {
         mcpBaseUrl = baseUrl;
+        mcpTransport = transport;
         mcpAuth = auth;
         const config: WikiMcpConfig = {
           namespace: "smoke",
@@ -71,9 +74,22 @@ describe("auth-mode wiring", () => {
     expect(mcpAuth?.authenticate(bearer("alice"))?.login).toBe("alice");
     expect(mcpAuth?.authenticate({})).toBeUndefined();
 
-    // Data plane: 401 bare, /auth/config public, full round-trip with a session.
-    expect((await fetch(`${server.baseUrl}/smoke/workspace/ws1`)).status).toBe(401);
+    // The MCP transport carries host-injected OAuth discovery: its 401s will
+    // advertise the gateway's resource-metadata URL, and its listener serves a
+    // protected-resource document naming the gateway as authorization server.
+    expect(mcpTransport?.kind).toBe("http");
+    const discovery = mcpTransport?.kind === "http" ? mcpTransport.authDiscovery : undefined;
+    expect(discovery?.resourceMetadataUrl).toBe(`${cfg.publicUrl}/.well-known/oauth-protected-resource`);
+    expect(discovery?.protectedResourceDocument).toMatchObject({ authorization_servers: [cfg.publicUrl] });
+
+    // Data plane: 401 bare (with RFC 9728 discovery), /auth/config public, full round-trip with a session.
+    const bare = await fetch(`${server.baseUrl}/smoke/workspace/ws1`);
+    expect(bare.status).toBe(401);
+    expect(bare.headers.get("www-authenticate")).toContain("resource_metadata=");
     expect((await fetch(`${server.baseUrl}/auth/config`)).status).toBe(200);
+    // The gateway serves both discovery documents publicly.
+    expect((await fetch(`${server.baseUrl}/.well-known/oauth-authorization-server`)).status).toBe(200);
+    expect((await fetch(`${server.baseUrl}/.well-known/oauth-protected-resource`)).status).toBe(200);
 
     const handle = await DurableStream.create({
       url: `${server.baseUrl}/smoke/workspace/ws1`,

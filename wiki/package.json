@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./admin": "./src/admin.ts",
+    "./auth-client": "./src/auth-client.ts",
     "./authoring": "./src/authoring.ts",
     "./testing": "./src/testing.ts",
     "./registry": "./src/core/registry.ts"

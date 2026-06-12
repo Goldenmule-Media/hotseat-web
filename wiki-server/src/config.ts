@@ -88,6 +88,14 @@ export interface WikiServerConfig {
   /** Session token lifetime in days. */
   readonly sessionTtlDays: number;
   /**
+   * Lifetime (seconds) of ACCESS tokens minted by the OAuth `/auth/token`
+   * endpoint. Short by design — OAuth clients hold a refresh token. The
+   * interactive GitHub flow keeps minting {@link sessionTtlDays}-long sessions.
+   */
+  readonly accessTokenTtlSeconds: number;
+  /** Lifetime (days) of OAuth refresh tokens. Defaults to {@link sessionTtlDays}. */
+  readonly refreshTokenTtlDays: number;
+  /**
    * GitHub logins allowed to sign in (CSV, case-insensitive). Unset → ANY GitHub
    * account may establish a session — workspace membership still gates content,
    * but the catalog and unclaimed workspaces are open to every signed-in user,
@@ -264,6 +272,14 @@ export function resolveConfig(
     .map((s) => s.trim().replace(/\/+$/, ""))
     .filter((s) => s.length > 0);
   const sessionTtlDays = toInt(pick("session-ttl-days", "WIKI_SERVER_SESSION_TTL_DAYS", "30"), "--session-ttl-days");
+  const accessTokenTtlSeconds = toInt(
+    pick("access-token-ttl-seconds", "WIKI_SERVER_ACCESS_TOKEN_TTL_SECONDS", "3600"),
+    "--access-token-ttl-seconds",
+  );
+  const refreshTokenTtlDays = toInt(
+    pick("refresh-token-ttl-days", "WIKI_SERVER_REFRESH_TOKEN_TTL_DAYS", String(sessionTtlDays)),
+    "--refresh-token-ttl-days",
+  );
   const authUsersRaw = flags["auth-users"] ?? env.WIKI_SERVER_AUTH_USERS;
   const authUsers =
     authUsersRaw !== undefined
@@ -292,6 +308,8 @@ export function resolveConfig(
     publicUrl,
     uiOrigins,
     sessionTtlDays,
+    accessTokenTtlSeconds,
+    refreshTokenTtlDays,
     ...(authUsers !== undefined ? { authUsers } : {}),
   };
 }

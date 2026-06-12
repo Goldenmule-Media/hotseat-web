@@ -8,6 +8,7 @@
  */
 import { createWiki } from "wiki";
 import type { IWiki, WorkspaceId } from "wiki";
+import { CredentialsStore, loginLoopback, oauthHeaders } from "wiki/auth-client";
 import { Registry } from "wiki/registry";
 
 import { consoleLogger, type Logger } from "./logger.js";
@@ -34,14 +35,23 @@ export async function startMirror(
 ): Promise<RunningMirror> {
   const pageTypes = await loadModels(config.models);
   const registry = new Registry(pageTypes);
+  // Authorization, by precedence: an explicit static token (flags → WIKI_MIRROR_TOKEN →
+  // config file) rides every request verbatim; else a stored OAuth grant for this server
+  // (`wiki-mirror login`) becomes a REFRESHING header function — the engine's IStreamHeaders
+  // seam evaluates it per request, so a near-expiry access token renews itself mid-tail;
+  // else no headers key at all (an open server). Token values are never logged.
+  const storedGrant = config.token === undefined && new CredentialsStore().get(config.streamBaseUrl) !== undefined;
+  const authorization =
+    config.token !== undefined
+      ? `Bearer ${config.token}`
+      : storedGrant
+        ? oauthHeaders(config.streamBaseUrl).authorization
+        : undefined;
   const wiki = createWiki({
     stream: {
       baseUrl: config.streamBaseUrl,
       namespace: config.namespace,
-      // A configured session token rides every stream request as a bearer Authorization
-      // header (the engine's IStreamHeaders seam); without one the shape is identical to
-      // before — no headers key at all. The token value itself is never logged.
-      ...(config.token !== undefined ? { headers: { authorization: `Bearer ${config.token}` } } : {}),
+      ...(authorization !== undefined ? { headers: { authorization } } : {}),
     },
     pageTypes,
   });
@@ -121,6 +131,15 @@ async function waitForStreamHost(baseUrl: string, logger: Logger, timeoutMs = 30
  */
 export async function main(argv = process.argv.slice(2), env = process.env): Promise<void> {
   const logger = consoleLogger();
+  // `wiki-mirror login [--stream-url …]`: run the OAuth loopback sign-in against the
+  // resolved server and persist the grant to ~/.wiki/credentials.json, then exit. The
+  // mirror itself picks the grant up on its next start (no token copying).
+  if (argv[0] === "login") {
+    const loginConfig = resolveConfig(argv.slice(1), env);
+    const credentials = await loginLoopback({ serverUrl: loginConfig.streamBaseUrl, clientName: "wiki-mirror" });
+    logger.info("wiki-mirror: signed in", { server: new URL(loginConfig.streamBaseUrl).origin, user: credentials.user });
+    return;
+  }
   const config = resolveConfig(argv, env);
   if (config.emitters.length === 0) {
     // An EXPLICITLY named config with nothing to do is a misconfiguration — fail loud.

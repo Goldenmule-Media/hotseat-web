@@ -32,7 +32,7 @@ export type { Logger } from "./logger.js";
 export { consoleLogger, silentLogger } from "./logger.js";
 export type { WikiMcpConfig, DbConfig } from "./config.js";
 export { resolveConfig, resolveRuntime } from "./config.js";
-export type { McpTransport } from "./mcp/server.js";
+export type { McpAuthDiscovery, McpTransport } from "./mcp/server.js";
 export type { McpAuth, AuthUser, AccessView } from "./mcp/auth.js";
 export type { RenderSink } from "./tail/render-sink.js";
 export { ModelRegistry } from "./models/registry.js";

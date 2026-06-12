@@ -191,3 +191,55 @@ describe("wiki-mcp auth seam", () => {
     }
   });
 });
+
+describe("wiki-mcp auth discovery (host-injected, RFC 9728)", () => {
+  let streamServer: DurableStreamTestServer;
+  let mcp: WikiMcp;
+  let base: string;
+
+  const RESOURCE_METADATA_URL = "https://gateway.example/.well-known/oauth-protected-resource";
+  const DOCUMENT = { resource: "http://127.0.0.1/mcp", authorization_servers: ["https://gateway.example"] };
+
+  beforeAll(async () => {
+    streamServer = new DurableStreamTestServer({ port: 0 });
+    const streamBaseUrl = await streamServer.start();
+    const port = await freePort();
+    base = `http://127.0.0.1:${port}`;
+    mcp = await createWikiMcp({
+      config: { namespace: "test", streamBaseUrl, db: { kind: "pglite" }, readConsistencyTimeoutMs: 2000, waitForPollMs: 5 },
+      pageTypes: [Note],
+      transport: {
+        kind: "http",
+        host: "127.0.0.1",
+        port,
+        authDiscovery: { resourceMetadataUrl: RESOURCE_METADATA_URL, protectedResourceDocument: DOCUMENT },
+      },
+      logger: silentLogger,
+      auth: { authenticate: () => undefined, canAccess: () => false, canAdmin: () => false, onWorkspaceCreated: () => {} },
+    });
+  });
+
+  afterAll(async () => {
+    await mcp?.close();
+    await streamServer?.stop();
+  });
+
+  it("the 401 advertises resource_metadata so an MCP client can bootstrap its login", async () => {
+    const res = await fetch(`${base}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }),
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toBe(
+      `Bearer realm="wiki-mcp", resource_metadata="${RESOURCE_METADATA_URL}"`,
+    );
+  });
+
+  it("serves the host-authored protected-resource document on its own origin", async () => {
+    const res = await fetch(`${base}/.well-known/oauth-protected-resource`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("access-control-allow-origin")).toBe("*");
+    expect(await res.json()).toEqual(DOCUMENT);
+  });
+});

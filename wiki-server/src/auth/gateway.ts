@@ -31,6 +31,16 @@ import type { AddressInfo } from "node:net";
 import type { IConsolidatingLogger } from "../logger.js";
 import { AccessError, AccessStore } from "./access.js";
 import { authorizeUrl, exchangeCodeForUser, type GitHubOAuthConfig } from "./github.js";
+import {
+  authorizationServerMetadata,
+  handleTokenGrant,
+  isOAuthError,
+  mintAuthorizationCode,
+  protectedResourceMetadata,
+  registerClient,
+  validateAuthorizeRequest,
+  type OAuthConfig,
+} from "./oauth.js";
 import { bearerSession, signSession, signState, verifyState, type Session } from "./tokens.js";
 
 export interface GatewayConfig {
@@ -52,8 +62,12 @@ export interface GatewayConfig {
   readonly allowedUsers?: readonly string[];
   readonly github: GitHubOAuthConfig;
   readonly sessionSecret: string;
-  /** Session lifetime in seconds. */
+  /** Session lifetime in seconds (the interactive GitHub flow's tokens). */
   readonly sessionTtlSeconds: number;
+  /** OAuth-minted access-token lifetime in seconds (`/auth/token`). */
+  readonly accessTokenTtlSeconds: number;
+  /** OAuth refresh-token lifetime in seconds. */
+  readonly refreshTokenTtlSeconds: number;
   readonly store: AccessStore;
   readonly logger: IConsolidatingLogger;
   /** Unix-seconds clock (injected for token-expiry tests). */
@@ -124,8 +138,47 @@ export async function startGateway(cfg: GatewayConfig): Promise<Gateway> {
   }
 
   function unauthenticated(res: ServerResponse): void {
-    res.setHeader("www-authenticate", 'Bearer realm="wiki-server"');
+    // `resource_metadata` (RFC 9728) is what lets an MCP client discover the
+    // OAuth login flow from a bare 401 — no out-of-band configuration.
+    res.setHeader(
+      "www-authenticate",
+      `Bearer realm="wiki-server", resource_metadata="${cfg.publicUrl}/.well-known/oauth-protected-resource"`,
+    );
     json(res, 401, { error: "unauthenticated" });
+  }
+
+  /** The OAuth façade's view of the gateway config (oauth.ts is pure over this). */
+  const oauthCfg: OAuthConfig = {
+    publicUrl: cfg.publicUrl,
+    sessionSecret: cfg.sessionSecret,
+    accessTokenTtlSeconds: cfg.accessTokenTtlSeconds,
+    refreshTokenTtlSeconds: cfg.refreshTokenTtlSeconds,
+    ...(cfg.allowedUsers !== undefined ? { allowedUsers: cfg.allowedUsers } : {}),
+  };
+
+  /** Public discovery documents (RFC 8414/9728) — reachable WITHOUT a session. */
+  function handleWellKnown(req: IncomingMessage, res: ServerResponse, url: URL): boolean {
+    const method = req.method ?? "GET";
+    if (url.pathname === "/.well-known/oauth-authorization-server" || url.pathname === "/.well-known/oauth-protected-resource") {
+      if (method === "OPTIONS") {
+        res.writeHead(204, CORS_HEADERS);
+        res.end();
+        return true;
+      }
+      if (method !== "GET" && method !== "HEAD") {
+        json(res, 405, { error: "method not allowed" });
+        return true;
+      }
+      json(
+        res,
+        200,
+        url.pathname === "/.well-known/oauth-authorization-server"
+          ? authorizationServerMetadata(cfg.publicUrl)
+          : protectedResourceMetadata(cfg.publicUrl, cfg.publicUrl),
+      );
+      return true;
+    }
+    return false;
   }
 
   // ── /auth/* routes ──────────────────────────────────────────────────────────
@@ -146,6 +199,60 @@ export async function startGateway(cfg: GatewayConfig): Promise<Gateway> {
 
     if (method === "GET" && url.pathname === "/auth/config") {
       json(res, 200, { enabled: true, provider: "github" });
+      return;
+    }
+
+    // ── OAuth 2.1 endpoints (public by nature: they EXIST to obtain a session) ──
+
+    if (method === "POST" && url.pathname === "/auth/register") {
+      let body: unknown;
+      try {
+        body = await readJson(req);
+      } catch (err) {
+        json(res, 400, { error: "invalid_request", error_description: (err as Error).message });
+        return;
+      }
+      const registration = registerClient(oauthCfg, body, now());
+      if (isOAuthError(registration)) {
+        json(res, registration.status, { error: registration.error, error_description: registration.error_description });
+        return;
+      }
+      log.info("OAuth client registered", { redirectUris: registration.redirect_uris.length });
+      json(res, 201, registration);
+      return;
+    }
+
+    if (method === "GET" && url.pathname === "/auth/authorize") {
+      const request = validateAuthorizeRequest(oauthCfg, url.searchParams, now());
+      if (isOAuthError(request)) {
+        json(res, request.status, { error: request.error, error_description: request.error_description });
+        return;
+      }
+      // No cookie session exists to check, so EVERY authorize chains into the
+      // GitHub dance (GitHub silently re-approves an already-authorized app —
+      // one redirect for a signed-in user). The pending OAuth request rides the
+      // signed state; the nonce-cookie CSRF binding is identical to /auth/github.
+      const nonce = randomUUID();
+      const state = signState(cfg.sessionSecret, undefined, nonce, now(), 600, request);
+      res.writeHead(302, {
+        location: authorizeUrl(cfg.github, state),
+        "set-cookie": `${NONCE_COOKIE}=${nonce}; Max-Age=600; Path=/auth; HttpOnly; SameSite=Lax${cfg.publicUrl.startsWith("https://") ? "; Secure" : ""}`,
+      });
+      res.end();
+      return;
+    }
+
+    if (method === "POST" && url.pathname === "/auth/token") {
+      const form = new URLSearchParams(await readBody(req));
+      const result = handleTokenGrant(oauthCfg, form, now());
+      if (isOAuthError(result)) {
+        json(res, result.status, { error: result.error, error_description: result.error_description });
+        return;
+      }
+      log.info("OAuth tokens minted", { grant: form.get("grant_type") });
+      // RFC 6749 §5.1: token responses must not be cached.
+      res.setHeader("cache-control", "no-store");
+      json(res, 200, result);
       return;
     }
 
@@ -183,25 +290,36 @@ export async function startGateway(cfg: GatewayConfig): Promise<Gateway> {
         html(res, 400, "<h1>Sign-in failed</h1><p>This sign-in did not start in this browser — start again from the app.</p>");
         return;
       }
-      let token: string;
-      let login: string;
+      let user: Awaited<ReturnType<typeof exchangeCodeForUser>>;
       try {
-        const user = await exchangeCodeForUser(cfg.github, code);
-        login = user.login;
-        if (cfg.allowedUsers !== undefined && !cfg.allowedUsers.includes(login)) {
-          log.warn("sign-in refused: not in the allowed users", { login });
-          html(res, 403, `<h1>Not authorized</h1><p><code>${login}</code> is not on this server's allowed-users list.</p>`);
+        user = await exchangeCodeForUser(cfg.github, code);
+        if (cfg.allowedUsers !== undefined && !cfg.allowedUsers.includes(user.login)) {
+          log.warn("sign-in refused: not in the allowed users", { login: user.login });
+          html(res, 403, `<h1>Not authorized</h1><p><code>${user.login}</code> is not on this server's allowed-users list.</p>`);
           return;
         }
-        token = signSession(cfg.sessionSecret, user, cfg.sessionTtlSeconds, now());
       } catch (err) {
         log.warn("GitHub code exchange failed", { error: err instanceof Error ? err.message : String(err) });
         html(res, 502, "<h1>Sign-in failed</h1><p>GitHub did not accept the sign-in. Try again.</p>");
         return;
       }
-      log.info("user signed in", { login });
       // The nonce cookie is one-shot: expire it with the response that consumes it.
       res.setHeader("set-cookie", `${NONCE_COOKIE}=; Max-Age=0; Path=/auth; HttpOnly; SameSite=Lax`);
+      if (parsedState.oauth !== undefined) {
+        // OAuth 2.1 authorize flow: hand the client a short-lived code (NOT a
+        // session) on its registered redirect_uri; /auth/token redeems it.
+        const authCode = mintAuthorizationCode(oauthCfg, user, parsedState.oauth, now());
+        const target = new URL(parsedState.oauth.ru);
+        target.searchParams.set("code", authCode);
+        if (parsedState.oauth.cs !== undefined) target.searchParams.set("state", parsedState.oauth.cs);
+        log.info("authorization code issued", { login: user.login });
+        res.writeHead(302, { location: target.toString() });
+        res.end();
+        return;
+      }
+      const token = signSession(cfg.sessionSecret, user, cfg.sessionTtlSeconds, now());
+      const login = user.login;
+      log.info("user signed in", { login });
       if (parsedState.redirect !== undefined) {
         // The token rides the URL FRAGMENT: it reaches the app's JS but never a server log.
         res.writeHead(302, { location: `${parsedState.redirect}#token=${encodeURIComponent(token)}` });
@@ -418,11 +536,14 @@ export async function startGateway(cfg: GatewayConfig): Promise<Gateway> {
       return;
     }
     Promise.resolve()
-      .then(() =>
-        url.pathname === "/auth" || url.pathname.startsWith("/auth/")
+      .then(() => {
+        // OAuth discovery is public by spec — carve it out before the
+        // deny-by-default data plane ever sees the path.
+        if (handleWellKnown(req, res, url)) return undefined;
+        return url.pathname === "/auth" || url.pathname.startsWith("/auth/")
           ? handleAuthRoute(req, res, url)
-          : handleDataPlane(req, res, url),
-      )
+          : handleDataPlane(req, res, url);
+      })
       .catch((err: unknown) => {
         log.error("gateway request failed", {
           method: req.method,
@@ -466,11 +587,16 @@ function cookieValue(header: string | undefined, name: string): string | undefin
   return undefined;
 }
 
-/** Read a request body fully and JSON-parse it (`undefined` for an empty body). */
-async function readJson(req: IncomingMessage): Promise<unknown> {
+/** Read a request body fully as UTF-8 (form-encoded bodies, e.g. `/auth/token`). */
+async function readBody(req: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) chunks.push(chunk as Buffer);
-  const raw = Buffer.concat(chunks).toString("utf8");
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+/** Read a request body fully and JSON-parse it (`undefined` for an empty body). */
+async function readJson(req: IncomingMessage): Promise<unknown> {
+  const raw = await readBody(req);
   if (raw.length === 0) return undefined;
   try {
     return JSON.parse(raw);

@@ -36,6 +36,7 @@ import { createLogger, type IConsolidatingLogger } from "./logger.js";
 import { startControlServer, type ControlServer } from "./control.js";
 import { AccessStore } from "./auth/access.js";
 import { startGateway, type Gateway } from "./auth/gateway.js";
+import { protectedResourceMetadata } from "./auth/oauth.js";
 import { ensureSessionSecret, ephemeralSessionSecret } from "./auth/secret.js";
 import { bearerSession } from "./auth/tokens.js";
 
@@ -194,12 +195,31 @@ export async function startWikiServer(
   // The embedded MCP is served over HTTP — NOT stdio — on its own listener so a
   // networked MCP client connects to `mcpUrl`. (stdio would bind the host process's
   // own terminal, unreachable by a separate client.)
-  const mcpTransport: McpTransport = { kind: "http", host: cfg.host, port: cfg.mcpPort, path: "/mcp" };
   const mcpUrl = `http://${cfg.host}:${cfg.mcpPort}/mcp`;
+  // Auth mode injects OAuth discovery (RFC 9728) into the MCP transport: the 401
+  // names the gateway's resource-metadata URL, and the MCP listener serves its
+  // own protected-resource document for origin-based discovery. Both are opaque
+  // values to wiki-mcp — it learns no OAuth concepts.
+  const mcpTransport: McpTransport = {
+    kind: "http",
+    host: cfg.host,
+    port: cfg.mcpPort,
+    path: "/mcp",
+    ...(authEnabled
+      ? {
+          authDiscovery: {
+            resourceMetadataUrl: `${cfg.publicUrl}/.well-known/oauth-protected-resource`,
+            protectedResourceDocument: protectedResourceMetadata(mcpUrl, cfg.publicUrl),
+          },
+        }
+      : {}),
+  };
   const started = await startMcp(internalBaseUrl, logger.forSource("mcp"), mcpTransport, mcpAuth);
   const mcp = started.mcp;
-  if (authEnabled && started.config.namespace === "auth") {
-    throw new Error(`the MCP namespace may not be "auth" when --auth is on (it would shadow the gateway's /auth/* routes)`);
+  if (authEnabled && (started.config.namespace === "auth" || started.config.namespace === ".well-known")) {
+    throw new Error(
+      `the MCP namespace may not be "${started.config.namespace}" when --auth is on (it would shadow the gateway's /auth/* or /.well-known/* routes)`,
+    );
   }
   serverLog.info("wiki-mcp up", {
     namespace: started.config.namespace,
@@ -258,6 +278,8 @@ export async function startWikiServer(
       ...(cfg.authUsers !== undefined ? { allowedUsers: cfg.authUsers } : {}),
       sessionSecret,
       sessionTtlSeconds: cfg.sessionTtlDays * 86_400,
+      accessTokenTtlSeconds: cfg.accessTokenTtlSeconds,
+      refreshTokenTtlSeconds: cfg.refreshTokenTtlDays * 86_400,
       store,
       logger,
     });

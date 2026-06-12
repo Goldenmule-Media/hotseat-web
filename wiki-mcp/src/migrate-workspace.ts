@@ -19,6 +19,7 @@
  * Run via the package script: `npm run migrate-workspace -w wiki-mcp -- --workspace ws:… --dest-url … --apply`.
  */
 import { replicateWorkspace, ReplicationConflictError } from "wiki/admin";
+import { CredentialsStore, oauthHeaders } from "wiki/auth-client";
 import type { IStreamConfig, WorkspaceId } from "wiki";
 
 interface Flags {
@@ -59,15 +60,20 @@ function parseFlags(argv: readonly string[]): Flags {
   };
 }
 
-/** A stream config with an optional `Authorization: Bearer …` header. */
+/**
+ * A stream config with authorization, by precedence: an explicit static token
+ * (flag/env) wins; else a stored OAuth grant for the server's origin
+ * (`wiki-mirror login`, in `~/.wiki/credentials.json`) becomes a refreshing
+ * header function; else unauthenticated (an open server).
+ */
 function streamConfig(baseUrl: string, namespace: string, token: string | undefined): IStreamConfig {
-  return {
-    baseUrl,
-    namespace,
-    ...(token !== undefined && token.length > 0
-      ? { headers: { authorization: `Bearer ${token}` } }
-      : {}),
-  };
+  if (token !== undefined && token.length > 0) {
+    return { baseUrl, namespace, headers: { authorization: `Bearer ${token}` } };
+  }
+  if (new CredentialsStore().get(baseUrl) !== undefined) {
+    return { baseUrl, namespace, headers: { authorization: oauthHeaders(baseUrl).authorization } };
+  }
+  return { baseUrl, namespace };
 }
 
 async function main(): Promise<void> {
@@ -76,7 +82,9 @@ async function main(): Promise<void> {
     console.error(
       "usage: migrate-workspace --workspace <ws:id> --dest-url <url> [--dest-namespace <ns>] " +
         "[--dest-token <bearer>] [--source-url <url>] [--source-namespace <ns>] [--source-token <bearer>] " +
-        "[--no-catalog] [--apply]",
+        "[--no-catalog] [--apply]\n" +
+        "auth: explicit tokens win; otherwise a stored OAuth grant for the URL's origin is used\n" +
+        "      (sign in once with `wiki-mirror login --stream-url <url>` — credentials refresh themselves)",
     );
     process.exitCode = 1;
     return;

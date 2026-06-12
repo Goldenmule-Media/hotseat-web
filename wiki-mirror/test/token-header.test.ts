@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { startTestServer, wikiOn } from "wiki/testing";
+import { CredentialsStore, defaultCredentialsPath } from "wiki/auth-client";
 
 import { silentLogger } from "../src/logger.js";
 import { startMirror } from "../src/main.js";
@@ -136,6 +137,59 @@ describe("wiki-mirror — bearer token on the wire", () => {
     expect(running.mirrors.length).toBe(1);
     expect(proxy.auths.length).toBeGreaterThan(0);
     expect([...new Set(proxy.auths)]).toEqual([undefined]);
+  });
+
+  /** Seed ~/.wiki/credentials.json under a throwaway HOME for `serverUrl`. */
+  async function seedCredentials(serverUrl: string, accessToken: string): Promise<void> {
+    const home = await mkdtemp(join(tmpdir(), "wiki-mirror-home-"));
+    const realHome = process.env.HOME;
+    process.env.HOME = home;
+    cleanup.push(async () => {
+      process.env.HOME = realHome;
+      await rm(home, { recursive: true, force: true });
+    });
+    const now = Math.floor(Date.now() / 1000);
+    new CredentialsStore(defaultCredentialsPath(process.env)).set(serverUrl, {
+      clientId: "wsid1.test.sig",
+      accessToken,
+      accessTokenExp: now + 3600, // fresh — no refresh traffic in this test
+      refreshToken: "wsr1.test.sig",
+      refreshTokenExp: now + 86_400,
+      tokenEndpoint: `${serverUrl}/auth/token`,
+      user: "alice",
+    });
+  }
+
+  it("startMirror with NO token falls back to a stored OAuth grant (refreshing header function)", async () => {
+    const workspaceId = await makeWorkspace();
+    await seedCredentials(proxy.url, "stored-access-token");
+    const running = await startMirror(
+      { streamBaseUrl: proxy.url, namespace: "test", models: [], emitters: [{ workspaceId, root: await freshRoot() }] },
+      silentLogger,
+    );
+    cleanup.push(() => running.close());
+
+    expect(running.mirrors.length).toBe(1);
+    expect(proxy.auths.length).toBeGreaterThan(0);
+    expect([...new Set(proxy.auths)]).toEqual(["Bearer stored-access-token"]);
+  });
+
+  it("an explicit static token still WINS over stored credentials (precedence preserved)", async () => {
+    const workspaceId = await makeWorkspace();
+    await seedCredentials(proxy.url, "stored-access-token");
+    const running = await startMirror(
+      {
+        streamBaseUrl: proxy.url,
+        namespace: "test",
+        models: [],
+        emitters: [{ workspaceId, root: await freshRoot() }],
+        token: "explicit-static-token",
+      },
+      silentLogger,
+    );
+    cleanup.push(() => running.close());
+
+    expect([...new Set(proxy.auths)]).toEqual(["Bearer explicit-static-token"]);
   });
 
   it("engine seam: wikiOn headers ride writes too (createWorkspace through the proxy)", async () => {
