@@ -1,0 +1,33 @@
+# AWS Amplify Hosting build spec.
+#
+# wiki-ui is a standalone Next.js (App Router, SSR) app nested in this monorepo — it is
+# NOT an npm-workspaces member (own node_modules + package-lock.json). Amplify's
+# autodetected `npm run build --workspace=wiki-ui` therefore fails ("No workspaces found").
+#
+# We use the monorepo `applications` form with `appRoot: wiki-ui` so Amplify runs the
+# build from inside wiki-ui/. Amplify still checks out the WHOLE repo, so wiki-ui's
+# `file:../wiki` / `file:../wiki-models` source dependencies resolve on disk (the engine
+# and schema are consumed as TypeScript source via `transpilePackages` — nothing to
+# prebuild). The `prebuild` npm hook copies PGlite's wasm/data assets into public/ for us.
+version: 1
+applications:
+  - appRoot: wiki-ui
+    frontend:
+      phases:
+        preBuild:
+          commands:
+            # Node ≥20 (repo engines requirement; @types/node ^24, Next 15).
+            - nvm use 20 || nvm install 20
+            - npm ci
+        build:
+          commands:
+            - npm run build
+      artifacts:
+        # Next SSR output (default mode — no `output: standalone/export`). Relative to appRoot.
+        baseDirectory: .next
+        files:
+          - "**/*"
+      cache:
+        paths:
+          - node_modules/**/*
+          - .next/cache/**/*
