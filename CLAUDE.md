@@ -126,6 +126,9 @@ The load-bearing mental model; full detail in [`architecture/wiki/`](docs/hotsea
 
 ## Conventions & gotchas
 
+- **Comments: short and rare.** Most code needs none. When one is warranted (a constraint the
+  code can't express), keep it to a line or two — never essay-length, never restating what the
+  code does.
 - **Determinism (hard rule).** No `Date.now()`, `Math.random()`, or `new Date()` in reducers (`apply`),
   deciders (`produces`), or renderers (`render`). Time/ids arrive via injected `now()` / `newId()`. Equal
   state must render byte-identical Markdown.
