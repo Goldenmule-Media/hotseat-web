@@ -17,13 +17,14 @@ import type { PageId, WorkspaceId } from "wiki";
 import { fsmOf } from "../lib/host-client";
 import { useLiveWorkspace, usePage, usePageMutations, useStructuralMutator } from "../lib/live";
 import { renderMarkdown } from "../lib/markdown";
-import { typesRenderingOwnChildren } from "../lib/models";
+import { defOf, typesRenderingOwnChildren } from "../lib/models";
 import { pageHref } from "../lib/routes";
 import { clearScrollTarget, scrollToTerms, useScrollTarget } from "../lib/search-scroll";
 import { findNode } from "../lib/tree";
 import { isTerminalStatus } from "../lib/fsm-graph";
 import { setViewMode, useViewMode } from "../lib/view-mode";
 import { FsmGraph } from "./FsmGraph";
+import { SchemaInspector } from "./SchemaInspector";
 
 export function PageView({
   workspaceId,
@@ -88,6 +89,9 @@ export function PageView({
   // not offered. `pageType` only becomes defined once the workspace snapshot arrives (after
   // the handshake), so the descriptor is cached by the time this resolves.
   const fsm = useMemo(() => fsmOf(pageType), [pageType]);
+  // The page TYPE's content schema (sections/fields/mutableIn), read synchronously from the
+  // build-time-bundled page types — no worker round-trip (see lib/models.ts defOf).
+  const def = useMemo(() => defOf(pageType), [pageType]);
 
   const currentStatus = node?.status ?? fsm?.initial ?? "";
   // The header always shows the current status; a terminal (sealed/final) status gets the
@@ -208,13 +212,16 @@ export function PageView({
       )}
 
       {mode === "model" && fsm !== null ? (
-        <FsmGraph
-          fsm={fsm}
-          currentStatus={currentStatus}
-          descriptors={descriptors}
-          workspaceId={workspaceId}
-          pageId={pageId}
-        />
+        <div className="model-view">
+          <FsmGraph
+            fsm={fsm}
+            currentStatus={currentStatus}
+            descriptors={descriptors}
+            workspaceId={workspaceId}
+            pageId={pageId}
+          />
+          {def !== null && <SchemaInspector def={def} currentStatus={currentStatus} />}
+        </div>
       ) : loading && markdown === null ? (
         <p className="muted">Loading page…</p>
       ) : (
