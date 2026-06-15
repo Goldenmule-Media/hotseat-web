@@ -21,7 +21,7 @@
  */
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { IMutationDescriptor, IWorkspaceSummary, PageId, WorkspaceId } from "wiki";
-import { notifyUnauthorized } from "./auth";
+import { notifyUnauthorized, serverBaseUrl } from "./auth";
 import { useAuth } from "./auth-context";
 import { getHost, UnsupportedBrowserError, type WikiHost } from "./host-client";
 import { classifyError, type LoadError, type WorkspaceSnapshot } from "./wiki-host-api";
@@ -185,13 +185,22 @@ export interface WorkspaceList {
 }
 
 export function useWorkspaces(): WorkspaceList {
-  const { me } = useAuth();
+  const { me, serverReachable } = useAuth();
   const [state, setState] = useState<{
     items: readonly IWorkspaceSummary[];
     loading: boolean;
     error: string | null;
   }>({ items: [], loading: true, error: null });
   const [nonce, setNonce] = useState(0);
+
+  // The auth-config probe is the one bounded reachability check at mount. If it proved the
+  // server unreachable, surface that with the URL instead of waiting on listWorkspaces() —
+  // a down server makes the catalog fetch hang/retry, leaving the list stuck on "Loading…".
+  useEffect(() => {
+    if (!serverReachable) {
+      setState({ items: [], loading: false, error: `No response from the wiki-server at ${serverBaseUrl()}.` });
+    }
+  }, [serverReachable]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;

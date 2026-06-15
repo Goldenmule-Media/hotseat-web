@@ -40,6 +40,10 @@ export type AuthStatus = "loading" | "disabled" | "unauthenticated" | "authentic
 
 export interface AuthContextValue {
   readonly status: AuthStatus;
+  /** False once the auth-config probe proved the wiki-server unreachable (no HTTP response).
+   *  Orthogonal to `status` — a disabled (auth-off) app is still reachable. Views use it to
+   *  show "couldn't connect" instead of waiting on stream calls that would only hang. */
+  readonly serverReachable: boolean;
   /** The signed-in GitHub user (display); `null` unless authenticated. */
   readonly user: AuthUser | null;
   /** The raw bearer token (for "Copy API token"); `null` unless authenticated. */
@@ -67,6 +71,9 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }): React.JSX.Element {
   const [snap, setSnap] = useState<AuthSnapshot>({ status: "loading", user: null, token: null, me: null });
+  // Server reachability, orthogonal to auth status — optimistic until the config probe says
+  // otherwise. Tracked separately so it doesn't ripple through every AuthSnapshot transition.
+  const [serverReachable, setServerReachable] = useState(true);
 
   // Resolve the gate once on mount (client-only — localStorage and fetch).
   useEffect(() => {
@@ -74,6 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     void (async (): Promise<void> => {
       const cfg = await fetchAuthConfig();
       if (cancelled) return;
+      setServerReachable(cfg.reachable);
       if (!cfg.enabled) {
         setSnap({ status: "disabled", user: null, token: null, me: null });
         return;
@@ -153,7 +161,7 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     }
   }, []);
 
-  const value: AuthContextValue = { ...snap, signIn, signOut, refreshMe };
+  const value: AuthContextValue = { ...snap, serverReachable, signIn, signOut, refreshMe };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

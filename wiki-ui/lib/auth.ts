@@ -95,9 +95,19 @@ function authBase(): string {
   return (process.env.NEXT_PUBLIC_WIKI_STREAM_BASE_URL ?? "http://127.0.0.1:4437").replace(/\/+$/, "");
 }
 
+/** The wiki-server origin this tab talks to (the Durable Stream + auth gateway share it).
+ *  Exported so views can name the URL in a "couldn't connect" message. */
+export function serverBaseUrl(): string {
+  return authBase();
+}
+
 export interface AuthConfig {
   readonly enabled: boolean;
   readonly provider?: string;
+  /** False when BOTH config probes got no HTTP response at all — the server is unreachable
+   *  (not merely "auth off"). Lets the workspace view show "couldn't connect" instead of
+   *  spinning, since a down server makes every later stream call hang too. */
+  readonly reachable: boolean;
 }
 
 let configP: Promise<AuthConfig> | null = null;
@@ -115,10 +125,12 @@ export function resetAuthConfigCache(): void {
 async function tryFetchConfig(): Promise<AuthConfig | null> {
   try {
     const res = await fetch(`${authBase()}/auth/config`, { signal: AbortSignal.timeout(3000) });
-    if (!res.ok) return { enabled: false };
+    // Any HTTP response means the server is reachable — even the auth-off server's 404.
+    if (!res.ok) return { enabled: false, reachable: true };
     const body = (await res.json()) as { enabled?: unknown; provider?: unknown };
     return {
       enabled: body.enabled === true,
+      reachable: true,
       ...(typeof body.provider === "string" ? { provider: body.provider } : {}),
     };
   } catch {
@@ -133,7 +145,9 @@ async function tryFetchConfig(): Promise<AuthConfig | null> {
 export function fetchAuthConfig(): Promise<AuthConfig> {
   if (configP === null) {
     configP = (async (): Promise<AuthConfig> => {
-      return (await tryFetchConfig()) ?? (await tryFetchConfig()) ?? { enabled: false };
+      // Two network failures in a row → the server is unreachable (reachable:false), distinct
+      // from a definitive "auth off" answer (reachable:true, enabled:false).
+      return (await tryFetchConfig()) ?? (await tryFetchConfig()) ?? { enabled: false, reachable: false };
     })();
   }
   return configP;

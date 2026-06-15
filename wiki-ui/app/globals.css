@@ -632,10 +632,18 @@ code {
 }
 
 .notice {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 16px;
+  padding: 18px 20px;
   background: var(--panel);
+}
+/* Normalize child rhythm: default <p> margins make the stacked notices (heading + lines)
+   look top-tight and unevenly spaced; the flex `gap` owns the spacing instead. */
+.notice > p {
+  margin: 0;
 }
 .notice.error {
   border-color: var(--red);
@@ -1025,6 +1033,17 @@ code {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+}
+/* "Workspaces" heading + refresh button; the margin keeps the button off the list/notice below. */
+.switcher-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.switcher-row h2 {
+  margin: 0;
 }
 .account-avatar {
   width: 20px;
