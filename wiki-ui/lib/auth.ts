@@ -101,6 +101,13 @@ export function serverBaseUrl(): string {
   return authBase();
 }
 
+/** The MCP endpoint an external client (Claude Code, …) connects to. On the deployed server
+ *  the gateway proxies `/mcp` on the same origin as the stream; an explicit
+ *  NEXT_PUBLIC_WIKI_MCP_URL overrides for local dev (where MCP listens on its own port). */
+export function mcpEndpointUrl(): string {
+  return process.env.NEXT_PUBLIC_WIKI_MCP_URL ?? `${authBase()}/mcp`;
+}
+
 export interface AuthConfig {
   readonly enabled: boolean;
   readonly provider?: string;

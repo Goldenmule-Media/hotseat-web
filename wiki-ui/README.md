@@ -59,6 +59,7 @@ client-side, these are `NEXT_PUBLIC_*`:
 |---|---|---|
 | `NEXT_PUBLIC_WIKI_STREAM_BASE_URL` | `http://127.0.0.1:4437` | wiki-server Durable Stream host |
 | `NEXT_PUBLIC_WIKI_NAMESPACE` | `default` | stream namespace (server's `WIKI_MCP_NAMESPACE`) |
+| `NEXT_PUBLIC_WIKI_MCP_URL` | `{stream base}/mcp` | MCP endpoint shown in the splash "Quick start" install command; override for local dev (MCP on `:4439`) |
 
 ### Models (build-time)
 

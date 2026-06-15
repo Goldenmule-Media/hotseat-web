@@ -3,6 +3,8 @@
 /** Landing: list all workspaces (Q4) and link into them. */
 import Link from "next/link";
 import { AccountMenu } from "../components/AccountMenu";
+import { CreateWorkspaceForm } from "../components/CreateWorkspaceForm";
+import { SplashDocs } from "../components/SplashDocs";
 import { useWorkspaces } from "../lib/live";
 import { workspaceHref } from "../lib/routes";
 
@@ -19,6 +21,8 @@ export default function Home(): React.JSX.Element {
         </div>
         <p className="muted">Read-only, live-updating browser for a wiki-server.</p>
       </header>
+
+      <SplashDocs />
 
       <section>
         <div className="switcher-row">
@@ -39,7 +43,10 @@ export default function Home(): React.JSX.Element {
         ) : loading ? (
           <p className="muted">Loading…</p>
         ) : items.length === 0 ? (
-          <p className="muted">No workspaces found in this namespace.</p>
+          <div className="ws-empty">
+            <p className="muted">No workspaces found in this namespace.</p>
+            <CreateWorkspaceForm />
+          </div>
         ) : (
           <ul className="ws-list">
             {items.map((w) => (

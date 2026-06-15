@@ -136,6 +136,9 @@ export interface WikiHostApi {
   handshake(): Promise<HandshakeResult>;
 
   listWorkspaces(): Promise<readonly IWorkspaceSummary[]>;
+  /** Create a new workspace (engine assigns the id) and return it. The engine appends the
+   *  catalog event, so the next listWorkspaces sees it. Auth ownership is claimed tab-side. */
+  createWorkspace(name: string): Promise<{ readonly workspaceId: WorkspaceId }>;
   search(query: string, opts: HostSearchOpts): Promise<readonly SearchHit[]>;
   /** Fold every active workspace once so search spans all of them (the shared index is
    *  primed once for the whole worker, not per tab). Idempotent. */

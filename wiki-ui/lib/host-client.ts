@@ -45,6 +45,7 @@ export function isHostSupported(): boolean {
  *  plumbing: `subscribe` takes a plain callback and returns a plain unsubscribe. */
 export interface WikiHost {
   listWorkspaces(): Promise<readonly IWorkspaceSummary[]>;
+  createWorkspace(name: string): Promise<{ readonly workspaceId: WorkspaceId }>;
   search(query: string, opts: HostSearchOpts): Promise<readonly SearchHit[]>;
   primeSearchIndex(): Promise<void>;
   ensureWorkspace(ws: WorkspaceId): Promise<void>;
@@ -140,6 +141,7 @@ async function connect(): Promise<WikiHost> {
 
   return {
     listWorkspaces: () => guard(remote.listWorkspaces()),
+    createWorkspace: (name) => guard(remote.createWorkspace(name)),
     search: (query, opts) => guard(remote.search(query, opts)),
     primeSearchIndex: () => guard(remote.primeSearchIndex()),
     ensureWorkspace: (ws) => guard(remote.ensureWorkspace(ws)),

@@ -401,6 +401,15 @@ function makeApi(conn: PortConn): WikiHostApi {
         throw toWikiErrorDTO(e);
       }
     },
+    async createWorkspace(name: string) {
+      const { wiki } = await boot();
+      try {
+        const handle = await wiki.createWorkspace({ name });
+        return { workspaceId: handle.id };
+      } catch (e) {
+        throw toWikiErrorDTO(e);
+      }
+    },
     async search(query: string, opts: HostSearchOpts) {
       const { wiki } = await boot();
       try {
