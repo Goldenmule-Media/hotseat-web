@@ -736,21 +736,30 @@ code {
   font-size: 12.5px;
   line-height: 1.7;
 }
-.schema-block-body {
-  /* Indent a block's contents and trace the nesting with a guide rule. */
-  padding-left: 1.25em;
-  margin-left: 1px;
-  border-left: 1px solid var(--border);
+/* Each section block carries a left accent bar coloured by its mutability — green when writable
+   now, muted when locked — so the badge on the opening line is unambiguously tied to the block it
+   governs (rather than drifting to the far right). Element-type blocks (list expansions) aren't
+   sections, so they get only the indentation, no bar. */
+.schema-block {
+  border-left: 2px solid var(--border);
+  padding-left: 10px;
+  margin: 6px 0;
 }
-.schema-block.is-locked > .schema-block-head,
-.schema-block.is-locked > .schema-block-body {
-  opacity: 0.62;
+.schema-block.is-mutable {
+  border-left-color: var(--green);
+}
+.schema-block.is-locked {
+  border-left-color: var(--border);
+}
+.schema-block-body {
+  /* Indent a block's contents under its opening line. */
+  padding-left: 1.1em;
 }
 .schema-block-head {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 6px;
 }
 .schema-name {
   color: var(--text);
@@ -784,11 +793,10 @@ code {
   font-weight: 700;
 }
 .schema-mutability {
-  margin-left: auto;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
   font-family: var(--font-sans, system-ui, sans-serif);
-  padding: 1px 8px;
+  padding: 0 7px;
   border-radius: 999px;
   border: 1px solid transparent;
 }
