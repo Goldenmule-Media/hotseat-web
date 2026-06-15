@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ElementDecl, IPageTypeDef, SectionDecl } from "wiki";
 import { defOf } from "./models";
-import { buildSchemaModel, FIELD_KIND_HINT, kindsInModel, type FieldKind } from "./schema-inspector";
+import { buildSchemaModel, FIELD_KIND_HINT, type FieldKind } from "./schema-inspector";
 
 /** Minimal def carrying just the bits buildSchemaModel reads (type + sections + elements). */
 function def(
@@ -77,21 +77,12 @@ describe("buildSchemaModel — nesting & order", () => {
   });
 });
 
-describe("buildSchemaModel — field-kind hints & glossary", () => {
-  it("every FieldKind has a plain-language hint, and rows carry it", () => {
+describe("buildSchemaModel — field-kind hints", () => {
+  it("every FieldKind has a plain-language hint, and rows carry it (shown on hover)", () => {
     const kinds: FieldKind[] = ["scalar", "prose", "code", "attachment-ref", "ref", "blocks", "list", "serial"];
     for (const k of kinds) expect(FIELD_KIND_HINT[k]).toBeTruthy();
     const d = def({ s: section({ fields: { body: { kind: "prose" } } }) });
     expect(buildSchemaModel(d, "x").sections[0].fields[0].hint).toBe(FIELD_KIND_HINT.prose);
-  });
-
-  it("kindsInModel returns the distinct kinds present (incl. inside list elements), in canonical order", () => {
-    const d = def(
-      { s: section({ fields: { items: { kind: "list", element: "row" }, note: { kind: "prose" } } }) },
-      { row: { fields: { n: { kind: "scalar" }, body: { kind: "code" } } } },
-    );
-    // canonical order is the FIELD_KIND_HINT key order: scalar, prose, code, ..., list, ...
-    expect(kindsInModel(buildSchemaModel(d, "x"))).toEqual(["scalar", "prose", "code", "list"]);
   });
 });
 

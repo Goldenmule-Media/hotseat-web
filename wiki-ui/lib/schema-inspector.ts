@@ -152,21 +152,3 @@ export function buildSchemaModel(def: IPageTypeDef, currentStatus: string): Sche
     sections: Object.entries(def.sections).map(([key, decl]) => sectionRow(key, decl, currentStatus, elements)),
   };
 }
-
-/** The distinct field-kinds present anywhere in the model — drives the inspector's glossary. */
-export function kindsInModel(model: SchemaModel): readonly FieldKind[] {
-  const kinds = new Set<FieldKind>();
-  const visitFields = (fields: readonly SchemaFieldRow[]): void => {
-    for (const f of fields) {
-      kinds.add(f.kind);
-      if (f.element != null) visitFields(f.element.fields);
-    }
-  };
-  const visitSection = (s: SchemaSectionRow): void => {
-    visitFields(s.fields);
-    s.subsections.forEach(visitSection);
-  };
-  model.sections.forEach(visitSection);
-  // Stable order: the canonical kind order from the hint map.
-  return (Object.keys(FIELD_KIND_HINT) as FieldKind[]).filter((k) => kinds.has(k));
-}

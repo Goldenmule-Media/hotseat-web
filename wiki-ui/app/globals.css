@@ -730,50 +730,64 @@ code {
   color: var(--muted);
   font-size: 13px;
 }
-.schema-sections,
-.schema-subsections,
-.schema-fields {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+/* The schema reads like a type signature: nested `{ }` blocks of `name: type` lines. */
+.schema-tree {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12.5px;
+  line-height: 1.7;
 }
-.schema-sections {
+.schema-block-body {
+  /* Indent a block's contents and trace the nesting with a guide rule. */
+  padding-left: 1.25em;
+  margin-left: 1px;
+  border-left: 1px solid var(--border);
+}
+.schema-block.is-locked > .schema-block-head,
+.schema-block.is-locked > .schema-block-body {
+  opacity: 0.62;
+}
+.schema-block-head {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.schema-section {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
-  background: var(--panel);
-}
-.schema-section.is-locked {
-  opacity: 0.72;
-}
-.schema-section-head {
-  display: flex;
-  align-items: center;
+  align-items: baseline;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 4px;
 }
-.schema-section-name {
+.schema-name {
+  color: var(--text);
   font-weight: 600;
+  cursor: help;
+}
+.schema-line {
+  white-space: pre-wrap;
+}
+.schema-key {
   color: var(--text);
 }
-.schema-section-key,
-.schema-field-key {
-  font-size: 12px;
+.schema-punct,
+.schema-brace {
   color: var(--muted);
 }
-.schema-section-desc {
-  margin: 6px 0 0;
-  font-size: 13px;
+/* The data-type token — accent-coloured; its meaning shows on hover (the title). */
+.schema-type {
+  color: var(--accent);
+  cursor: help;
+}
+.schema-states {
+  font-size: 11px;
+}
+.schema-req {
+  color: var(--muted);
+  cursor: help;
+}
+.schema-req.now {
+  color: var(--amber);
+  font-weight: 700;
 }
 .schema-mutability {
   margin-left: auto;
   font-size: 11px;
   font-weight: 600;
+  font-family: var(--font-sans, system-ui, sans-serif);
   padding: 1px 8px;
   border-radius: 999px;
   border: 1px solid transparent;
@@ -785,91 +799,6 @@ code {
 .schema-mutability.locked {
   color: var(--muted);
   border-color: var(--border);
-}
-.schema-fields {
-  margin-top: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.schema-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 13px;
-}
-.schema-field-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.schema-kind-hint {
-  font-size: 12px;
-}
-/* A list field's element type, expanded to its own fields, indented under the field. */
-.schema-element {
-  margin-left: 14px;
-  padding-left: 10px;
-  border-left: 1px dashed var(--border);
-}
-.schema-element-head {
-  margin: 0;
-  font-size: 12px;
-}
-.schema-kind-chip {
-  font-size: 11px;
-  font-family: var(--font-mono, monospace);
-  color: var(--accent);
-  border: 1px solid var(--accent-dim);
-  border-radius: 4px;
-  padding: 0 6px;
-}
-.schema-required,
-.schema-required-now {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.schema-required {
-  color: var(--muted);
-}
-.schema-required-now {
-  color: var(--amber);
-}
-.schema-field-meta {
-  font-size: 12px;
-}
-/* Nested subsections sit indented inside their parent. */
-.schema-subsections {
-  margin-top: 10px;
-  padding-left: 14px;
-  border-left: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-/* Glossary of the field-kinds present on this page type. */
-.schema-glossary {
-  margin: 16px 0 0;
-}
-.schema-glossary-head {
-  margin: 0 0 6px;
-  font-size: 13px;
-}
-.schema-glossary-row {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 2px 0;
-}
-.schema-glossary-row dt {
-  flex: none;
-  width: 110px;
-}
-.schema-glossary-row dd {
-  margin: 0;
-  font-size: 13px;
 }
 
 .markdown h1 {

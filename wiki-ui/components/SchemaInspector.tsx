@@ -2,108 +2,104 @@
 
 /**
  * The content-schema panel of the model-inspection view (feature: wiki-ui model inspection —
- * schema panel). Renders a page TYPE's sections and fields from its declarative definition, with
- * each section badged mutable / locked for the open page INSTANCE's current status, each field
- * annotated with its data-type, and `list` items expanded to their element fields. A glossary
- * explains the field-kinds in play. Read-only: it authors nothing and issues no commands — the
- * FSM graph beside it owns the interactive surface. The classification is the pure
- * {@link buildSchemaModel}; this component only lays it out.
+ * schema panel). Renders a page TYPE's schema as a type-signature: each section (and each `list`
+ * element type) is a `{ }` block of `name: type` fields, a `list` field reads as the generic
+ * `list<element>`, and a section is badged mutable / locked for the open page INSTANCE's current
+ * status. The data-type behind each `type` token is explained on HOVER (its title), not inline.
+ * Read-only: it authors nothing — the FSM graph beside it owns the interactive surface. The
+ * classification is the pure {@link buildSchemaModel}; this component only lays it out.
  */
 import { useMemo } from "react";
 import type { IPageTypeDef } from "wiki";
-import {
-  buildSchemaModel,
-  FIELD_KIND_HINT,
-  kindsInModel,
-  type SchemaFieldRow,
-  type SchemaSectionRow,
-} from "../lib/schema-inspector";
+import { buildSchemaModel, type SchemaFieldRow, type SchemaSectionRow } from "../lib/schema-inspector";
 
-function FieldRow({ field }: { field: SchemaFieldRow }): React.JSX.Element {
-  const meta: string[] = [];
-  if (field.ordered === true) meta.push("ordered");
-  if (field.targetKinds !== undefined && field.targetKinds.length > 0) meta.push(`→ ${field.targetKinds.join(", ")}`);
-  if (field.requiredIn !== null && field.requiredIn.length > 0) meta.push(`required in ${field.requiredIn.join(", ")}`);
+/** The field's data-type rendered as a token (`prose`, `list<component>`, `ref<page>`), with its
+ *  plain-language meaning on hover. */
+function TypeToken({ field }: { field: SchemaFieldRow }): React.JSX.Element {
+  let text: string;
+  if (field.kind === "list") text = `list<${field.elementType ?? "?"}>`;
+  else if (field.kind === "ref" && field.targetKinds !== undefined && field.targetKinds.length > 0)
+    text = `ref<${field.targetKinds.join(", ")}>`;
+  else text = field.kind;
   return (
-    <li className="schema-field">
-      <div className="schema-field-row">
-        <code className="schema-field-key">{field.key}</code>
-        <span className="schema-kind-chip" title={field.hint}>
-          {field.kind}
-        </span>
-        <span className="schema-kind-hint muted">{field.hint}</span>
-        {field.required && (
-          <span className="schema-required" title="Must be present">
-            required
-          </span>
-        )}
-        {field.requiredInCurrent && (
-          <span className="schema-required-now" title="Must be authored in the current status">
-            author now
-          </span>
-        )}
-        {meta.length > 0 && <span className="schema-field-meta muted">{meta.join(" · ")}</span>}
-      </div>
-      {field.kind === "list" && (
-        <div className="schema-element">
-          {field.element != null ? (
-            <>
-              <p className="schema-element-head muted">
-                each item is a <code>{field.element.type}</code>
-                {field.element.states != null && <> · states: {field.element.states.join(" → ")}</>}
-              </p>
-              {field.element.fields.length > 0 && (
-                <ul className="schema-fields">
-                  {field.element.fields.map((f) => (
-                    <FieldRow key={f.key} field={f} />
-                  ))}
-                </ul>
-              )}
-            </>
-          ) : (
-            <p className="schema-element-head muted">
-              items of type <code>{field.elementType}</code>
-            </p>
-          )}
-        </div>
-      )}
-    </li>
+    <span className="schema-type" title={field.hint}>
+      {text}
+    </span>
   );
 }
 
-function SectionRow({ section }: { section: SchemaSectionRow }): React.JSX.Element {
+/** A trailing authored-ness marker (`*`), explained on hover; amber when it applies right now. */
+function RequiredMark({ field }: { field: SchemaFieldRow }): React.JSX.Element | null {
+  if (field.requiredInCurrent) return <span className="schema-req now" title="Must be authored in the current status">*</span>;
+  if (field.required) return <span className="schema-req" title="Required — present at create">*</span>;
+  if (field.requiredIn !== null && field.requiredIn.length > 0)
+    return <span className="schema-req" title={`Must be authored in: ${field.requiredIn.join(", ")}`}>*</span>;
+  return null;
+}
+
+function FieldLine({ field }: { field: SchemaFieldRow }): React.JSX.Element {
+  const line = (
+    <div className="schema-line">
+      <span className="schema-key">{field.key}</span>
+      <span className="schema-punct">: </span>
+      <TypeToken field={field} />
+      <RequiredMark field={field} />
+      {field.kind === "list" && field.element != null && (
+        <>
+          <span className="schema-brace"> {"{"}</span>
+          {field.element.states != null && (
+            <span className="schema-states muted"> // {field.element.states.join(" → ")}</span>
+          )}
+        </>
+      )}
+    </div>
+  );
+  // A resolved list element expands to its own `{ }` block of fields, indented under the line.
+  if (field.kind === "list" && field.element != null) {
+    return (
+      <>
+        {line}
+        <div className="schema-block-body">
+          {field.element.fields.map((f) => (
+            <FieldLine key={f.key} field={f} />
+          ))}
+        </div>
+        <div className="schema-brace">{"}"}</div>
+      </>
+    );
+  }
+  return line;
+}
+
+function SectionBlock({ section }: { section: SchemaSectionRow }): React.JSX.Element {
   const gate =
     section.mutableIn === null
       ? "Writable in every status"
       : section.mutableIn.length === 0
         ? "Never writable"
         : `Writable in: ${section.mutableIn.join(", ")}`;
+  const title = section.description !== undefined ? `${section.name} — ${section.description}` : section.name;
   return (
-    <li className={`schema-section ${section.mutableNow ? "is-mutable" : "is-locked"}`}>
-      <div className="schema-section-head">
-        <span className="schema-section-name">{section.name}</span>
-        <code className="schema-section-key">{section.key}</code>
-        {section.required && <span className="schema-required" title="Materialized at create">required</span>}
+    <div className={`schema-block ${section.mutableNow ? "is-mutable" : "is-locked"}`}>
+      <div className="schema-block-head">
+        <span className="schema-name" title={title}>
+          {section.key}
+        </span>
+        <span className="schema-brace"> {"{"}</span>
         <span className={`schema-mutability ${section.mutableNow ? "mutable" : "locked"}`} title={gate}>
           {section.mutableNow ? "mutable now" : "🔒 locked"}
         </span>
       </div>
-      {section.description !== undefined && <p className="schema-section-desc muted">{section.description}</p>}
-      {section.fields.length > 0 && (
-        <ul className="schema-fields">
-          {section.fields.map((f) => (
-            <FieldRow key={f.key} field={f} />
-          ))}
-        </ul>
-      )}
-      {section.subsections.length > 0 && (
-        <ul className="schema-subsections">
-          {section.subsections.map((s) => (
-            <SectionRow key={s.key} section={s} />
-          ))}
-        </ul>
-      )}
-    </li>
+      <div className="schema-block-body">
+        {section.fields.map((f) => (
+          <FieldLine key={f.key} field={f} />
+        ))}
+        {section.subsections.map((s) => (
+          <SectionBlock key={s.key} section={s} />
+        ))}
+      </div>
+      <div className="schema-brace">{"}"}</div>
+    </div>
   );
 }
 
@@ -115,31 +111,17 @@ export function SchemaInspector({
   currentStatus: string;
 }): React.JSX.Element {
   const model = useMemo(() => buildSchemaModel(def, currentStatus), [def, currentStatus]);
-  const kinds = useMemo(() => kindsInModel(model), [model]);
   return (
     <section className="schema-inspector" aria-label="Page schema">
       <p className="schema-head">
         Schema of <code>{model.type}</code> — sections writable in <strong>{currentStatus}</strong> are marked{" "}
-        <span className="schema-mutability mutable">mutable now</span>.
+        <span className="schema-mutability mutable">mutable now</span>. Hover a type for what it holds.
       </p>
-      <ul className="schema-sections">
+      <div className="schema-tree">
         {model.sections.map((s) => (
-          <SectionRow key={s.key} section={s} />
+          <SectionBlock key={s.key} section={s} />
         ))}
-      </ul>
-      {kinds.length > 0 && (
-        <dl className="schema-glossary">
-          <p className="schema-glossary-head muted">Field types</p>
-          {kinds.map((k) => (
-            <div key={k} className="schema-glossary-row">
-              <dt>
-                <span className="schema-kind-chip">{k}</span>
-              </dt>
-              <dd className="muted">{FIELD_KIND_HINT[k]}</dd>
-            </div>
-          ))}
-        </dl>
-      )}
+      </div>
     </section>
   );
 }
