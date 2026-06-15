@@ -11,8 +11,8 @@
  *  state highlighted and its transitions classified available / blocked / inert from the
  *  live, precondition-aware mutation overlay. */
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import type { PageId, WorkspaceId } from "wiki";
 import { fsmOf } from "../lib/host-client";
 import { useLiveWorkspace, usePage, usePageMutations, useStructuralMutator } from "../lib/live";
@@ -22,7 +22,7 @@ import { pageHref } from "../lib/routes";
 import { clearScrollTarget, scrollToTerms, useScrollTarget } from "../lib/search-scroll";
 import { findNode } from "../lib/tree";
 import { isTerminalStatus } from "../lib/fsm-graph";
-import { setViewMode, useViewMode } from "../lib/view-mode";
+import { preferredViewMode, rememberViewMode, type ViewMode } from "../lib/view-mode";
 import { FsmGraph } from "./FsmGraph";
 import { SchemaInspector } from "./SchemaInspector";
 
@@ -39,8 +39,29 @@ export function PageView({
   const ws = useLiveWorkspace(workspaceId);
   const { markdown, loading, error, unknownType } = usePage(workspaceId, pageId);
   const { descriptors } = usePageMutations(workspaceId, pageId);
-  const mode = useViewMode();
+  // The active view is the URL's source of truth, so a refresh or shared link reopens the
+  // same tab.
+  const searchParams = useSearchParams();
+  const mode: ViewMode = searchParams.get("view") === "model" ? "model" : "content";
   const structural = useStructuralMutator(workspaceId);
+
+  const selectView = useCallback(
+    (next: ViewMode) => {
+      rememberViewMode(next);
+      router.replace(pageHref(workspaceId, pageId, next));
+    },
+    [router, workspaceId, pageId],
+  );
+
+  // Sticky across navigations: opening another page with no explicit ?view carries over the
+  // last toggle, re-stamping it into the URL (run on navigation only — a user toggle already
+  // sets the URL via selectView).
+  useEffect(() => {
+    if (preferredViewMode() === "model" && searchParams.get("view") !== "model") {
+      router.replace(pageHref(workspaceId, pageId, "model"));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId, pageId]);
 
   // Lift the page's H1 out of the body so it can live in a persistent header (kept in
   // both Content and Model views); render the remaining markdown as the body.
@@ -165,7 +186,7 @@ export function PageView({
                   role="tab"
                   aria-selected={mode === "content"}
                   className={`view-tab ${mode === "content" ? "active" : ""}`}
-                  onClick={() => setViewMode("content")}
+                  onClick={() => selectView("content")}
                 >
                   Content
                 </button>
@@ -174,7 +195,7 @@ export function PageView({
                   role="tab"
                   aria-selected={mode === "model"}
                   className={`view-tab ${mode === "model" ? "active" : ""}`}
-                  onClick={() => setViewMode("model")}
+                  onClick={() => selectView("model")}
                 >
                   Model
                 </button>

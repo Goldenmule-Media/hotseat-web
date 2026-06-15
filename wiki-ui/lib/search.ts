@@ -2,7 +2,7 @@
 
 /**
  * Global search store (the Ctrl+K palette's brain). A module-level store exposed through
- * `useSyncExternalStore` — the same pattern as lib/view-mode.ts — so its state OUTLIVES
+ * `useSyncExternalStore` — the same pattern as lib/search-scroll.ts — so its state OUTLIVES
  * the modal's mount/unmount: closing the palette keeps the query, the ranked results, and
  * the selection, and Ctrl+K reopens to exactly that state (a requirement). The modal
  * component is a thin view over this store.

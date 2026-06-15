@@ -4,6 +4,7 @@
  * but we still encode to be safe against reserved characters.
  */
 import type { PageId, WorkspaceId } from "wiki";
+import type { ViewMode } from "./view-mode";
 
 /** A page id has the shape `<type>:<id>` (e.g. "feature-brief:mpyh…"). */
 export const PAGE_ID_RE = /^[a-z][a-z0-9-]*:[A-Za-z0-9._-]+$/;
@@ -16,6 +17,11 @@ export function workspaceHref(workspaceId: WorkspaceId | string): string {
   return `/${encodeURIComponent(workspaceId)}`;
 }
 
-export function pageHref(workspaceId: WorkspaceId | string, pageId: PageId | string): string {
-  return `/${encodeURIComponent(workspaceId)}/${encodeURIComponent(pageId)}`;
+export function pageHref(
+  workspaceId: WorkspaceId | string,
+  pageId: PageId | string,
+  view?: ViewMode,
+): string {
+  const base = `/${encodeURIComponent(workspaceId)}/${encodeURIComponent(pageId)}`;
+  return view === "model" ? `${base}?view=model` : base;
 }
