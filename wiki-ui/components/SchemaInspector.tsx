@@ -22,7 +22,7 @@ function TypeToken({ field }: { field: SchemaFieldRow }): React.JSX.Element {
     text = `ref<${field.targetKinds.join(", ")}>`;
   else text = field.kind;
   return (
-    <span className="schema-type" title={field.hint}>
+    <span className="schema-type" data-tip={field.hint} aria-label={field.hint}>
       {text}
     </span>
   );
@@ -30,11 +30,19 @@ function TypeToken({ field }: { field: SchemaFieldRow }): React.JSX.Element {
 
 /** A trailing authored-ness marker (`*`), explained on hover; amber when it applies right now. */
 function RequiredMark({ field }: { field: SchemaFieldRow }): React.JSX.Element | null {
-  if (field.requiredInCurrent) return <span className="schema-req now" title="Must be authored in the current status">*</span>;
-  if (field.required) return <span className="schema-req" title="Required — present at create">*</span>;
-  if (field.requiredIn !== null && field.requiredIn.length > 0)
-    return <span className="schema-req" title={`Must be authored in: ${field.requiredIn.join(", ")}`}>*</span>;
-  return null;
+  const tip = field.requiredInCurrent
+    ? "Must be authored in the current status"
+    : field.required
+      ? "Required — present at create"
+      : field.requiredIn !== null && field.requiredIn.length > 0
+        ? `Must be authored in: ${field.requiredIn.join(", ")}`
+        : null;
+  if (tip === null) return null;
+  return (
+    <span className={`schema-req${field.requiredInCurrent ? " now" : ""}`} data-tip={tip} aria-label={tip}>
+      *
+    </span>
+  );
 }
 
 function FieldLine({ field }: { field: SchemaFieldRow }): React.JSX.Element {
@@ -82,11 +90,15 @@ function SectionBlock({ section }: { section: SchemaSectionRow }): React.JSX.Ele
   return (
     <div className={`schema-block ${section.mutableNow ? "is-mutable" : "is-locked"}`}>
       <div className="schema-block-head">
-        <span className="schema-name" title={title}>
+        <span className="schema-name" data-tip={title} aria-label={title}>
           {section.key}
         </span>
         <span className="schema-brace"> {"{"}</span>
-        <span className={`schema-mutability ${section.mutableNow ? "mutable" : "locked"}`} title={gate}>
+        <span
+          className={`schema-mutability ${section.mutableNow ? "mutable" : "locked"}`}
+          data-tip={gate}
+          aria-label={gate}
+        >
           {section.mutableNow ? "mutable now" : "🔒 locked"}
         </span>
       </div>

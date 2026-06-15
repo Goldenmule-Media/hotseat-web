@@ -808,6 +808,36 @@ code {
   color: var(--muted);
   border-color: var(--border);
 }
+/* Immediate, styled hover/focus tooltip — native `title` is too slow and unstyled. The element
+   carries its text in `data-tip`; the box is drawn with an ::after so no JS/state is needed. */
+.schema-inspector [data-tip] {
+  position: relative;
+  cursor: help;
+}
+.schema-inspector [data-tip]:hover::after,
+.schema-inspector [data-tip]:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 0;
+  top: calc(100% + 5px);
+  z-index: 30;
+  width: max-content;
+  max-width: 280px;
+  white-space: normal;
+  font-family: var(--font-sans, system-ui, sans-serif);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 9px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
 
 .markdown h1 {
   margin-top: 0;
