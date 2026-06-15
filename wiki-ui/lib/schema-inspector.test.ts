@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
-import type { IPageTypeDef, SectionDecl } from "wiki";
+import type { ElementDecl, IPageTypeDef, SectionDecl } from "wiki";
 import { defOf } from "./models";
-import { buildSchemaModel } from "./schema-inspector";
+import { buildSchemaModel, FIELD_KIND_HINT, kindsInModel, type FieldKind } from "./schema-inspector";
 
-/** Minimal def carrying just the bits buildSchemaModel reads (type + sections). */
-function def(sections: Record<string, SectionDecl>, type = "t"): IPageTypeDef {
-  return { type, sections } as unknown as IPageTypeDef;
+/** Minimal def carrying just the bits buildSchemaModel reads (type + sections + elements). */
+function def(
+  sections: Record<string, SectionDecl>,
+  elements: Record<string, ElementDecl> = {},
+  type = "t",
+): IPageTypeDef {
+  return { type, sections, elements } as unknown as IPageTypeDef;
 }
 
 const section = (over: Partial<SectionDecl> = {}): SectionDecl => ({ name: "S", fields: {}, ...over });
@@ -70,6 +74,65 @@ describe("buildSchemaModel — nesting & order", () => {
   it("preserves the def's section key order deterministically", () => {
     const d = def({ b: section(), a: section(), c: section() });
     expect(buildSchemaModel(d, "x").sections.map((s) => s.key)).toEqual(["b", "a", "c"]);
+  });
+});
+
+describe("buildSchemaModel — field-kind hints & glossary", () => {
+  it("every FieldKind has a plain-language hint, and rows carry it", () => {
+    const kinds: FieldKind[] = ["scalar", "prose", "code", "attachment-ref", "ref", "blocks", "list", "serial"];
+    for (const k of kinds) expect(FIELD_KIND_HINT[k]).toBeTruthy();
+    const d = def({ s: section({ fields: { body: { kind: "prose" } } }) });
+    expect(buildSchemaModel(d, "x").sections[0].fields[0].hint).toBe(FIELD_KIND_HINT.prose);
+  });
+
+  it("kindsInModel returns the distinct kinds present (incl. inside list elements), in canonical order", () => {
+    const d = def(
+      { s: section({ fields: { items: { kind: "list", element: "row" }, note: { kind: "prose" } } }) },
+      { row: { fields: { n: { kind: "scalar" }, body: { kind: "code" } } } },
+    );
+    // canonical order is the FIELD_KIND_HINT key order: scalar, prose, code, ..., list, ...
+    expect(kindsInModel(buildSchemaModel(d, "x"))).toEqual(["scalar", "prose", "code", "list"]);
+  });
+});
+
+describe("buildSchemaModel — list element resolution", () => {
+  it("resolves a list field's element type to its own fields", () => {
+    const d = def(
+      { components: section({ fields: { items: { kind: "list", element: "component" } } }) },
+      { component: { fields: { name: { kind: "scalar", required: true } } } },
+    );
+    const items = buildSchemaModel(d, "x").sections[0].fields[0];
+    expect(items.element).not.toBeNull();
+    expect(items.element!.type).toBe("component");
+    expect(items.element!.fields.map((f) => f.key)).toEqual(["name"]);
+    expect(items.element!.fields[0].kind).toBe("scalar");
+  });
+
+  it("surfaces an element type's lifecycle states when it declares an FSM", () => {
+    const d = def(
+      { questions: section({ fields: { items: { kind: "list", element: "question" } } }) },
+      {
+        question: {
+          fields: { text: { kind: "prose" } },
+          status: { initial: "open", transitions: [{ fromState: "open", event: "answer", toState: "resolved" }] },
+        } as unknown as ElementDecl,
+      },
+    );
+    expect(buildSchemaModel(d, "x").sections[0].fields[0].element!.states).toEqual(["open", "resolved"]);
+  });
+
+  it("leaves element null (no infinite recursion) when the element type is unknown or self-referential", () => {
+    const unknown = def({ s: section({ fields: { items: { kind: "list", element: "missing" } } }) }, {});
+    expect(buildSchemaModel(unknown, "x").sections[0].fields[0].element).toBeNull();
+
+    const selfRef = def(
+      { s: section({ fields: { items: { kind: "list", element: "node" } } }) },
+      { node: { fields: { kids: { kind: "list", element: "node" } } } },
+    );
+    const top = buildSchemaModel(selfRef, "x").sections[0].fields[0];
+    expect(top.element!.type).toBe("node");
+    // the nested self-reference stops resolving
+    expect(top.element!.fields[0].element).toBeNull();
   });
 });
 

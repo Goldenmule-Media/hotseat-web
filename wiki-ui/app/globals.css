@@ -790,14 +790,32 @@ code {
   margin-top: 8px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 .schema-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+.schema-field-row {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  font-size: 13px;
+}
+.schema-kind-hint {
+  font-size: 12px;
+}
+/* A list field's element type, expanded to its own fields, indented under the field. */
+.schema-element {
+  margin-left: 14px;
+  padding-left: 10px;
+  border-left: 1px dashed var(--border);
+}
+.schema-element-head {
+  margin: 0;
+  font-size: 12px;
 }
 .schema-kind-chip {
   font-size: 11px;
@@ -830,6 +848,28 @@ code {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+/* Glossary of the field-kinds present on this page type. */
+.schema-glossary {
+  margin: 16px 0 0;
+}
+.schema-glossary-head {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+.schema-glossary-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+}
+.schema-glossary-row dt {
+  flex: none;
+  width: 110px;
+}
+.schema-glossary-row dd {
+  margin: 0;
+  font-size: 13px;
 }
 
 .markdown h1 {
