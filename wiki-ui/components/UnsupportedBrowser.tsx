@@ -7,12 +7,12 @@ export function UnsupportedBrowser(): React.JSX.Element {
   return (
     <main className="landing">
       <header className="landing-header">
-        <h1>wiki-ui</h1>
+        <h1>Hotseat Wiki</h1>
       </header>
       <div className="notice error">
         <strong>This browser isn&apos;t supported</strong>
         <p className="muted">
-          wiki-ui runs its engine in a single <code>{"{type:\"module\"}"}</code> SharedWorker shared across all
+          Hotseat Wiki runs its engine in a single <code>{"{type:\"module\"}"}</code> SharedWorker shared across all
           tabs, which this browser doesn&apos;t support. Use a recent <strong>Chrome</strong> or{" "}
           <strong>Edge</strong>, <strong>Firefox 114+</strong>, or <strong>Safari 16+</strong>.
         </p>

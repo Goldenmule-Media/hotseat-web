@@ -36,7 +36,7 @@ export function AuthGate({ children }: { children: ReactNode }): React.JSX.Eleme
     return (
       <main className="login-screen">
         <div className="login-card">
-          <h1>wiki-ui</h1>
+          <h1>Hotseat Wiki</h1>
           <p className="muted">Sign in to browse this wiki-server.</p>
           <button className="login-btn" onClick={signIn}>
             Sign in with GitHub

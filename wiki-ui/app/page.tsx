@@ -13,7 +13,7 @@ export default function Home(): React.JSX.Element {
     <main className="landing">
       <header className="landing-header">
         <div className="landing-header-row">
-          <h1>wiki-ui</h1>
+          <h1>Hotseat Wiki</h1>
           {/* Renders nothing when auth is disabled. */}
           <AccountMenu />
         </div>

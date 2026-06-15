@@ -7,7 +7,7 @@ import { AuthProvider } from "../lib/auth-context";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "wiki-ui",
+  title: "Hotseat Wiki",
   description: "Read-only, live-updating browser for a wiki-server.",
 };
 
