@@ -1,6 +1,6 @@
 {
   "ws:mpzncs2z-0001-2wgv51": {
-    "version": 2124,
+    "version": 2265,
     "files": {
       "hotseat-wiki/architecture/index.md": "5213acdc1038077e77d636e752170d48a0efdbf3a8639b6e6d795f4fde277015",
       "hotseat-wiki/feature-specs/index.md": "f39d08db07e0ed57f225cb9f5c595b09681c1f99fbc6753333f70742a6cb5dad",
@@ -111,7 +111,15 @@
       "hotseat-wiki/.archived/implementation-plan--mqb9074t-001f-yd818n.md": "409e0826a9598b7c804fbda1ee93b1b977fbed8068e8521b2ae573a385e7cb9a",
       "hotseat-wiki/.archived/testing-plan--mqb9074t-001g-h9zcu7.md": "e4d955bb730c01a77e5941b9bec8f66e94d8342221f6f89f1262a4ce2c5176ca",
       "hotseat-wiki/.archived/feature-spec--mqb9074t-001h-9hawnj.md": "9c8ee3b0fb69b9b453895e37f000d67d2c9b40e82e9fcce397c38b3f04216c53",
-      "hotseat-wiki/decision-records/oauth-2-1-fa-ade-over-the-stateless-gateway-signed-blob-codes-and-refresh-tokens.md": "9abeedb3434e294bf77be4ca5e51d82a7e2f7bc17008224d11bdd8ab6bbac510"
+      "hotseat-wiki/decision-records/oauth-2-1-fa-ade-over-the-stateless-gateway-signed-blob-codes-and-refresh-tokens.md": "9abeedb3434e294bf77be4ca5e51d82a7e2f7bc17008224d11bdd8ab6bbac510",
+      "hotseat-wiki/.archived/feature-brief--mqfgx7em-004v-xsmovc.md": "4ec07d381f7178b0a6feb7a322d4c61c4ae405d002bc99ef02d3ef108bdba0dd",
+      "hotseat-wiki/.archived/implementation-plan--mqfgx7em-004w-fe6hpp.md": "2ab5ce580efdded4ffca04892269a29456a9b276e96ae7f38ea5153761ed4c53",
+      "hotseat-wiki/.archived/testing-plan--mqfgx7em-004x-m9v6t9.md": "1297b31f5f381ae3aa1c18fd2298929daed9234615ae9ac0ec7d8cd46fafc680",
+      "hotseat-wiki/.archived/feature-spec--mqfgx7em-004y-45xvy.md": "f5704ddf7acbcb652783b54b8e1f9b40d128e176289c80e74aa33f97a492783a",
+      "hotseat-wiki/.archived/feature-brief--mqgpmzt8-000e-95cfsa.md": "905a2d8b34ad138cca31a5c318cd5000eef93b475442d155638a8c8fa1226aed",
+      "hotseat-wiki/.archived/implementation-plan--mqgpmzt8-000f-wb0wiq.md": "1ccc6568e7a1b466a3b36f1450629e312d67f9fd463231b32c12062849a99831",
+      "hotseat-wiki/.archived/testing-plan--mqgpmzt8-000g-lld99t.md": "3ce54c1d452e366ddb5a93a176cee6cb510a79deb9f833301cbe8e09e484c622",
+      "hotseat-wiki/.archived/feature-spec--mqgpmzt8-000h-6ym7gh.md": "0c33442df95d7357d24d3de747ff8a4637b38a410c3357b5261fc44c8e173f4e"
     },
     "pages": {
       "toc:mpznedyz-0003-pdtcmh": "hotseat-wiki/architecture/index.md",
@@ -223,7 +231,15 @@
       "implementation-plan:mqb9074t-001f-yd818n": "hotseat-wiki/.archived/implementation-plan--mqb9074t-001f-yd818n.md",
       "testing-plan:mqb9074t-001g-h9zcu7": "hotseat-wiki/.archived/testing-plan--mqb9074t-001g-h9zcu7.md",
       "feature-spec:mqb9074t-001h-9hawnj": "hotseat-wiki/.archived/feature-spec--mqb9074t-001h-9hawnj.md",
-      "decision-record:mqbfg2yp-0027-n6wrih": "hotseat-wiki/decision-records/oauth-2-1-fa-ade-over-the-stateless-gateway-signed-blob-codes-and-refresh-tokens.md"
+      "decision-record:mqbfg2yp-0027-n6wrih": "hotseat-wiki/decision-records/oauth-2-1-fa-ade-over-the-stateless-gateway-signed-blob-codes-and-refresh-tokens.md",
+      "feature-brief:mqfgx7em-004v-xsmovc": "hotseat-wiki/.archived/feature-brief--mqfgx7em-004v-xsmovc.md",
+      "implementation-plan:mqfgx7em-004w-fe6hpp": "hotseat-wiki/.archived/implementation-plan--mqfgx7em-004w-fe6hpp.md",
+      "testing-plan:mqfgx7em-004x-m9v6t9": "hotseat-wiki/.archived/testing-plan--mqfgx7em-004x-m9v6t9.md",
+      "feature-spec:mqfgx7em-004y-45xvy": "hotseat-wiki/.archived/feature-spec--mqfgx7em-004y-45xvy.md",
+      "feature-brief:mqgpmzt8-000e-95cfsa": "hotseat-wiki/.archived/feature-brief--mqgpmzt8-000e-95cfsa.md",
+      "implementation-plan:mqgpmzt8-000f-wb0wiq": "hotseat-wiki/.archived/implementation-plan--mqgpmzt8-000f-wb0wiq.md",
+      "testing-plan:mqgpmzt8-000g-lld99t": "hotseat-wiki/.archived/testing-plan--mqgpmzt8-000g-lld99t.md",
+      "feature-spec:mqgpmzt8-000h-6ym7gh": "hotseat-wiki/.archived/feature-spec--mqgpmzt8-000h-6ym7gh.md"
     }
   }
 }
