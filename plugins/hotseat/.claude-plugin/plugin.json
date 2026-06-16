@@ -2,7 +2,7 @@
   "name": "hotseat",
   "displayName": "Hotseat Wiki",
   "description": "Agentic, FSM-gated feature builds driven by the hotseat structured wiki. Ships the /build-feature skill plus the wiki MCP server wiring it depends on.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": {
     "name": "Benjamin Jordan",
     "email": "benjamin@thegoldenmule.com"

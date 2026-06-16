@@ -32,6 +32,10 @@ The skill talks to a running `wiki-server`; the plugin only carries the client w
    `WIKI_MCP_URL` env var if your server lives elsewhere.
 3. If the target repo should mirror wiki Markdown to disk, run the `wiki-mirror` process with the
    workspace mapped to a root in `~/.wiki/wiki-mirror.config.json` — the plugin does not do this for you.
+4. A **`hotseat.config.json`** at the repo root binding the repo to its workspace
+   (`{ "workspaceId": "ws:..." }`), so `/build-feature` resolves the workspace without an argument. Commit
+   it so it travels with every clone/worktree. Skip it and the skill falls back to `listWorkspaces` + a
+   prompt (and offers to write it for you).
 
 ## Contents
 

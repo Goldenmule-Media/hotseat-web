@@ -5,8 +5,19 @@ the wiki's `feature` bundle as the source of truth for *what comes next*. It is 
 *orchestrates* the system — not part of the engine. Invoke it explicitly:
 
 ```
-/build-feature <workspaceId> "<one-line intent>"
-/build-feature <workspaceId> feature-brief:<id>      # drive an existing brief
+/build-feature "<one-line intent>"
+/build-feature feature-brief:<id>            # drive an existing brief
+/build-feature ws:<id> "<one-line intent>"   # explicit workspace override (prefix a ws: token)
+```
+
+**Workspace resolution.** A repo maps **1:1** to a wiki workspace, so you don't pass the id. The skill
+resolves it once, in precedence order: (1) a leading `ws:` token in the argument overrides; (2) otherwise
+the `workspaceId` in **`hotseat.config.json`** at the repo root; (3) otherwise it calls `listWorkspaces`,
+confirms with you, and offers to write the config. `hotseat.config.json` is committed, so it travels with
+every clone and parallel worktree:
+
+```json
+{ "workspaceId": "ws:mpzncs2z-0001-2wgv51" }
 ```
 
 ## Why it exists
