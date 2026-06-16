@@ -9,7 +9,8 @@
     "./architecture": "./src/architecture/index.ts",
     "./adr": "./src/adr/index.ts",
     "./document": "./src/document/index.ts",
-    "./bug": "./src/bug/index.ts"
+    "./bug": "./src/bug/index.ts",
+    "./security": "./src/security/index.ts"
   },
   "files": [
     "dist"

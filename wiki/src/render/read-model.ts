@@ -47,9 +47,50 @@ export function buildRenderCtx(state: IWorkspaceState, _registry: Registry): IRe
   };
 }
 
+/** Key into the per-render ordinal index: section id + list field + element id. */
+function ordinalKey(section: string, field: string, element: string): string {
+  return JSON.stringify([section, field, element]);
+}
+
+/**
+ * Precompute, once per page render, the 1-based ordinal of every element in a `numbered` or
+ * `as: "sections"` list — replaying the SAME per-group status filter and stored order that
+ * {@link renderListField} renders with, so an `$ordinal` element-ref resolves to exactly the
+ * number the reader sees. Pure over folded state; an element filtered out of every rendered
+ * group simply has no entry (its refs then fall back to a stable label). The two reads of the
+ * filter/order rule must stay in lockstep with {@link renderListField}.
+ */
+function buildOrdinalIndex(node: IPageNode, config: RenderConfig): Map<string, number> {
+  const index = new Map<string, number>();
+  for (const sr of config.sections) {
+    const sectionKey = sr.section;
+    const field = sr.field;
+    if (sectionKey === undefined || field === undefined) continue;
+    if (sr.as !== "numbered" && sr.as !== "sections") continue;
+    const sec = node.sections.find((s) => s.key === sectionKey);
+    const f = sec === undefined ? undefined : sec.fields[field];
+    if (sec === undefined || f === undefined || f.kind !== "list") continue;
+    if (sr.groupBy !== undefined && sr.groups !== undefined) {
+      for (const g of sr.groups) {
+        f.elements
+          .filter((el) => (el.status ?? "") === g.when)
+          .forEach((el, i) => index.set(ordinalKey(sec.id, field, el.id), i + 1));
+      }
+    } else {
+      f.elements.forEach((el, i) => index.set(ordinalKey(sec.id, field, el.id), i + 1));
+    }
+  }
+  return index;
+}
+
 /** Resolve a ref target to its render-derived label. Workspace-scoped: a
  * cross-page ref (`target.page` set) resolves against that page; same-page otherwise. */
-function makeLabelResolver(state: IWorkspaceState, page: IPageNode, ctx: IRenderCtx): LabelResolver {
+function makeLabelResolver(
+  state: IWorkspaceState,
+  page: IPageNode,
+  ctx: IRenderCtx,
+  ordinals: ReadonlyMap<string, number>,
+): LabelResolver {
   const ownerOf = (p: PageId | undefined): IPageNode | undefined =>
     p === undefined ? page : state.pages.get(p);
   return (target: RefTarget): string => {
@@ -70,9 +111,26 @@ function makeLabelResolver(state: IWorkspaceState, page: IPageNode, ctx: IRender
         // the element id when the field is absent or non-textual.
         const f = ownerOf(target.page)?.sections.find((s) => s.id === target.section)?.fields[target.field];
         const el = f !== undefined && f.kind === "list" ? f.elements.find((e) => e.id === target.element) : undefined;
-        if (el !== undefined && target.labelField !== undefined) {
-          const lf = el.fields[target.labelField];
-          if (lf !== undefined && (lf.kind === "prose" || lf.kind === "scalar")) return String(lf.value);
+        const lf = target.labelField;
+        // `$ordinal` (optionally `$ordinal:<fallbackField>`): render the element's CURRENT
+        // render-time ordinal — same-page only, since a page's ordinals depend on its own
+        // render config — falling back to the named field then the element id when it has
+        // none (target filtered out of every rendered group, or a cross-page ref).
+        if (lf !== undefined && (lf === "$ordinal" || lf.startsWith("$ordinal:"))) {
+          if (target.page === undefined) {
+            const ord = ordinals.get(ordinalKey(target.section, target.field, target.element));
+            if (ord !== undefined) return String(ord);
+          }
+          const fb = lf.startsWith("$ordinal:") ? lf.slice("$ordinal:".length) : undefined;
+          if (el !== undefined && fb !== undefined) {
+            const fv = el.fields[fb];
+            if (fv !== undefined && (fv.kind === "prose" || fv.kind === "scalar")) return String(fv.value);
+          }
+          return String(target.element);
+        }
+        if (el !== undefined && lf !== undefined) {
+          const fv = el.fields[lf];
+          if (fv !== undefined && (fv.kind === "prose" || fv.kind === "scalar")) return String(fv.value);
         }
         return String(target.element);
       }
@@ -158,13 +216,20 @@ function renderListField(
     for (const g of sr.groups) {
       const matched = f.elements.filter((el) => (el.status ?? "") === g.when);
       const body =
-        matched.length === 0 ? placeholder() : asList(matched.map((el) => fillTemplate(g.item, el, label)));
+        matched.length === 0
+          ? placeholder()
+          : sr.as === "sections"
+            ? matched.map((el, i) => renderElementSection(el, i + 1, sr, label)).join("\n\n")
+            : asList(matched.map((el) => fillTemplate(g.item ?? "", el, label)));
       blocks.push(section(heading(2, g.heading ?? g.when), body));
     }
     return blocks.join("\n\n");
   }
-  const template = sr.item ?? "{text}";
   if (f.elements.length === 0) return sr.placeholder ?? placeholder();
+  if (sr.as === "sections") {
+    return f.elements.map((el, i) => renderElementSection(el, i + 1, sr, label)).join("\n\n");
+  }
+  const template = sr.item ?? "{text}";
   if (sr.as === "checklist") {
     // A box is checked when the element status === checkedWhen.
     return bulletList(
@@ -172,6 +237,57 @@ function renderListField(
     );
   }
   return asList(f.elements.map((el) => fillTemplate(template, el, label)));
+}
+
+/**
+ * Render one list element as a numbered H3 subsection (the `as: "sections"` mode): a heading
+ * template filled from the element's fields, then each non-empty declared body part. The
+ * ordinal is supplied by the caller from the element's position in its rendered group, so it
+ * matches what an `$ordinal` element-ref resolves to.
+ */
+function renderElementSection(el: IItem, ordinal: number, sr: SectionRender, label: LabelResolver): string {
+  const spec = sr.element;
+  const headingText = spec !== undefined ? fillTemplate(spec.heading, el, label) : "";
+  const parts: string[] = [];
+  for (const part of spec?.body ?? []) {
+    const rendered = renderElementBodyPart(el, part, label);
+    if (rendered.length > 0) parts.push(rendered);
+  }
+  return section(heading(3, `${ordinal}. ${headingText}`), parts.join("\n\n"));
+}
+
+/** One body part of an `as: "sections"` element: its field body, optionally prefixed
+ *  `**label:** `. An absent or empty field yields "" so the part is skipped. */
+function renderElementBodyPart(
+  el: IItem,
+  part: { readonly label?: string; readonly field: string },
+  label: LabelResolver,
+): string {
+  const f = el.fields[part.field];
+  if (f === undefined) return "";
+  const body = elementFieldBody(f, label);
+  if (body.length === 0) return "";
+  return part.label !== undefined ? `**${part.label}:** ${body}` : body;
+}
+
+/** Block-level rendering of one element field (fenced code, full blocks tree). */
+function elementFieldBody(f: IField, label: LabelResolver): string {
+  switch (f.kind) {
+    case "scalar":
+      return String(f.value);
+    case "prose":
+      return f.value;
+    case "code":
+      return "```" + f.lang + "\n" + f.source + "\n```";
+    case "attachment-ref":
+      return `[${f.name}](${f.ref})`;
+    case "ref":
+      return label(f.target);
+    case "blocks":
+      return renderBlocks(f.blocks, label);
+    case "list":
+      return "";
+  }
 }
 
 /**
@@ -216,7 +332,10 @@ export function renderPage(state: IWorkspaceState, pageId: PageId, registry: Reg
   const ctx = buildRenderCtx(state, registry);
   const def = registry.page(node.type);
   const config: RenderConfig = def.render;
-  const label = makeLabelResolver(state, node, ctx);
+  // Built before label resolution so an `$ordinal` ref (even a forward one) sees every
+  // element's render-time number.
+  const ordinals = buildOrdinalIndex(node, config);
+  const label = makeLabelResolver(state, node, ctx, ordinals);
   const pageView = pageStateView(node) as DeepReadonly<PageState>;
 
   const blocks: string[] = [];

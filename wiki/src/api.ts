@@ -157,6 +157,13 @@ export type FieldKind =
  * ref could previously point at — and carries an optional `labelField` naming which of
  * the element's fields supplies the render-derived label (explicit, never object-key
  * order). Together these let a page reference a decision/step/case on a sibling page.
+ *
+ * A reserved `labelField` value `"$ordinal"` (or `"$ordinal:<fallbackField>"`) renders
+ * the element's CURRENT render-time ordinal within its numbered / `as: "sections"` group
+ * instead of a stored field — so a SAME-PAGE reference renumbers automatically as siblings
+ * are filtered (by status group) or reordered, falling back to `<fallbackField>` (e.g. the
+ * element's title) then the element id when no ordinal applies (the target is filtered out
+ * of every rendered group, or the ref is cross-page).
  */
 export type RefTarget =
   | { readonly kind: "section"; page?: PageId; id: SectionId }
@@ -994,13 +1001,27 @@ export interface SectionRender {
   readonly placeholder?: string;
   /** Which field of the section to render as the body. */
   readonly field?: string;
-  readonly as?: "block" | "inline" | "fenced" | "link" | "bullets" | "numbered" | "table" | "blocks" | "checklist";
+  readonly as?: "block" | "inline" | "fenced" | "link" | "bullets" | "numbered" | "table" | "blocks" | "checklist" | "sections";
   /** Element template, e.g. "{text}" / "{field?}". */
   readonly item?: string;
   /** For `as: "checklist"`: the element status value that renders a checked box `[x]` (else `[ ]`). */
   readonly checkedWhen?: string;
   readonly groupBy?: string;
-  readonly groups?: readonly { when: string; heading?: string; item: string }[];
+  /** Per-group line template; optional under `as: "sections"`, where {@link element} drives layout. */
+  readonly groups?: readonly { when: string; heading?: string; item?: string }[];
+  /**
+   * For `as: "sections"`: render each list element as its own numbered H3 subsection
+   * (`### {ordinal}. {heading}`) followed by the named body parts, instead of a single list
+   * line — for rich, multi-field items (e.g. a security finding's detail/impact/
+   * recommendation). The ordinal is render-time and per-group, so it renumbers as elements
+   * are filtered (by status group) or reordered, matching what an `$ordinal` element-ref
+   * resolves to. `heading` is an element template (`{field}`); each body part renders
+   * `field` (optionally prefixed `**label:** `), skipping a part whose field is empty.
+   */
+  readonly element?: {
+    readonly heading: string;
+    readonly body?: readonly { readonly label?: string; readonly field: string }[];
+  };
 }
 
 export interface RenderConfig {

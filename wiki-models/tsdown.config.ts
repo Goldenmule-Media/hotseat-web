@@ -20,6 +20,7 @@ export default defineConfig({
     adr: "src/adr/index.ts",
     document: "src/document/index.ts",
     bug: "src/bug/index.ts",
+    security: "src/security/index.ts",
   },
   format: ["esm"],
   platform: "node",
