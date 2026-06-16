@@ -17,11 +17,29 @@ import { Registry } from "wiki/registry";
 import type { Logger } from "./logger.js";
 import type { MarkdownDiskProjector } from "./markdown-projection.js";
 
+/** A point-in-time health snapshot of one workspace's tail loop, surfaced over the health endpoint. */
+export interface MirrorWorkspaceStatus {
+  readonly workspaceId: string;
+  /** Absolute on-disk mirror root. */
+  readonly root: string;
+  /** The version this mirror has written to disk (0 if never applied). */
+  readonly appliedVersion: number;
+  /** Epoch ms of the last successful reconcile, or null if none has completed. */
+  readonly lastReconcileAt: number | null;
+  /** Message of the most recent reconcile failure, cleared on the next success; null when healthy. */
+  readonly lastReconcileError: string | null;
+  /** Whether the loop is subscribed to (tailing) the live stream. */
+  readonly connected: boolean;
+}
+
 export class WorkspaceMirror {
   /** Serializes reconciles so overlapping triggers never interleave manifest/tree writes. */
   private chain: Promise<void> = Promise.resolve();
   private unsub?: Unsubscribe;
   private stopped = false;
+  private lastReconcileAt: number | null = null;
+  private lastReconcileError: string | null = null;
+  private connected = false;
 
   constructor(
     private readonly handle: IWorkspaceHandle,
@@ -36,11 +54,25 @@ export class WorkspaceMirror {
     await this.sink.init();
     await this.sync(); // boot back-fill from the workspace head
     this.unsub = await this.handle.subscribe(() => this.kick());
+    this.connected = true;
+  }
+
+  /** A point-in-time health snapshot of this tail loop (for the health endpoint). */
+  async status(): Promise<MirrorWorkspaceStatus> {
+    return {
+      workspaceId: this.workspaceId,
+      root: this.sink.root,
+      appliedVersion: await this.sink.appliedVersion(this.workspaceId),
+      lastReconcileAt: this.lastReconcileAt,
+      lastReconcileError: this.lastReconcileError,
+      connected: this.connected,
+    };
   }
 
   /** Stop tailing and drain any in-flight reconcile. */
   async stop(): Promise<void> {
     this.stopped = true;
+    this.connected = false;
     this.unsub?.();
     // Drain the in-flight reconcile but ABSORB a prior failed one: a kick()-driven reconcile
     // that rejected left its rejection on `this.chain` (kick's `.catch` rides a derived promise,
@@ -66,7 +98,19 @@ export class WorkspaceMirror {
     void this.sync().catch((err) => this.sink.fail(this.workspaceId, -1, err));
   }
 
+  /** Reconcile once, recording the outcome for {@link status}. Re-throws so callers (sync/kick) still see failures. */
   private async reconcile(): Promise<void> {
+    try {
+      await this.reconcileOnce();
+      this.lastReconcileAt = Date.now(); // host wall-clock; the determinism rule binds reducers/renderers, not the tail loop
+      this.lastReconcileError = null;
+    } catch (err) {
+      this.lastReconcileError = err instanceof Error ? err.message : String(err);
+      throw err;
+    }
+  }
+
+  private async reconcileOnce(): Promise<void> {
     const events = await this.handle.history();
     if (events.length === 0) return;
     const head = events[events.length - 1].version + 1;

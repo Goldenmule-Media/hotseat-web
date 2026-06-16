@@ -223,6 +223,11 @@ export class MarkdownDiskProjector {
     private readonly logger: Logger,
   ) {}
 
+  /** The absolute on-disk root this projector writes under (surfaced in the mirror's status). */
+  get root(): string {
+    return this.cfg.root;
+  }
+
   /**
    * Load the persisted manifest (best-effort: a missing/corrupt manifest starts empty →
    * full rebuild), then VERIFY it against disk: a manifest entry whose file is missing —

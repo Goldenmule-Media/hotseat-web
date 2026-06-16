@@ -254,7 +254,7 @@ describe("wiki-mirror — tail a workspace stream to a local Markdown mirror", (
     await writer.createPage("note", { title: "X", parentId: null });
     const root = await freshRoot();
     const running = await startMirror(
-      { streamBaseUrl: url, namespace: "test", models: [], emitters: [{ workspaceId: writer.id, root }] },
+      { streamBaseUrl: url, namespace: "test", models: [], emitters: [{ workspaceId: writer.id, root }], healthHost: "127.0.0.1", healthPort: 0 },
       silentLogger,
     );
     expect(running.mirrors.length).toBe(0); // the failing workspace was skipped, not fatal

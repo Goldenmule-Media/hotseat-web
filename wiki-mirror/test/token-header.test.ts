@@ -115,6 +115,8 @@ describe("wiki-mirror — bearer token on the wire", () => {
         namespace: "test",
         models: [],
         emitters: [{ workspaceId, root: await freshRoot() }],
+        healthHost: "127.0.0.1",
+        healthPort: 0,
         token: "mirror-token",
       },
       silentLogger,
@@ -129,7 +131,7 @@ describe("wiki-mirror — bearer token on the wire", () => {
   it("startMirror without a token sends NO authorization header (unchanged behavior)", async () => {
     const workspaceId = await makeWorkspace();
     const running = await startMirror(
-      { streamBaseUrl: proxy.url, namespace: "test", models: [], emitters: [{ workspaceId, root: await freshRoot() }] },
+      { streamBaseUrl: proxy.url, namespace: "test", models: [], emitters: [{ workspaceId, root: await freshRoot() }], healthHost: "127.0.0.1", healthPort: 0 },
       silentLogger,
     );
     cleanup.push(() => running.close());
@@ -164,7 +166,7 @@ describe("wiki-mirror — bearer token on the wire", () => {
     const workspaceId = await makeWorkspace();
     await seedCredentials(proxy.url, "stored-access-token");
     const running = await startMirror(
-      { streamBaseUrl: proxy.url, namespace: "test", models: [], emitters: [{ workspaceId, root: await freshRoot() }] },
+      { streamBaseUrl: proxy.url, namespace: "test", models: [], emitters: [{ workspaceId, root: await freshRoot() }], healthHost: "127.0.0.1", healthPort: 0 },
       silentLogger,
     );
     cleanup.push(() => running.close());
@@ -183,6 +185,8 @@ describe("wiki-mirror — bearer token on the wire", () => {
         namespace: "test",
         models: [],
         emitters: [{ workspaceId, root: await freshRoot() }],
+        healthHost: "127.0.0.1",
+        healthPort: 0,
         token: "explicit-static-token",
       },
       silentLogger,

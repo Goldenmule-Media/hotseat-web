@@ -34,6 +34,10 @@ export interface IMirrorConfig {
   readonly models: readonly string[];
   /** The workspace → absolute-root mirrors; one tail loop each. */
   readonly emitters: readonly IEmitterEntry[];
+  /** Host the local health endpoint binds to (loopback by default — unauthenticated, local-trust). */
+  readonly healthHost: string;
+  /** Port the local health endpoint binds to (fixed default {@link DEFAULT_HEALTH_PORT}, NOT derived from the stream port). */
+  readonly healthPort: number;
   /**
    * Optional bearer token sent as `Authorization: Bearer <token>` on every stream request —
    * a wiki-server session token (copy from the wiki-ui account menu), used when the server
@@ -57,11 +61,16 @@ interface IMirrorConfigFile {
   models?: string[];
   emitters?: { workspaceId?: string; root?: string }[];
   token?: string;
+  healthHost?: string;
+  healthPort?: number;
 }
 
 export const DEFAULT_CONFIG_FILENAME = "wiki-mirror.config.json";
 export const DEFAULT_STREAM_BASE_URL = "http://127.0.0.1:4437";
 export const DEFAULT_NAMESPACE = "default";
+/** Fixed default for the local health endpoint (4437 stream / 4438 control / 4439 mcp / 4440 mirror). */
+export const DEFAULT_HEALTH_PORT = 4440;
+export const DEFAULT_HEALTH_HOST = "127.0.0.1";
 
 /**
  * The default config location: the per-machine `~/.wiki/wiki-mirror.config.json`, shared by
@@ -134,6 +143,14 @@ export function resolveConfig(
   const namespace = flags["namespace"] ?? env.WIKI_MIRROR_NAMESPACE ?? file.namespace ?? DEFAULT_NAMESPACE;
   const token = flags["token"] ?? env.WIKI_MIRROR_TOKEN ?? file.token;
 
+  const healthHost =
+    flags["health-host"] ?? env.WIKI_MIRROR_HEALTH_HOST ?? file.healthHost ?? DEFAULT_HEALTH_HOST;
+  const healthPortRaw =
+    flags["health-port"] ??
+    env.WIKI_MIRROR_HEALTH_PORT ??
+    (file.healthPort !== undefined ? String(file.healthPort) : undefined);
+  const healthPort = healthPortRaw === undefined ? DEFAULT_HEALTH_PORT : parsePort(healthPortRaw);
+
   const modelsRaw = flags["models"] ?? env.WIKI_MIRROR_MODELS;
   const models =
     modelsRaw !== undefined
@@ -179,5 +196,23 @@ export function resolveConfig(
     return { workspaceId: e.workspaceId, root };
   });
 
-  return { streamBaseUrl, namespace, models, emitters, token, configWasExplicit: explicitConfig !== undefined };
+  return {
+    streamBaseUrl,
+    namespace,
+    models,
+    emitters,
+    token,
+    healthHost,
+    healthPort,
+    configWasExplicit: explicitConfig !== undefined,
+  };
+}
+
+/** Parse a port (`--health-port` / env / file): an integer in 0–65535 (0 = auto-assign). Fail loud otherwise. */
+function parsePort(value: string): number {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0 || n > 65535) {
+    throw new Error(`wiki-mirror: invalid health port ${JSON.stringify(value)} (expected an integer 0–65535)`);
+  }
+  return n;
 }

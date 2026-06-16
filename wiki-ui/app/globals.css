@@ -493,6 +493,31 @@ code {
   transform: scale(1.9);
 }
 
+/* ── mirror (emitter) indicator ──────────────────────────────────────────── */
+.mirror-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.mirror-indicator .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.mirror-indicator[data-state="live"] .dot {
+  background: var(--green);
+}
+.mirror-indicator[data-state="error"] {
+  color: var(--red);
+}
+.mirror-indicator[data-state="error"] .dot {
+  background: var(--red);
+}
+/* checking / off / absent stay muted (the default dot/text color). */
+
 /* ── page body ───────────────────────────────────────────────────────────── */
 .page {
   animation: fade 0.15s ease;

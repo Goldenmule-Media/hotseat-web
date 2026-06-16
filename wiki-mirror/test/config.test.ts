@@ -10,7 +10,14 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { DEFAULT_NAMESPACE, DEFAULT_STREAM_BASE_URL, defaultConfigPath, resolveConfig } from "../src/config.js";
+import {
+  DEFAULT_HEALTH_HOST,
+  DEFAULT_HEALTH_PORT,
+  DEFAULT_NAMESPACE,
+  DEFAULT_STREAM_BASE_URL,
+  defaultConfigPath,
+  resolveConfig,
+} from "../src/config.js";
 
 describe("wiki-mirror config resolution", () => {
   let dir: string;
@@ -118,5 +125,25 @@ describe("wiki-mirror config resolution", () => {
 
   it("throws when an explicitly-requested config file is missing", () => {
     expect(() => resolveConfig(["--config", join(dir, "nope.json")], env, dir)).toThrow(/cannot read config file/);
+  });
+
+  it("defaults the health host/port and resolves them flag → env → file", () => {
+    expect(resolveConfig([], env, dir)).toMatchObject({
+      healthHost: DEFAULT_HEALTH_HOST,
+      healthPort: DEFAULT_HEALTH_PORT,
+    });
+    writeConfig({ healthHost: "0.0.0.0", healthPort: 5500, emitters: [] });
+    expect(resolveConfig([], env, dir)).toMatchObject({ healthHost: "0.0.0.0", healthPort: 5500 });
+    const env2 = { ...env, WIKI_MIRROR_HEALTH_PORT: "5600" };
+    expect(resolveConfig([], env2, dir).healthPort).toBe(5600);
+    expect(resolveConfig(["--health-port", "5700", "--health-host", "::1"], env2, dir)).toMatchObject({
+      healthHost: "::1",
+      healthPort: 5700,
+    });
+  });
+
+  it("throws on a non-integer health port", () => {
+    expect(() => resolveConfig(["--health-port", "abc"], env, dir)).toThrow(/invalid health port/);
+    expect(() => resolveConfig(["--health-port", "99999"], env, dir)).toThrow(/invalid health port/);
   });
 });

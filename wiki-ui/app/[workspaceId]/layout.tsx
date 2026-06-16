@@ -8,6 +8,7 @@ import type { ReactNode } from "react";
 import type { WorkspaceId } from "wiki";
 import { AccountMenu } from "../../components/AccountMenu";
 import { LiveIndicator } from "../../components/LiveIndicator";
+import { MirrorIndicator } from "../../components/MirrorIndicator";
 import { SidebarResizer } from "../../components/SidebarResizer";
 import { TreeNav } from "../../components/TreeNav";
 import { WorkspaceError } from "../../components/WorkspaceError";
@@ -29,6 +30,7 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }): 
             ← Workspaces
           </Link>
           <LiveIndicator connection={ws.connection} lastEventAt={ws.lastEventAt} error={ws.error} />
+          <MirrorIndicator workspaceId={workspaceId} />
         </div>
         <WorkspaceTitle id={workspaceId} />
         <nav className="tree-nav" aria-label="Pages">

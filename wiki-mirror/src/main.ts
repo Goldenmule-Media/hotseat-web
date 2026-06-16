@@ -16,11 +16,13 @@ import { resolveConfig, type IMirrorConfig } from "./config.js";
 import { loadModels } from "./models.js";
 import { MarkdownDiskProjector } from "./markdown-projection.js";
 import { WorkspaceMirror } from "./mirror.js";
+import { startHealthServer, type HealthServer } from "./health.js";
 
-/** A running mirror: every workspace tail loop, plus a `close()` that tears them all down. */
+/** A running mirror: every workspace tail loop, the local health endpoint, plus a `close()` that tears them all down. */
 export interface RunningMirror {
   readonly wiki: IWiki;
   readonly mirrors: readonly WorkspaceMirror[];
+  readonly health: HealthServer;
   close(): Promise<void>;
 }
 
@@ -81,10 +83,25 @@ export async function startMirror(
     }
   }
 
+  // The local health endpoint reports liveness + per-workspace tail state to clients (chiefly
+  // wiki-ui). Required here: a started mirror that can't expose health is a startup error worth
+  // surfacing (binding fails loud). On port 0 (tests) the OS auto-assigns; read it back via `url`.
+  const health = await startHealthServer({
+    host: config.healthHost,
+    port: config.healthPort,
+    namespace: config.namespace,
+    streamBaseUrl: config.streamBaseUrl,
+    mirrors,
+    logger,
+  });
+  logger.info("wiki-mirror: health endpoint listening", { url: health.url });
+
   return {
     wiki,
     mirrors,
+    health,
     async close(): Promise<void> {
+      await health.stop();
       for (const m of mirrors) await m.stop();
       await wiki.close();
     },
@@ -149,6 +166,28 @@ export async function main(argv = process.argv.slice(2), env = process.env): Pro
       "wiki-mirror: no emitters configured (no ~/.wiki/wiki-mirror.config.json on this machine) — idling; add emitters and restart to mirror",
       {},
     );
+    // Still expose the health endpoint while idling, so wiki-ui can distinguish "a mirror is
+    // running but isn't mirroring this workspace" (reachable, empty workspaces[]) from "no
+    // mirror process" (unreachable). Best-effort: a bind failure here must NOT exit, or
+    // `concurrently -k` would take the wiki-server down on this unprovisioned machine.
+    try {
+      const health = await startHealthServer({
+        host: config.healthHost,
+        port: config.healthPort,
+        namespace: config.namespace,
+        streamBaseUrl: config.streamBaseUrl,
+        mirrors: [],
+        logger,
+      });
+      logger.info("wiki-mirror: health endpoint listening (no workspaces mirrored)", { url: health.url });
+      const stop = (): void => void health.stop().finally(() => process.exit(0));
+      process.on("SIGINT", stop);
+      process.on("SIGTERM", stop);
+    } catch (err) {
+      logger.warn("wiki-mirror: could not start the health endpoint while idling", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
     await new Promise<never>(() => {});
   }
 
