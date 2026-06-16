@@ -30,7 +30,6 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }): 
             ← Workspaces
           </Link>
           <LiveIndicator connection={ws.connection} lastEventAt={ws.lastEventAt} error={ws.error} />
-          <MirrorIndicator workspaceId={workspaceId} />
         </div>
         <WorkspaceTitle id={workspaceId} />
         <nav className="tree-nav" aria-label="Pages">
@@ -40,8 +39,12 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }): 
             <TreeNav tree={ws.tree} workspaceId={workspaceId} />
           )}
         </nav>
-        {/* Renders nothing when auth is disabled (no stray footer chrome). */}
-        <AccountMenu className="account-footer" />
+        {/* Sidebar foot: local mirror (emitter) status above the account. AccountMenu renders
+            nothing when auth is disabled, leaving just the mirror status. */}
+        <div className="sidebar-foot">
+          <MirrorIndicator workspaceId={workspaceId} />
+          <AccountMenu />
+        </div>
       </aside>
       <SidebarResizer />
       <main className="content">{children}</main>

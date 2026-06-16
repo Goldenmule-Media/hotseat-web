@@ -1311,10 +1311,13 @@ code {
   gap: 8px;
   min-width: 0;
 }
-.account-footer {
+.sidebar-foot {
   margin-top: 16px;
   border-top: 1px solid var(--border);
   padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 .landing-header-row {
   display: flex;
