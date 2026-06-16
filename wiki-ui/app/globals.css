@@ -185,8 +185,33 @@ code {
 /* ── shell ───────────────────────────────────────────────────────────────── */
 .shell {
   display: grid;
-  grid-template-columns: 320px 1fr;
+  grid-template-columns: var(--sidebar-width, 320px) 1fr;
   min-height: 100vh;
+  position: relative;
+}
+/* Drag handle straddling the sidebar/content boundary; reads the same width var. */
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--sidebar-width, 320px);
+  width: 10px;
+  transform: translateX(-50%);
+  cursor: col-resize;
+  z-index: 5;
+  touch-action: none;
+}
+.sidebar-resizer::after {
+  content: "";
+  position: absolute;
+  inset: 0 calc(50% - 1px);
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.sidebar-resizer:hover::after,
+.sidebar-resizer.is-dragging::after {
+  opacity: 1;
 }
 .sidebar {
   border-right: 1px solid var(--border);
@@ -218,11 +243,12 @@ code {
 .ws-title {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   margin-bottom: 16px;
 }
 .ws-name {
+  flex: 1;
+  min-width: 0;
   font-size: 15px;
   font-weight: 600;
   overflow: hidden;

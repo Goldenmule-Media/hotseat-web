@@ -8,6 +8,7 @@ import type { ReactNode } from "react";
 import type { WorkspaceId } from "wiki";
 import { AccountMenu } from "../../components/AccountMenu";
 import { LiveIndicator } from "../../components/LiveIndicator";
+import { SidebarResizer } from "../../components/SidebarResizer";
 import { TreeNav } from "../../components/TreeNav";
 import { WorkspaceError } from "../../components/WorkspaceError";
 import { WorkspaceTitle } from "../../components/WorkspaceTitle";
@@ -40,6 +41,7 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }): 
         {/* Renders nothing when auth is disabled (no stray footer chrome). */}
         <AccountMenu className="account-footer" />
       </aside>
+      <SidebarResizer />
       <main className="content">{children}</main>
     </div>
   );
