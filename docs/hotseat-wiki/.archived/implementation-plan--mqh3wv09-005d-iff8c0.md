@@ -1,6 +1,6 @@
 # Implementation plan — Mirror (emitter) status in wiki-ui
 
-**Status:** draft
+**Status:** ready
 
 ## Steps
 - [x] wiki-mirror/src/mirror.ts: track lastReconcileAt + lastReconcileError (set on each reconcile success/failure and in kick()'s catch); accept `root` via the constructor; add `async status(): Promise<MirrorWorkspaceStatus>` returning { workspaceId, root, appliedVersion: await sink.appliedVersion(ws), lastReconcileAt, lastReconcileError, connected }. Export the MirrorWorkspaceStatus type.

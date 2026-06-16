@@ -1,9 +1,9 @@
 {
   "ws:mpzncs2z-0001-2wgv51": {
-    "version": 2321,
+    "version": 2328,
     "files": {
       "hotseat-wiki/architecture/index.md": "5213acdc1038077e77d636e752170d48a0efdbf3a8639b6e6d795f4fde277015",
-      "hotseat-wiki/feature-specs/index.md": "5fcd072393b51d2ddb8917b5de996835cfbc5feec871703cffacbc3345adc24b",
+      "hotseat-wiki/feature-specs/index.md": "f39d08db07e0ed57f225cb9f5c595b09681c1f99fbc6753333f70742a6cb5dad",
       "hotseat-wiki/architecture/wiki/index.md": "9a63fc0f809f255f0deb5a50f7398abbc408103a7d348daaf31c7987dc20c212",
       "hotseat-wiki/architecture/wiki-models/index.md": "acec0870b92ee856c5cb0edb135ccae625d159a6aee93c18439e8b310ec50d66",
       "hotseat-wiki/architecture/wiki-mcp/index.md": "d588057a56c0b7550e7aa4afc64a4eebecfc6cef113028ebe07bc95bdc494c4d",
@@ -120,10 +120,10 @@
       "hotseat-wiki/.archived/implementation-plan--mqgpmzt8-000f-wb0wiq.md": "1ccc6568e7a1b466a3b36f1450629e312d67f9fd463231b32c12062849a99831",
       "hotseat-wiki/.archived/testing-plan--mqgpmzt8-000g-lld99t.md": "3ce54c1d452e366ddb5a93a176cee6cb510a79deb9f833301cbe8e09e484c622",
       "hotseat-wiki/.archived/feature-spec--mqgpmzt8-000h-6ym7gh.md": "0c33442df95d7357d24d3de747ff8a4637b38a410c3357b5261fc44c8e173f4e",
-      "hotseat-wiki/feature-specs/mirror-emitter-status-in-wiki-ui/index.md": "8d97253e52962e743153f964fb745835426c809c2ebdf81d8cdbe14e5d42a184",
-      "hotseat-wiki/feature-specs/mirror-emitter-status-in-wiki-ui/implementation-plan-mirror-emitter-status-in-wiki-ui.md": "08bdef212d7813877da44ba5bfdf250f16e3ca5a7b04b97ec3c0dd31e94b30ec",
-      "hotseat-wiki/feature-specs/mirror-emitter-status-in-wiki-ui/testing-plan-mirror-emitter-status-in-wiki-ui.md": "eb443eddfea0d5aa0615433fd215d853221516b8ba03df7035f056772bfe4a2f",
-      "hotseat-wiki/feature-specs/mirror-emitter-status-in-wiki-ui/spec-mirror-emitter-status-in-wiki-ui.md": "186041b22b443fd5f35674ceb71521a66358e45c63a04d6e6583378715c45951"
+      "hotseat-wiki/.archived/feature-brief--mqh3wv09-005c-5o02gz.md": "e40f22a6fae03e06d1c2e8111e3349e6bcc2692c0cbe57f62a111431e27c0f19",
+      "hotseat-wiki/.archived/implementation-plan--mqh3wv09-005d-iff8c0.md": "67a9285fb3de6ad5ec855b82c53e4b33cd4f1a81e95f7917221c5c465e3f4486",
+      "hotseat-wiki/.archived/testing-plan--mqh3wv09-005e-kqcoc8.md": "9e1e52d4816693afe84c28bfaf4030a5e081edbc12f6aad5e3b3360c72594fe5",
+      "hotseat-wiki/.archived/feature-spec--mqh3wv09-005f-lh3it.md": "7048e63def8bd61f06f8424e89b48953c617ff196c853063aa205d983f39c5a2"
     },
     "pages": {
       "toc:mpznedyz-0003-pdtcmh": "hotseat-wiki/architecture/index.md",
@@ -244,10 +244,10 @@
       "implementation-plan:mqgpmzt8-000f-wb0wiq": "hotseat-wiki/.archived/implementation-plan--mqgpmzt8-000f-wb0wiq.md",
       "testing-plan:mqgpmzt8-000g-lld99t": "hotseat-wiki/.archived/testing-plan--mqgpmzt8-000g-lld99t.md",
       "feature-spec:mqgpmzt8-000h-6ym7gh": "hotseat-wiki/.archived/feature-spec--mqgpmzt8-000h-6ym7gh.md",
-      "feature-brief:mqh3wv09-005c-5o02gz": "hotseat-wiki/feature-specs/mirror-emitter-status-in-wiki-ui/index.md",
-      "implementation-plan:mqh3wv09-005d-iff8c0": "hotseat-wiki/feature-specs/mirror-emitter-status-in-wiki-ui/implementation-plan-mirror-emitter-status-in-wiki-ui.md",
-      "testing-plan:mqh3wv09-005e-kqcoc8": "hotseat-wiki/feature-specs/mirror-emitter-status-in-wiki-ui/testing-plan-mirror-emitter-status-in-wiki-ui.md",
-      "feature-spec:mqh3wv09-005f-lh3it": "hotseat-wiki/feature-specs/mirror-emitter-status-in-wiki-ui/spec-mirror-emitter-status-in-wiki-ui.md"
+      "feature-brief:mqh3wv09-005c-5o02gz": "hotseat-wiki/.archived/feature-brief--mqh3wv09-005c-5o02gz.md",
+      "implementation-plan:mqh3wv09-005d-iff8c0": "hotseat-wiki/.archived/implementation-plan--mqh3wv09-005d-iff8c0.md",
+      "testing-plan:mqh3wv09-005e-kqcoc8": "hotseat-wiki/.archived/testing-plan--mqh3wv09-005e-kqcoc8.md",
+      "feature-spec:mqh3wv09-005f-lh3it": "hotseat-wiki/.archived/feature-spec--mqh3wv09-005f-lh3it.md"
     }
   }
 }

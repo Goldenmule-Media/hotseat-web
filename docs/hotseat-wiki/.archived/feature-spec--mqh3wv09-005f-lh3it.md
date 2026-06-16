@@ -1,6 +1,6 @@
 # Spec — Mirror (emitter) status in wiki-ui
 
-**Status:** drafting
+**Status:** sealed
 
 ## Overview
 _No overview yet._

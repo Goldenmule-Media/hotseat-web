@@ -1,6 +1,6 @@
 # Testing plan — Mirror (emitter) status in wiki-ui
 
-**Status:** draft
+**Status:** ready
 
 ## Planned
 _None._

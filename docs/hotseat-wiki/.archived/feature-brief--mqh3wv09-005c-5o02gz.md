@@ -1,6 +1,6 @@
 # Feature: Mirror (emitter) status in wiki-ui
 
-**Status:** building
+**Status:** shipped
 
 ## Summary
 Make the local Markdown **emitter** (the `wiki-mirror` process) report its health, and surface that status in wiki-ui. Today `wiki-mirror` is a headless tail-loop with no HTTP surface and `WorkspaceMirror` exposes nothing. We add (1) a small loopback HTTP health server in `wiki-mirror` (`GET /_mirror/health`, `GET /_mirror/status`) on a fixed configurable port (default **4440**) with permissive CORS, backed by a new per-workspace `status()` accessor; and (2) a `MirrorIndicator` in wiki-ui that **always probes a fixed localhost URL** (default `http://127.0.0.1:4440`, independent of the stream base URL — the mirror runs on the user's machine even when the wiki-server is remote), polling every ~5s and showing, for the current workspace, whether the mirror is up and keeping pace. Graceful when no mirror is running; hidden under https where the browser blocks the mixed-content fetch.
@@ -38,3 +38,4 @@ _None._
 
 ## Commits
 - `a2093b3` feat(mirror,ui): emitter health endpoint + Mirror status in wiki-ui
+- `7745e21` fix(wiki-ui): move Mirror status to the sidebar foot by the account
