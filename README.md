@@ -73,11 +73,14 @@ running** (with a model loaded). Any other MCP client can connect to the same UR
 The bundled Claude Code skill drives a feature through the `feature` bundle's FSM end-to-end:
 
 ```
-/build-feature <workspaceId> "<one-line intent>"
-/build-feature <workspaceId> feature-brief:<id>      # drive an existing brief
+/build-feature "<one-line intent>"
+/build-feature feature-brief:<id>      # drive an existing brief
 ```
 
-(No workspace yet? One MCP call — `createWorkspace → { name: "My project" }` — returns the `workspaceId`.)
+The workspace is auto-resolved from [`hotseat.config.json`](./hotseat.config.json) at the repo root
+(`{ "workspaceId": "ws:..." }`) — a repo maps 1:1 to a workspace, so you don't pass the id (prefix a
+`ws:` token to override). (No workspace yet? One MCP call — `createWorkspace → { name: "My project" }` —
+returns the `workspaceId` to drop into `hotseat.config.json`.)
 
 It seeds (or picks up) a feature-brief, grounds the implementation plan in the real repo, writes the
 code, and **verifies** with real typecheck/tests plus a `/code-review` pass before flipping any FSM gate —
