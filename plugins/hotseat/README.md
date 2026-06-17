@@ -1,9 +1,12 @@
 # hotseat — Claude Code plugin
 
-Ships the **`build-feature`** skill (FSM-gated feature builds driven by the structured wiki)
-plus the **`wiki` MCP server config** it depends on, so installing this plugin gives any repo
-both in one step. The skill is namespaced as `hotseat:build-feature`; invoke it as
-`/build-feature` (or `/hotseat:build-feature` if another skill shadows the short name).
+Ships the **`plan-feature`** and **`build-feature`** skills (FSM-gated feature planning and
+builds driven by the structured wiki) plus the **`wiki` MCP server config** they depend on, so
+installing this plugin gives any repo all of it in one step. `/plan-feature` produces a grounded,
+reviewed, build-ready plan and stops; `/build-feature` takes a brief the rest of the way to a
+human sign-off gate. The skills are namespaced `hotseat:plan-feature` / `hotseat:build-feature`;
+invoke them as `/plan-feature` / `/build-feature` (or the `hotseat:`-prefixed form if another
+skill shadows the short name).
 
 ## Install
 
@@ -39,12 +42,16 @@ The skill talks to a running `wiki-server`; the plugin only carries the client w
 
 ## Contents
 
-- `skills/build-feature/` — the skill (spine + `workflows/` fan-out templates). See its
+- `skills/plan-feature/` — the planning skill (spine + `workflows/` fan-out templates): grounds,
+  authors, and reviews a plan, then stops build-ready. See its
+  [README](skills/plan-feature/README.md).
+- `skills/build-feature/` — the build skill (spine + `workflows/` fan-out templates). See its
   [README](skills/build-feature/README.md) for design and usage.
 - `.mcp.json` — the `wiki` MCP server entry (HTTP, `WIKI_MCP_URL`-overridable).
 
 ## Source of truth
 
-The canonical copy of the skill lives here. `hotseat-web`'s own `.claude/skills/build-feature/`
-is the same skill loaded as a project skill for work inside this repo — keep the two in sync
-when editing (or delete the project copy and install the plugin here too).
+The canonical copies of the skills live here. `hotseat-web`'s own `.claude/skills/plan-feature/`
+and `.claude/skills/build-feature/` are the same skills loaded as project skills for work inside
+this repo — keep each pair in sync when editing (or delete the project copies and install the
+plugin here too).

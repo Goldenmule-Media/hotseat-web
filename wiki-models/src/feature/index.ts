@@ -29,6 +29,15 @@ export const featurePageTypes = [
  */
 export const skills: readonly IBundleSkillDecl[] = [
   {
+    name: "plan-feature",
+    description:
+      "Ground, author, and review a build-ready feature plan in the hotseat structured wiki, then stop (no code).",
+    plugin: "hotseat",
+    marketplace: "hotseat",
+    marketplaceSource: "Goldenmule-Media/hotseat-web",
+    command: "/plan-feature",
+  },
+  {
     name: "build-feature",
     description: "Agentic, FSM-gated feature builds driven by the hotseat structured wiki.",
     plugin: "hotseat",

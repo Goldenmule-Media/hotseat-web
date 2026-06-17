@@ -9,7 +9,7 @@
     {
       "name": "hotseat",
       "source": "./plugins/hotseat",
-      "description": "Agentic, FSM-gated feature builds driven by the hotseat structured wiki (/build-feature + wiki MCP wiring)."
+      "description": "Agentic, FSM-gated feature planning and builds driven by the hotseat structured wiki (/plan-feature + /build-feature + wiki MCP wiring)."
     }
   ]
 }
