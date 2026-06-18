@@ -21,6 +21,9 @@ const planHasDataModel: Precondition = (page) =>
 
 export const ImplementationPlan = definePageType({
   type: "implementation-plan",
+  description:
+    "The step-by-step build plan for a feature. Auto-created as a child of a `feature-brief` — you do not " +
+    "create one directly; author into the one the brief materializes.",
   version: 1,
   initialStatus: "draft",
   // markReady carries no `agency`: a child is finalized by the brief's `ship` cascade

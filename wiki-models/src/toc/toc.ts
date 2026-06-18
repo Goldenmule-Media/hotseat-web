@@ -111,6 +111,10 @@ const contents: DerivedList = (page, ctx: IRenderCtx) => {
 export const Toc = definePageType({
   type: "toc",
   label: "Table of contents",
+  description:
+    "An index page that groups and links its child pages into a navigable overview (e.g. an Architecture " +
+    "Overview or Decision Records index). Use it as a container/landing node that organizes other pages; it " +
+    "holds no subject matter of its own.",
   version: 1,
   // A TOC has no lifecycle of its own — it's always curatable; structural archivePage
   // handles removal. Content edits are gated to the single `active` status via `mutableIn`.

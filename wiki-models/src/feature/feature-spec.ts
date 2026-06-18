@@ -92,6 +92,9 @@ const everyDecisionReferenced: Precondition = (page, related) => {
 export const FeatureSpec = definePageType({
   type: "feature-spec",
   label: "Spec",
+  description:
+    "The detailed product/UX specification for a feature. Auto-created as a child of a `feature-brief` — you " +
+    "do not create one directly; author into the one the brief materializes.",
   version: 1,
   initialStatus: "drafting",
   // seal carries no `agency` — driven by the brief's `ship` cascade, not the agent (its

@@ -129,6 +129,13 @@ describe("IWiki.describeType / pageTypes — instance-free authoring surface", (
     expect(wiki.describeType("testing-plan").requiredChildren).toBeUndefined();
   });
 
+  it("surfaces the type's `description` (what-it's-for) when declared", () => {
+    // feature-brief declares one; it disambiguates from architecture (build vs. document).
+    expect(wiki.describeType("feature-brief").description).toMatch(/wish existed/i);
+    // An auto-created child says so, steering authors away from creating it directly.
+    expect(wiki.describeType("implementation-plan").description).toMatch(/auto-created/i);
+  });
+
   it("surfaces the target field-KIND on field-targeting commands (blocks vs prose)", () => {
     const desc = wiki.describeType("feature-spec");
     // design.body is a `blocks` field (its prose runs reject inline Markdown) ...

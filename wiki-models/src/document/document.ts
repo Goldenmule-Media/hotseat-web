@@ -158,6 +158,10 @@ const addedBlockId = zodSchema(z.object({ blockId: z.string() }));
 export const Document = definePageType({
   type: "document",
   label: "Document",
+  description:
+    "A general-purpose prose page for content that doesn't fit a more specific type — notes, guides, " +
+    "references, narratives. Reach for a typed page first (`architecture`, `feature-brief`, `decision-record`, " +
+    "`bug-report`) when one fits; use `document` as the catch-all when none does.",
   version: 1,
   initialStatus: "active",
   statusTransitions: [],

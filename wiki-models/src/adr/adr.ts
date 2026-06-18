@@ -198,6 +198,10 @@ function paragraph(text: string, newId: () => string): IBlock {
 export const DecisionRecord = definePageType({
   type: "decision-record",
   label: "ADR",
+  description:
+    "Records ONE architectural decision — the context, the options weighed, the choice made, and its " +
+    "consequences — as a durable, dated rationale. Use it to capture WHY the system is shaped the way it is, " +
+    "not to describe the shape itself (that's `architecture`) or to plan new work (that's a `feature`).",
   version: 1,
   initialStatus: "proposed",
   statusTransitions: [

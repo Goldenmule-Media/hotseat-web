@@ -10,6 +10,9 @@ const empty = z.object({});
 
 export const TestingPlan = definePageType({
   type: "testing-plan",
+  description:
+    "The verification cases for a feature. Auto-created as a child of a `feature-brief` — you do not create " +
+    "one directly; author into the one the brief materializes.",
   version: 1,
   initialStatus: "draft",
   // markReady carries no `agency` — driven by the brief's `ship` cascade, not the agent

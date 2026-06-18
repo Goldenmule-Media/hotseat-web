@@ -84,6 +84,11 @@ const empty = z.object({});
 
 export const FeatureBrief = definePageType({
   type: "feature-brief",
+  description:
+    "The root of a FEATURE: a system or capability you WISH EXISTED and intend to build. Start one to drive " +
+    "new work from intent through a brief, plan, checklist, and testing plan to a human sign-off gate — even " +
+    "when it extends or refactors existing code. Use this (not `architecture`) whenever the thing is not yet " +
+    "built. Once shipped and stable, document what now exists with `architecture` nodes.",
   version: 1,
   initialStatus: "draft",
   statusTransitions: [

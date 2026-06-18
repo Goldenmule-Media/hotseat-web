@@ -114,6 +114,11 @@ const editable = ["current", "stale"];
 export const Architecture = definePageType({
   type: "architecture",
   label: "Architecture node",
+  description:
+    "Documents a part of the system that ALREADY EXISTS in the codebase — a module, component, or " +
+    "subsystem you can point at in the source. Use it to describe and keep current what IS built (purpose, " +
+    "data model, code references, dependencies) and to flip current⇄stale as the code drifts. Do NOT use it " +
+    "to propose, design, or plan something not yet built — a system you wish existed is a `feature`.",
   version: 2,
   // No draft: a node is documented after the code exists, so it is born `current`; an agent
   // flips it `stale` when it detects drift and back to `current` once re-verified.

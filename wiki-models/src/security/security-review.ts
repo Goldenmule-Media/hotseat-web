@@ -43,6 +43,10 @@ function paragraphs(markdown: string, ctx: ICommandContext): IBlock[] {
 export const SecurityReview = definePageType({
   type: "security-review",
   label: "Security review",
+  description:
+    "Captures a security assessment of existing code or a change — scope, findings (with severity), and their " +
+    "disposition — from review through sign-off. Use it for an adversarial/risk pass over what exists, not to " +
+    "describe the system (`architecture`) or to plan a build (`feature`).",
   version: 1,
   initialStatus: "open",
   statusTransitions: [

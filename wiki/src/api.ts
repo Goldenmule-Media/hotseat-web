@@ -723,6 +723,8 @@ export interface TypeDescriptor {
   readonly type: string;
   /** The type's human label, when declared. */
   readonly label?: string;
+  /** What this type is for / when to use it, when declared (see {@link IPageTypeDef.description}). */
+  readonly description?: string;
   /** The status FSM (same shape as {@link IWiki.fsmOf}). */
   readonly fsm: FsmDescriptor;
   /** Every command the type can run — declared commands first, then generated. */
@@ -1072,6 +1074,14 @@ export interface IPageTypeDef<Status extends string = string> {
    * NOT rename existing pages (their titles live in the event log).
    */
   readonly label?: string;
+  /**
+   * One- or two-sentence statement of what this page type is FOR and when to reach for it —
+   * the disambiguation an author needs when several types could plausibly fit. Surfaced
+   * verbatim by type discovery (`describePageType` with no `type`) and per-type describe.
+   * Opaque to the engine (carried like {@link label}); models own the wording. Cross-reference
+   * sibling types by name when the distinction is the point (e.g. architecture vs. feature).
+   */
+  readonly description?: string;
   readonly version: number;
   readonly initialStatus: Status;
   /** Lifecycle FSM ONLY. */

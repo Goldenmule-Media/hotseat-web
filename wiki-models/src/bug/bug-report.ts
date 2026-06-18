@@ -75,6 +75,10 @@ const reportRows: DerivedList = (page) => {
 export const BugReport = definePageType({
   type: "bug-report",
   label: "Bug report",
+  description:
+    "Tracks ONE defect in EXISTING behavior — what's wrong, how to reproduce it, and its resolution — from " +
+    "report to fix. Use it when something built is broken; use a `feature` when the work is building something " +
+    "new rather than repairing something that already exists.",
   version: 1,
   initialStatus: "draft",
   statusTransitions: [

@@ -366,6 +366,7 @@ class Wiki implements IWiki {
     return {
       type,
       ...(def.label !== undefined ? { label: def.label } : {}),
+      ...(def.description !== undefined ? { description: def.description } : {}),
       fsm: this.fsmOf(type),
       commands,
       ...(def.requiredChildren !== undefined && def.requiredChildren.length > 0

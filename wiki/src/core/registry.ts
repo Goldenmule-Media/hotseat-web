@@ -73,6 +73,9 @@ export class Registry {
     if (def.label !== undefined && (typeof def.label !== "string" || def.label.length === 0)) {
       issues.push({ path: ["label"], message: "label, when present, must be a non-empty string" });
     }
+    if (def.description !== undefined && (typeof def.description !== "string" || def.description.length === 0)) {
+      issues.push({ path: ["description"], message: "description, when present, must be a non-empty string" });
+    }
     const statuses = new Set<string>([def.initialStatus]);
     for (const tr of def.statusTransitions) {
       statuses.add(tr.fromState);

@@ -807,7 +807,11 @@ const describePageTypeTool: WikiTool = {
         // `states` is an unordered set (initial first), NOT a path — summarize as a
         // count so we never imply a linear progression the FSM doesn't have. The full
         // edge list is one drill-down away: describePageType({ type }).
-        return `- ${t} (initial: ${fsm.initial}; ${fsm.states.length} statuses, ${fsm.transitions.length} transitions)`;
+        const meta = `(initial: ${fsm.initial}; ${fsm.states.length} statuses, ${fsm.transitions.length} transitions)`;
+        // The type's own "what it's for" line, when declared — the disambiguation an author
+        // needs to pick the right type (e.g. architecture = what exists vs. feature = what to build).
+        const why = wiki.describeType(t).description;
+        return why !== undefined ? `- ${t} — ${why} ${meta}` : `- ${t} ${meta}`;
       });
       return {
         text: types.length === 0 ? "No page types loaded." : `Loaded page types:\n${lines.join("\n")}`,
@@ -849,7 +853,8 @@ const describePageTypeTool: WikiTool = {
       desc.requiredChildren !== undefined && desc.requiredChildren.length > 0
         ? `\nAuto-creates pinned children on create: ${desc.requiredChildren.join(", ")} — author INTO those, do not create your own.`
         : "";
-    const head = `${desc.type}${desc.label !== undefined ? ` — ${desc.label}` : ""}\nStatus FSM (initial: ${desc.fsm.initial}): ${fsmLine}${reqChildren}\nCommands:`;
+    const whatFor = desc.description !== undefined ? `\n${desc.description}` : "";
+    const head = `${desc.type}${desc.label !== undefined ? ` — ${desc.label}` : ""}${whatFor}\nStatus FSM (initial: ${desc.fsm.initial}): ${fsmLine}${reqChildren}\nCommands:`;
     return { text: `${head}\n${cmdLines.join("\n")}${blocksNote}`, data: desc };
   },
 };
