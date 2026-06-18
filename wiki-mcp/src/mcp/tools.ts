@@ -903,6 +903,51 @@ const listModelSkillsTool: WikiTool = {
   },
 };
 
+const installSkillsTool: WikiTool = {
+  name: "installSkills",
+  description:
+    "Bootstrap THIS project with the Claude skills shipped by the wiki server and ALL its loaded model " +
+    "bundles. Returns the deduped install steps (plugin marketplaces + plugins) in both `claude` CLI form " +
+    "(run via your shell) and `/plugin` slash-command form (for the user to paste), plus the slash commands " +
+    "each skill adds. Call this when a project connects to the wiki and the feature-build skills aren't " +
+    "installed yet. Installing a plugin runs marketplace code and changes the user's environment — confirm first.",
+  inputSchema: obj({}, []),
+  write: false,
+  async handle(_args, ctx) {
+    const models = ctx.models;
+    if (models === undefined) return { text: "Model registry not available on this server.", data: null };
+    const skills = models.list().flatMap((b) => b.skills);
+    if (skills.length === 0) {
+      return {
+        text:
+          "No skills are declared by any loaded model bundle — nothing to install. Load a bundle on the " +
+          "server (e.g. wiki-models/feature) and try again.",
+        data: { marketplaces: [], plugins: [], cli: [], slash: [], skills: [] },
+      };
+    }
+    // Dedupe across bundles (every skill may share one marketplace/plugin), first-seen order preserved.
+    const marketplaces = [...new Set(skills.map((s) => s.marketplaceSource))];
+    const plugins = [...new Set(skills.map((s) => `${s.plugin}@${s.marketplace}`))];
+    const cli = [
+      ...marketplaces.map((m) => `claude plugin marketplace add ${m}`),
+      ...plugins.map((p) => `claude plugin install ${p}`),
+    ];
+    const slash = [
+      ...marketplaces.map((m) => `/plugin marketplace add ${m}`),
+      ...plugins.map((p) => `/plugin install ${p}`),
+    ];
+    const provides = [...new Set(skills.map((s) => `- ${s.command ?? s.name} — ${s.description}`))];
+    const text =
+      "These plugins ship the wiki's skills (server + all loaded models).\n\n" +
+      `Run via shell (claude CLI):\n${cli.join("\n")}\n\n` +
+      `Or paste as slash commands:\n${slash.join("\n")}\n\n` +
+      `After install you get:\n${provides.join("\n")}\n\n` +
+      "Restart the session (or /reload-plugins) so the skills register. Installing plugins runs marketplace " +
+      "code — confirm with the user before running.";
+    return { text, data: { marketplaces, plugins, cli, slash, skills } };
+  },
+};
+
 const getPageTool: WikiTool = {
   name: "getPage",
   description: "Fetch one page's projected state (type, title, status, sections) from the read model.",
@@ -1470,6 +1515,7 @@ export function wikiTools(): readonly WikiTool[] {
     describePageTypeTool,
     listWorkspacesTool,
     listModelSkillsTool,
+    installSkillsTool,
     getPageTool,
     treeTool,
     renderPageTool,

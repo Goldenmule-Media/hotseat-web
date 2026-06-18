@@ -175,7 +175,10 @@ export class WikiMcpServer {
         "pageId?) rolls a subtree up into do (agent edges — drive these yourself now), blocked (agent edges " +
         "whose unmet reason names the content to author first), humanGates (sign-off/decision edges), and " +
         "attention (items awaiting a human). Keep driving do/blocked to completion; STOP and defer to the " +
-        "human ONLY for humanGates and attention items (use the `attention` tool to find them).",
+        "human ONLY for humanGates and attention items (use the `attention` tool to find them). " +
+        "BOOTSTRAP: the skills that drive this wiki (e.g. /plan-feature, /build-feature) ship as Claude " +
+        "plugins, not with this MCP — if they aren't installed in this project, call installSkills for the " +
+        "exact steps (server + every loaded model) and offer to install them.",
     });
     this.registerHandlers(server);
     return server;
