@@ -518,6 +518,28 @@ code {
 }
 /* checking / off / absent stay muted (the default dot/text color). */
 
+/* ── build provenance badge (sidebar foot) ───────────────────────────────── */
+.build-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  text-decoration: none;
+}
+.build-badge:hover {
+  color: var(--text);
+}
+.build-badge .build-commit {
+  font-family: var(--mono, ui-monospace, monospace);
+}
+.build-badge .build-branch {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 12ch;
+}
+
 /* ── page body ───────────────────────────────────────────────────────────── */
 .page {
   animation: fade 0.15s ease;

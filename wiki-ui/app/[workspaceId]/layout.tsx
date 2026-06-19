@@ -7,6 +7,7 @@ import { useParams } from "next/navigation";
 import type { ReactNode } from "react";
 import type { WorkspaceId } from "wiki";
 import { AccountMenu } from "../../components/AccountMenu";
+import { BuildBadge } from "../../components/BuildBadge";
 import { LiveIndicator } from "../../components/LiveIndicator";
 import { MirrorIndicator } from "../../components/MirrorIndicator";
 import { SidebarResizer } from "../../components/SidebarResizer";
@@ -44,6 +45,7 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }): 
         <div className="sidebar-foot">
           <MirrorIndicator workspaceId={workspaceId} />
           <AccountMenu />
+          <BuildBadge />
         </div>
       </aside>
       <SidebarResizer />

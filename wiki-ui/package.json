@@ -6,9 +6,10 @@
   "type": "module",
   "scripts": {
     "copy-pglite-assets": "node ./scripts/copy-pglite-assets.mjs",
+    "write-build-info": "node ./scripts/write-build-info.mjs",
     "predev": "npm run copy-pglite-assets",
     "dev": "next dev",
-    "prebuild": "npm run copy-pglite-assets",
+    "prebuild": "npm run copy-pglite-assets && npm run write-build-info",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",

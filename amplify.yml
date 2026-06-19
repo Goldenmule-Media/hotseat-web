@@ -8,7 +8,10 @@
 # build from inside wiki-ui/. Amplify still checks out the WHOLE repo, so wiki-ui's
 # `file:../wiki` / `file:../wiki-models` source dependencies resolve on disk (the engine
 # and schema are consumed as TypeScript source via `transpilePackages` — nothing to
-# prebuild). The `prebuild` npm hook copies PGlite's wasm/data assets into public/ for us.
+# prebuild). The `prebuild` npm hook copies PGlite's wasm/data assets into public/ AND
+# writes .env.production.local with the git branch/commit (scripts/write-build-info.mjs,
+# reading Amplify's AWS_BRANCH / AWS_COMMIT_ID) so the deployed UI shows which commit it
+# is serving — no amplify.yml command needed; the hook inherits those env vars here.
 version: 1
 applications:
   - appRoot: wiki-ui

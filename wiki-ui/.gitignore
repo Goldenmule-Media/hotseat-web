@@ -4,6 +4,8 @@
 next-env.d.ts
 *.tsbuildinfo
 .env.local
+# Generated at build time by scripts/write-build-info.mjs (git branch + commit).
+.env.production.local
 # PGlite wasm/data assets copied from node_modules by scripts/copy-pglite-assets.mjs
 # (the SharedWorker fetches them from /pglite/* — regenerated on predev/prebuild).
 /public/pglite

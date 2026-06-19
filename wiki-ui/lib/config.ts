@@ -20,13 +20,25 @@ export interface WikiUiConfig {
   readonly mirrorHealthUrl: string;
   /** Page types the UI can render — resolved from configured model bundles at build time. */
   readonly pageTypes: readonly IPageType[];
+  /**
+   * Git provenance of THIS build, captured at build time by scripts/write-build-info.mjs
+   * and inlined as NEXT_PUBLIC_*. Lets you confirm which commit a deploy is actually
+   * serving. `null` when the build ran without git info (e.g. a bare `next build`).
+   */
+  readonly build: { readonly branch: string; readonly commit: string; readonly time: string } | null;
 }
 
 export function getConfig(): WikiUiConfig {
+  const commit = process.env.NEXT_PUBLIC_BUILD_COMMIT;
+  const branch = process.env.NEXT_PUBLIC_BUILD_BRANCH;
   return {
     streamBaseUrl: process.env.NEXT_PUBLIC_WIKI_STREAM_BASE_URL ?? "http://127.0.0.1:4437",
     namespace: process.env.NEXT_PUBLIC_WIKI_NAMESPACE ?? "default",
     mirrorHealthUrl: process.env.NEXT_PUBLIC_WIKI_MIRROR_HEALTH_URL ?? "http://127.0.0.1:4440",
     pageTypes,
+    build:
+      commit !== undefined && branch !== undefined
+        ? { branch, commit, time: process.env.NEXT_PUBLIC_BUILD_TIME ?? "" }
+        : null,
   };
 }

@@ -3,6 +3,7 @@
 /** Landing: list all workspaces (Q4) and link into them. */
 import Link from "next/link";
 import { AccountMenu } from "../components/AccountMenu";
+import { BuildBadge } from "../components/BuildBadge";
 import { CreateWorkspaceForm } from "../components/CreateWorkspaceForm";
 import { SplashDocs } from "../components/SplashDocs";
 import { useWorkspaces } from "../lib/live";
@@ -20,6 +21,7 @@ export default function Home(): React.JSX.Element {
           <AccountMenu />
         </div>
         <p className="muted">Read-only, live-updating browser for a wiki-server.</p>
+        <BuildBadge />
       </header>
 
       <SplashDocs />
