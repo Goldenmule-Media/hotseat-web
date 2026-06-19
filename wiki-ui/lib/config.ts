@@ -20,11 +20,7 @@ export interface WikiUiConfig {
   readonly mirrorHealthUrl: string;
   /** Page types the UI can render — resolved from configured model bundles at build time. */
   readonly pageTypes: readonly IPageType[];
-  /**
-   * Git provenance of THIS build, captured at build time by scripts/write-build-info.mjs
-   * and inlined as NEXT_PUBLIC_*. Lets you confirm which commit a deploy is actually
-   * serving. `null` when the build ran without git info (e.g. a bare `next build`).
-   */
+  /** Git branch/commit this build came from; null when built without git info. */
   readonly build: { readonly branch: string; readonly commit: string; readonly time: string } | null;
 }
 

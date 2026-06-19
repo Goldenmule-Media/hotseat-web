@@ -8,8 +8,6 @@
  * current workspace: it reports whether a mirror is running, and whether THIS workspace is being
  * mirrored and keeping pace.
  *
- * Under https the browser blocks fetching http://127.0.0.1 (mixed content), so there the
- * indicator renders nothing rather than a misleading "off".
  */
 import { useEffect, useState } from "react";
 import { getConfig } from "../lib/config";
@@ -45,8 +43,12 @@ function useMirrorStatus(): Probe {
 
   useEffect(() => {
     const healthUrl = getConfig().mirrorHealthUrl;
-    // Mixed content: an https page cannot reach a plain-http localhost endpoint.
-    if (typeof window !== "undefined" && window.location.protocol === "https:" && healthUrl.startsWith("http:")) {
+    // Only Chromium treats http-loopback as a secure context; on Firefox/Safari the fetch fails
+    // opaquely (indistinguishable from "mirror down"), so hide rather than show a misleading "off".
+    const isHttpsToHttp =
+      typeof window !== "undefined" && window.location.protocol === "https:" && healthUrl.startsWith("http:");
+    const isChromium = typeof navigator !== "undefined" && "userAgentData" in navigator;
+    if (isHttpsToHttp && !isChromium) {
       setProbe({ phase: "disabled" });
       return;
     }

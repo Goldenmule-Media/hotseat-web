@@ -1,11 +1,5 @@
-// Capture the git branch + commit at build time and write them to `.env.production.local`
-// so Next inlines them into the client bundle as NEXT_PUBLIC_* (the engine runs in the
-// browser, so build info has to ride along as public env). This is what powers the build
-// badge in the sidebar foot, letting you confirm WHICH commit a deploy is actually serving.
-//
-// Source of truth, in order: AWS Amplify's injected build vars (AWS_COMMIT_ID / AWS_BRANCH),
-// then a local `git` call as a fallback for `npm run build` off-CI. Amplify checks out a
-// detached HEAD, so AWS_BRANCH is the only reliable branch name there.
+// Write the git branch + commit to .env.production.local so Next inlines them as NEXT_PUBLIC_*
+// for the build badge. Amplify's AWS_* vars first (detached HEAD there), local git as fallback.
 import { execSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
