@@ -23,11 +23,12 @@
  * and every re-critique resumes it, so the critic accumulates the spec. That session is a
  * single mutable resource, so only ONE critique runs at a time.
  *
- * The left panel also RESTRUCTURES the spec — add/join/split/reorder, each a curated model
- * command. Structural controls never read the restatement selection: they belong to a card
- * (↑ ↓ ✂, collapse) or to the gap between two cards (insert here, join this pair). Ids
- * survive by design — a join keeps the top section's id and a split keeps the top half's —
- * so a draft or critique in progress there outlives the edit.
+ * The left panel also RESTRUCTURES the spec — add/join/split/reorder/delete, each a curated
+ * model command. Structural controls never read the restatement selection: they belong to a
+ * card (↑ ↓ ✂ ✕, collapse) or to the gap between two cards (insert here, join this pair).
+ * Ids survive by design — a join keeps the top section's id and a split keeps the top
+ * half's — so a draft or critique in progress there outlives the edit. Delete is the one
+ * that destroys an id, so it confirms in place and names what goes with it.
  */
 import Link from "next/link";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -264,7 +265,7 @@ function SplitPicker({
   );
 }
 
-/** Reorder / split / collapse for one card — structure, never selection. */
+/** Reorder / split / delete / collapse for one card — structure, never selection. */
 interface CardStructure {
   readonly canUp: boolean;
   readonly canDown: boolean;
@@ -275,6 +276,13 @@ interface CardStructure {
   readonly splitting: boolean;
   readonly onToggleSplit: () => void;
   readonly onSplit: (split: SectionSplit) => void;
+  /** Delete is the one structural edit that destroys an id, so it asks first. */
+  readonly canDelete: boolean;
+  readonly deleting: boolean;
+  readonly onToggleDelete: () => void;
+  readonly onDelete: () => void;
+  /** What the delete would take with it ("your restatement draft"), or null. */
+  readonly loses: string | null;
   readonly busy: boolean;
 }
 
@@ -408,6 +416,20 @@ function SectionCard({
               >
                 ✂
               </button>
+              <button
+                type="button"
+                className={`restate-tool ${structure.deleting ? "is-danger" : ""}`}
+                aria-pressed={structure.deleting}
+                disabled={!structure.canDelete || structure.busy}
+                aria-label={`Delete "${titleOf(el)}"`}
+                title={structure.canDelete ? "Delete this section" : "The last section can't be deleted"}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  structure.onToggleDelete();
+                }}
+              >
+                ✕
+              </button>
             </span>
           )}
           {critique !== null && (
@@ -431,6 +453,34 @@ function SectionCard({
           </span>
         </span>
       </div>
+      {structure?.deleting === true && (
+        <div className="restate-confirm" role="alert">
+          <span>
+            Delete &ldquo;{titleOf(el)}&rdquo;?{structure.loses !== null && ` This also discards ${structure.loses}.`}
+          </span>
+          <button
+            type="button"
+            className="tf-btn tf-btn-danger"
+            disabled={structure.busy}
+            onClick={(e) => {
+              e.stopPropagation();
+              structure.onDelete();
+            }}
+          >
+            Delete
+          </button>
+          <button
+            type="button"
+            className="restate-cancel"
+            onClick={(e) => {
+              e.stopPropagation();
+              structure.onToggleDelete();
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
       {error !== null ? (
         <p className="error">{error}</p>
       ) : markdown === null && loading ? (
@@ -569,6 +619,7 @@ export function RestateStudio({
   /** Structure: collapsed card ids, the card in split mode, and the pending insert. */
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [splitting, setSplitting] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const [composing, setComposing] = useState<{ beforeId?: string } | null>(null);
   const [composeTitle, setComposeTitle] = useState("");
   const [composeBody, setComposeBody] = useState("");
@@ -626,8 +677,9 @@ export function RestateStudio({
     const keptCritiques = pruneBySection(critiques, restatable);
     if (Object.keys(keptCritiques).length !== Object.keys(critiques).length) setCritiques(keptCritiques);
     if (critiqueRun !== null && !restatable.some((e) => e.id === critiqueRun.id)) endCritique();
-    // Split mode is pure UI state — drop it when its card goes (a join, someone else's edit).
+    // Card modes are pure UI state — drop them when the card goes (a join, someone else's edit).
     if (splitting !== null && !elements.some((e) => e.id === splitting)) setSplitting(null);
+    if (deleting !== null && !elements.some((e) => e.id === deleting)) setDeleting(null);
   }, [
     restored,
     elementsLoading,
@@ -639,6 +691,7 @@ export function RestateStudio({
     critiqueRun,
     endCritique,
     splitting,
+    deleting,
   ]);
 
   // Looking at a critique marks it read (whether it landed before or during the visit).
@@ -906,6 +959,15 @@ export function RestateStudio({
     [runMutation],
   );
 
+  const onRemove = useCallback(
+    async (id: string) => {
+      const ok = await runMutation("removeSection", { sectionId: id });
+      // The id is gone; the prune effect drops its draft and critique with it.
+      if (ok) setDeleting(null);
+    },
+    [runMutation],
+  );
+
   const onCompose = useCallback((beforeId: string | undefined) => {
     setSplitting(null);
     setSelectedId(null);
@@ -930,6 +992,18 @@ export function RestateStudio({
       setComposeBody("");
     }
   }, [composing, composeTitle, composeBody, runMutation]);
+
+  /** What a delete of this section would take with it — named in the confirm. */
+  const losesWith = useCallback(
+    (id: string): string | null => {
+      const hasDraft = (drafts[id] ?? "").trim() !== "";
+      const hasCritique = critiques[id] !== undefined || critiqueRun?.id === id;
+      if (hasDraft && hasCritique) return "your restatement draft and its critique";
+      if (hasDraft) return "your restatement draft";
+      return hasCritique ? "its critique" : null;
+    },
+    [drafts, critiques, critiqueRun],
+  );
 
   const toggleCollapse = useCallback((id: string) => {
     setCollapsed((prev) => {
@@ -1454,8 +1528,19 @@ export function RestateStudio({
                         collapsed: collapsed.has(el.id),
                         onToggleCollapse: () => toggleCollapse(el.id),
                         splitting: splitting === el.id,
-                        onToggleSplit: () => setSplitting((prev) => (prev === el.id ? null : el.id)),
+                        onToggleSplit: () => {
+                          setDeleting(null); // one card mode at a time
+                          setSplitting((prev) => (prev === el.id ? null : el.id));
+                        },
                         onSplit: (split) => void onSplit(el.id, split),
+                        canDelete: total > 1,
+                        deleting: deleting === el.id,
+                        onToggleDelete: () => {
+                          setSplitting(null);
+                          setDeleting((prev) => (prev === el.id ? null : el.id));
+                        },
+                        onDelete: () => void onRemove(el.id),
+                        loses: losesWith(el.id),
                         busy: mutating,
                       }
                 }

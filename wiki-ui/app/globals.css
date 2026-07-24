@@ -1685,18 +1685,27 @@ code {
   font-size: 13px;
   font-weight: 600;
 }
+/* A real 26px hit target — the glyph is small, the button is not. */
 .restate-collapse {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-left: -6px;
   background: none;
-  border: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1;
-  padding: 2px 3px;
   cursor: pointer;
 }
 .restate-collapse:hover {
   color: var(--text);
+  border-color: var(--border);
+  background: var(--accent-dim);
 }
 /* Structure tools stay quiet until you reach for the card — present, not shouting. */
 .restate-card-tools {
@@ -1732,6 +1741,35 @@ code {
 .restate-tool.is-armed {
   color: var(--accent);
   border-color: var(--accent);
+}
+.restate-tool.is-danger {
+  color: var(--red);
+  border-color: var(--red);
+}
+/* Delete is the one structural edit that destroys an id — it asks, in place. */
+.restate-confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 6px 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--red);
+  border-radius: 6px;
+  font-size: 13px;
+}
+.restate-confirm span {
+  flex: 1;
+  min-width: 0;
+}
+.tf-btn-danger {
+  background: var(--red);
+  border-color: var(--red);
+  color: #150708;
+  font-weight: 600;
+}
+.tf-btn-danger:hover:not(:disabled) {
+  filter: brightness(1.08);
 }
 /* The live gap between cards: insert a section here, or join the pair it separates. */
 /* Tall enough to hold its own buttons: the hover area and the hit area are the same box,

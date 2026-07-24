@@ -374,6 +374,25 @@ export const SpecRestatement = definePageType({
         return [{ op: "moveElement", section: "sections", field: "items", id: a.sectionId, toIndex: a.toIndex }];
       },
     },
+    removeSection: {
+      description:
+        "Delete a section outright — the human's call that this content does not belong in the spec. Unlike " +
+        "join and split, which preserve one id, the id is GONE: a restatement in progress on it goes with it. " +
+        "Refuses to empty the spec (the last remaining section cannot be deleted).",
+      args: zodSchema(z.object({ sectionId: z.string() })),
+      target: { section: "sections", field: "items" },
+      preconditions: [activeRestatement("removeSection")],
+      produces: (page, args) => {
+        const a = args as { sectionId: string };
+        sectionAt(page, a.sectionId); // throws loudly when the id is not on this page
+        if (listOf(page, "sections", "items").length === 1) {
+          throw new InvariantViolationError(
+            "cannot delete the last section — a spec-restatement page needs at least one",
+          );
+        }
+        return [{ op: "removeElement", section: "sections", field: "items", id: a.sectionId }];
+      },
+    },
     joinSections: {
       description:
         "Merge `absorbId` INTO the section immediately before it: `sectionId` keeps its id, title and " +

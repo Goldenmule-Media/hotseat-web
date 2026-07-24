@@ -281,6 +281,18 @@ describe("spec-restatement model", () => {
     );
   });
 
+  it("removeSection deletes a section, but never the last one", async () => {
+    const { page, ids } = await restatableSpec("Delete", [["Alpha", "A."], ["Beta", "B."]]);
+    const rm = await ws.mutate(page, "removeSection", { sectionId: ids[1]! });
+    const items = els(await stateOf(page, rm.token), "sections", "items");
+    expect(items.map(titleOf)).toEqual(["Alpha"]);
+    expect(await ws.toMarkdown(page)).not.toContain("B.");
+    await expect(ws.mutate(page, "removeSection", { sectionId: ids[0]! })).rejects.toThrow(InvariantViolationError);
+    await expect(ws.mutate(page, "removeSection", { sectionId: "spec-section:nope" })).rejects.toThrow(
+      InvariantViolationError,
+    );
+  });
+
   it("joinSections merges the next section into this one, keeping THIS id", async () => {
     const { page, ids } = await restatableSpec("Join", [["Alpha", "A body."], ["Beta", "B body."], ["Gamma", "G."]]);
     const j = await ws.mutate(page, "joinSections", { sectionId: ids[0]!, absorbId: ids[1]! });
@@ -361,6 +373,7 @@ describe("spec-restatement model", () => {
     await expect(ws.mutate(p, "addSection", { title: "Mine", markdown: "Text." })).rejects.toThrow(
       PreconditionUnmetError,
     );
+    await expect(ws.mutate(p, "removeSection", { sectionId: b })).rejects.toThrow(PreconditionUnmetError);
     await expect(ws.mutate(p, "joinSections", { sectionId: a, absorbId: b })).rejects.toThrow(PreconditionUnmetError);
     await expect(
       ws.mutate(p, "splitSection", { sectionId: a, topMarkdown: "x", bottomMarkdown: "y", newTitle: "Y" }),
