@@ -7,11 +7,11 @@
  *
  * Declarative: sections + the `finding` element + lifecycle FSM + commands + render config.
  * The two `blocks`-field commands (`setFindingDetail`, `citeFinding`) use `produces` because
- * the declarative `set:` sugar covers scalar/prose/ref but not blocks; `parseInline` reifies
- * a Markdown string into canonical inline runs so authors write normal Markdown.
+ * the declarative `set:` sugar covers scalar/prose/ref but not blocks; `parseBlocks` reifies
+ * a Markdown document into the canonical block tree so authors write normal Markdown.
  */
-import type { BlockId, IBlock, ICommandContext, IItem, PageState, SectionId, SectionOp } from "wiki/authoring";
-import { arg, definePageType, parseInline, t, z, zodSchema } from "wiki/authoring";
+import type { BlockId, IBlock, IItem, PageState, SectionId, SectionOp } from "wiki/authoring";
+import { arg, definePageType, parseBlocks, t, z, zodSchema } from "wiki/authoring";
 
 const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
 const severityArg = z.enum(SEVERITIES);
@@ -29,15 +29,6 @@ function findingsList(page: PageState): { sectionId: SectionId; elements: readon
 /** Build a `setElementField` op writing `detail` to a blocks value. */
 function writeDetail(findingId: string, blocks: IBlock[]): SectionOp {
   return { op: "setElementField", section: "findings", field: "items", id: findingId, elementField: "detail", value: { kind: "blocks", blocks } };
-}
-
-/** Markdown string → one paragraph block per blank-line-separated chunk (inline Markdown reified). */
-function paragraphs(markdown: string, ctx: ICommandContext): IBlock[] {
-  return markdown
-    .split(/\n\s*\n/)
-    .map((p) => p.trim())
-    .filter((p) => p.length > 0)
-    .map((p): IBlock => ({ kind: "paragraph", id: ctx.newId() as BlockId, inlines: parseInline(p) }));
 }
 
 export const SecurityReview = definePageType({
@@ -119,13 +110,13 @@ export const SecurityReview = definePageType({
       target: { section: "findings", field: "items" },
       set: { title: arg("title"), severity: arg("severity"), category: arg("category") },
     },
-    // Replace a finding's narrative with `markdown` (inline Markdown is reified to runs).
+    // Replace a finding's narrative with `markdown` (full block Markdown is reified).
     setFindingDetail: {
       args: zodSchema(z.object({ findingId: z.string(), markdown: z.string() })),
       target: { section: "findings", field: "items" },
       produces: (_page, args, ctx) => {
         const a = args as { findingId: string; markdown: string };
-        return [writeDetail(a.findingId, paragraphs(a.markdown, ctx))];
+        return [writeDetail(a.findingId, parseBlocks(a.markdown, ctx.newId))];
       },
     },
     // Append "Related: <ref>" to a finding's narrative, where the ref renders the target

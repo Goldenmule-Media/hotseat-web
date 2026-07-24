@@ -21,6 +21,7 @@ export default defineConfig({
     document: "src/document/index.ts",
     bug: "src/bug/index.ts",
     security: "src/security/index.ts",
+    "spec-restatement": "src/spec-restatement/index.ts",
   },
   format: ["esm"],
   platform: "node",
