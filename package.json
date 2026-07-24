@@ -14,8 +14,10 @@
     "test": "npm run test -w wiki -w wiki-models -w wiki-server -w wiki-mcp -w wiki-mirror",
     "build": "npm run build -w wiki -w wiki-models -w wiki-server -w wiki-mcp -w wiki-mirror",
     "start": "concurrently -k -n server,mirror -c blue,green \"npm:start:server\" \"npm:start:mirror\"",
+    "dev": "concurrently -k -n server,mirror,ui -c blue,green,magenta \"npm:start:server\" \"npm:start:mirror\" \"npm:start:ui\"",
     "start:server": "npm run start:all -w wiki-server",
-    "start:mirror": "tsx wiki-mirror/src/bin.ts"
+    "start:mirror": "tsx wiki-mirror/src/bin.ts",
+    "start:ui": "npm run dev --prefix wiki-ui"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

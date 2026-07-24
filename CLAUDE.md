@@ -37,6 +37,7 @@ Run from the repo root unless noted. There is **no linter/formatter** — `typec
 | Watch | `npm run test:watch -w <pkg>` (wiki · wiki-mcp · wiki-server; not wiki-models) |
 | Run the server | `npm run start -w wiki-server` (tsx; see "Running locally") |
 | Run server + mirror | `npm start` (root — boots the server **and** the local `wiki-mirror` via `concurrently`) |
+| Run server + mirror + UI | `npm run dev` (root — `npm start` plus `next dev` inside `wiki-ui/`; UI needs its own `npm install` first) |
 
 `<pkg>` ∈ `wiki` · `wiki-models` · `wiki-mcp` · `wiki-server` · `wiki-mirror`. **`wiki-ui` is NOT covered by the root
 scripts** — it has its own `node_modules`/lockfile and `next build`/`vitest`; run `npm install` / `npm run
