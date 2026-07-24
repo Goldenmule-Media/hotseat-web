@@ -1714,6 +1714,21 @@ code {
   letter-spacing: 0.05em;
   color: var(--muted);
 }
+/* Block title + the Edit/Preview tabs, on one line. */
+.restate-block-head-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.restate-block-head-row .view-toggle {
+  gap: 12px;
+}
+.restate-block-head-row .view-tab {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
 .restate-sources {
   margin: 0;
   font-size: 13px;
@@ -1745,6 +1760,39 @@ code {
 .restate-draft:focus {
   outline: none;
   border-color: var(--accent);
+}
+/* The draft rendered as it will land on the page; scrolls inside its own box. */
+.restate-preview {
+  min-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: var(--bg);
+}
+.restate-preview > :first-child {
+  margin-top: 0;
+}
+.restate-preview > :last-child {
+  margin-bottom: 0;
+}
+.restate-preview-empty {
+  font-size: 13px;
+}
+/* Side-by-side: the editor block takes the workbench's leftover height, so the textarea
+   (or the preview) is as tall as the viewport allows and scrolls internally. */
+@media (min-width: 981px) {
+  .restate-block-editor {
+    flex: 1 1 auto;
+  }
+  .restate-block-editor .restate-draft,
+  .restate-block-editor .restate-preview {
+    flex: 1 1 auto;
+    min-height: 160px;
+  }
+  .restate-block-editor .restate-draft {
+    resize: none; /* the height IS the flex leftover — a drag handle would fight it */
+  }
 }
 .restate-hint {
   margin: 0;

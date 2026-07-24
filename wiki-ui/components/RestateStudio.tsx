@@ -5,7 +5,8 @@
  * `spec-restatement` pages. Two columns: the LEFT renders the spec per section
  * (renderElement → HTML) styled by provenance (ai-draft vs human-verified), with
  * multi-select of AI-drafted sections; the RIGHT is the workbench driven by page status —
- * restate selected sections in your own markdown, optionally stream an AI critique
+ * restate selected sections in your own markdown (Edit/Preview tabs over one draft, the
+ * editor filling the viewport's leftover height), optionally stream an AI critique
  * (/api/restate/critique), Accept to atomically REPLACE them via `restateSections`
  * (born human-verified), then run the holistic review (/api/restate/review →
  * `recordHolisticReview`) and resolve notes. Page transitions (approve, reopen…) stay in
@@ -271,6 +272,7 @@ export function RestateStudio({
   const studioRef = useRef<HTMLDivElement | null>(null);
   const specColRef = useRef<HTMLElement | null>(null);
   const draftRef = useRef<HTMLTextAreaElement | null>(null);
+  const [preview, setPreview] = useState(false);
   const [seedBusy, setSeedBusy] = useState(false);
   /** Two-step confirm: first click arms "Discard your edits?", second re-seeds. */
   const [resetArm, setResetArm] = useState(false);
@@ -440,6 +442,12 @@ export function RestateStudio({
     const body = specMarkdown === null ? null : sliceH2Section(specMarkdown, "Review", "last");
     return body === null || body === "" || body === "_Not reviewed._" ? null : body;
   }, [specMarkdown]);
+
+  // Rendered only while the preview tab is open — this runs on every keystroke otherwise.
+  const draftHtml = useMemo(
+    () => (preview && draft.trim() !== "" ? renderMarkdown(draft, workspaceId) : ""),
+    [preview, draft, workspaceId],
+  );
 
   const conflict = mutationError !== null && mutationError.includes("removeIds not found");
 
@@ -758,8 +766,32 @@ export function RestateStudio({
         )}
         {reviewRun.error !== null && <div className="notice error">Holistic review failed: {reviewRun.error}</div>}
 
-        <section className="restate-block">
-          <h2 className="restate-block-head">Restate</h2>
+        <section className={`restate-block${selectedElements.length > 0 ? " restate-block-editor" : ""}`}>
+          <div className="restate-block-head-row">
+            <h2 className="restate-block-head">Restate</h2>
+            {selectedElements.length > 0 && (
+              <div className="view-toggle" role="tablist" aria-label="Editor or preview">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={!preview}
+                  className={`view-tab ${preview ? "" : "active"}`}
+                  onClick={() => setPreview(false)}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={preview}
+                  className={`view-tab ${preview ? "active" : ""}`}
+                  onClick={() => setPreview(true)}
+                >
+                  Preview
+                </button>
+              </div>
+            )}
+          </div>
           {selectedElements.length === 0 ? (
             <p className="muted">Select one or more AI-draft sections on the left to restate them in your own words.</p>
           ) : (
@@ -797,14 +829,27 @@ export function RestateStudio({
                   Couldn&apos;t load the sections into the editor: {seedError}
                 </p>
               )}
-              <textarea
-                ref={draftRef}
-                className="restate-draft"
-                value={draft}
-                spellCheck
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder={seedBusy ? "Loading the selected sections…" : "Restate the selected sections in your own words…"}
-              />
+              {preview ? (
+                draftHtml === "" ? (
+                  <p className="muted restate-preview restate-preview-empty">
+                    Nothing to preview yet — write your restatement in the editor.
+                  </p>
+                ) : (
+                  /* eslint-disable-next-line react/no-danger */
+                  <div className="markdown restate-preview" dangerouslySetInnerHTML={{ __html: draftHtml }} />
+                )
+              ) : (
+                <textarea
+                  ref={draftRef}
+                  className="restate-draft"
+                  value={draft}
+                  spellCheck
+                  onChange={(e) => setDraft(e.target.value)}
+                  placeholder={
+                    seedBusy ? "Loading the selected sections…" : "Restate the selected sections in your own words…"
+                  }
+                />
+              )}
               <p className="muted restate-hint">
                 Start lines with <code>## Heading</code> to write multiple sections (each heading becomes a section
                 title). With no headings, the whole draft becomes one section titled &ldquo;{fallbackTitle}&rdquo;.
