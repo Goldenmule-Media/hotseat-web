@@ -25,7 +25,8 @@
  *
  * The left panel also RESTRUCTURES the spec — add/join/split/reorder/delete, each a curated
  * model command. Structural controls never read the restatement selection: they belong to a
- * card (↑ ↓ ✂ ✕, collapse) or to the gap between two cards (insert here, join this pair).
+ * card (its title row collapses it; ↑ ↓ ✂ ✕ sit opposite) or to the gap between two cards
+ * (insert here, join this pair).
  * Ids survive by design — a join keeps the top section's id and a split keeps the top
  * half's — so a draft or critique in progress there outlives the edit. Delete is the one
  * that destroys an id, so it confirms in place and names what goes with it.
@@ -313,8 +314,9 @@ function SectionCard({
   structure: CardStructure | null;
 }): React.JSX.Element {
   const { markdown, loading, error } = useElementMarkdown(workspaceId, pageId, SECTIONS_KEY, el.id);
+  // The head row carries the title, so the body drops the rendered heading.
   const body = markdown === null ? null : splitRenderedElement(markdown).body;
-  const html = useMemo(() => (markdown === null ? "" : renderMarkdown(markdown, workspaceId)), [markdown, workspaceId]);
+  const html = useMemo(() => (body === null ? "" : renderMarkdown(body, workspaceId)), [body, workspaceId]);
   const chunks = useMemo(
     () => (body === null || structure?.splitting !== true ? [] : splitTopLevelBlocks(body)),
     [body, structure?.splitting],
@@ -342,7 +344,27 @@ function SectionCard({
       }}
     >
       <div className="restate-section-head">
-        <span className="restate-card-lead">
+        {/* The title owns the head row, and the whole run of it up to the controls is the
+            collapse toggle — the body below carries content only. */}
+        {structure === null ? (
+          <span className="restate-card-lead">
+            <span className="restate-card-title">{titleOf(el)}</span>
+          </span>
+        ) : (
+          <button
+            type="button"
+            className="restate-card-lead"
+            aria-expanded={!collapsed}
+            title={collapsed ? "Expand this section" : "Collapse this section"}
+            onClick={(e) => {
+              e.stopPropagation();
+              structure.onToggleCollapse();
+            }}
+          >
+            <span className="restate-card-title">{titleOf(el)}</span>
+          </button>
+        )}
+        <span className="restate-card-side">
           {selectable && (
             <button
               type="button"
@@ -357,23 +379,8 @@ function SectionCard({
               {selected ? "Restating" : "Restate"}
             </button>
           )}
-          {/* Expanded, the rendered body already carries the heading. */}
-          {collapsed && <span className="restate-card-title">{titleOf(el)}</span>}
-        </span>
-        <span className="restate-card-side">
           {structure !== null && (
             <span className="restate-card-tools">
-              <button
-                type="button"
-                className="restate-tool restate-tool-text"
-                aria-expanded={!collapsed}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  structure.onToggleCollapse();
-                }}
-              >
-                {collapsed ? "Expand" : "Collapse"}
-              </button>
               <button
                 type="button"
                 className="restate-tool"

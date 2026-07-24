@@ -1672,23 +1672,35 @@ code {
   gap: 12px;
   margin-bottom: 4px;
 }
+/* The title plus every pixel of head row up to the controls: one big collapse toggle. */
 .restate-card-lead {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: 0;
+  margin: -4px -6px;
+  padding: 4px 6px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+button.restate-card-lead {
+  cursor: pointer;
+}
+button.restate-card-lead:hover {
+  border-color: var(--border);
+  background: var(--accent-dim);
 }
 .restate-card-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
-}
-/* Collapse is a WORD, not a chevron: a glyph that size is unhittable and unreadable. */
-.restate-tool-text {
-  border-color: var(--border);
-  padding: 2px 8px;
 }
 /* Structure tools stay quiet until you reach for the card — present, not shouting. */
 .restate-card-tools {
@@ -2227,6 +2239,7 @@ code {
 }
 /* Per-card quick actions (Accept as-is / Unaccept) beside the provenance badge. */
 .restate-card-side {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 8px;
