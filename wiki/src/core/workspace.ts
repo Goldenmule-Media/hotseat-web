@@ -460,6 +460,10 @@ function applyContent(
     def,
     pageNext: (status, ev) => registry.pageGuard(node.type).next(status, ev),
     elementNext: (elType, status, ev) => registry.elementGuard(node.type, elType)?.next(status, ev),
+    // The FOLD is a replay of committed history and must be total: an op whose target a
+    // later schema no longer materializes (subtractive evolution) skips instead of
+    // bricking the workspace. The decide-time dry-run stays strict (no `tolerant`).
+    tolerant: true,
   });
   writeBack(node, view);
   return state;
