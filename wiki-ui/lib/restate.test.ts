@@ -4,15 +4,13 @@ import {
   assembleDraft,
   clearRestateDraft,
   createSseDecoder,
+  isRestatable,
   loadRestateDraft,
-  pruneDrafts,
-  pruneSelection,
+  pruneBySection,
   restateStorageKey,
-  resumableSession,
   saveRestateDraft,
   severityFromHeading,
   sliceH2Section,
-  sourceKeyOf,
   splitDraft,
   splitRenderedElement,
   type KeyValueStore,
@@ -262,13 +260,12 @@ describe("restate draft persistence", () => {
     expect(restateStorageKey("ws-1", "spec-restatement:abc")).toBe("wiki.restate.ws-1.spec-restatement:abc");
   });
 
-  it("round-trips {selectedIds, drafts, sessionId, sourceKey} through save/load", () => {
+  it("round-trips {selectedId, drafts, sessions} through save/load", () => {
     const store = memoryStore();
     const state = {
-      selectedIds: ["a", "b"],
-      drafts: { [sourceKeyOf(["a", "b"])]: "## X\n\nbody", [sourceKeyOf(["a"])]: "solo" },
-      sessionId: "sess-9",
-      sourceKey: sourceKeyOf(["b", "a"]),
+      selectedId: "a",
+      drafts: { a: "## X\n\nbody", b: "other section's draft" },
+      sessions: { a: "sess-9" },
     };
     saveRestateDraft(store, "ws", "p", state);
     expect(loadRestateDraft(store, "ws", "p")).toEqual(state);
@@ -278,30 +275,48 @@ describe("restate draft persistence", () => {
 
   it("keeps a deliberately-emptied draft as an entry (absent ≠ empty — absent re-seeds)", () => {
     const store = memoryStore();
-    saveRestateDraft(store, "ws", "p", { selectedIds: ["a"], drafts: { a: "" } });
-    expect(loadRestateDraft(store, "ws", "p")).toEqual({ selectedIds: ["a"], drafts: { a: "" } });
+    saveRestateDraft(store, "ws", "p", { selectedId: "a", drafts: { a: "" }, sessions: {} });
+    expect(loadRestateDraft(store, "ws", "p")).toEqual({ selectedId: "a", drafts: { a: "" }, sessions: {} });
   });
 
-  it("omits the session pair when it was never set, and clears cleanly", () => {
+  it("round-trips with no selection, and clears cleanly", () => {
     const store = memoryStore();
-    saveRestateDraft(store, "ws", "p", { selectedIds: ["a"], drafts: { a: "d" } });
-    expect(loadRestateDraft(store, "ws", "p")).toEqual({ selectedIds: ["a"], drafts: { a: "d" } });
+    saveRestateDraft(store, "ws", "p", { drafts: { a: "d" }, sessions: {} });
+    expect(loadRestateDraft(store, "ws", "p")).toEqual({ drafts: { a: "d" }, sessions: {} });
     clearRestateDraft(store, "ws", "p");
     expect(loadRestateDraft(store, "ws", "p")).toBeNull();
   });
 
-  it("files a legacy flat `draft` under its stored selection's key", () => {
+  it("migrates a multi-select payload: first selection, single-section entries only", () => {
     const store = memoryStore();
-    store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ selectedIds: ["b", "a"], draft: "old text" }));
+    store.setItem(
+      restateStorageKey("ws", "p"),
+      JSON.stringify({
+        selectedIds: ["b", "a"],
+        drafts: { "a\nb": "the pair's draft", b: "b's draft" },
+        sessionId: "sess-1",
+        sourceKey: "a\nb", // opened over two sections — unusable for one
+      }),
+    );
+    expect(loadRestateDraft(store, "ws", "p")).toEqual({ selectedId: "b", drafts: { b: "b's draft" }, sessions: {} });
+  });
+
+  it("carries a single-section session and an older flat `draft` over", () => {
+    const store = memoryStore();
+    store.setItem(
+      restateStorageKey("ws", "p"),
+      JSON.stringify({ selectedIds: ["a"], draft: "old text", sessionId: "sess-1", sourceKey: "a" }),
+    );
     expect(loadRestateDraft(store, "ws", "p")).toEqual({
-      selectedIds: ["b", "a"],
-      drafts: { [sourceKeyOf(["a", "b"])]: "old text" },
+      selectedId: "a",
+      drafts: { a: "old text" },
+      sessions: { a: "sess-1" },
     });
   });
 
-  it("drops a sessionId stored WITHOUT its sourceKey (it can't be validated against the selection)", () => {
+  it("drops a sessionId stored WITHOUT its section (it can't be tied to one)", () => {
     const store = memoryStore();
-    const stored = { selectedIds: ["a"], drafts: { a: "d" } };
+    const stored = { selectedId: "a", drafts: { a: "d" }, sessions: {} };
     store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ ...stored, sessionId: "legacy" }));
     expect(loadRestateDraft(store, "ws", "p")).toEqual(stored);
     // …and a sourceKey without a sessionId is equally meaningless.
@@ -313,68 +328,39 @@ describe("restate draft persistence", () => {
     const store = memoryStore();
     store.setItem(restateStorageKey("ws", "p"), "not-json");
     expect(loadRestateDraft(store, "ws", "p")).toBeNull();
-    store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ selectedIds: [], drafts: {} }));
+    store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ drafts: {}, sessions: {} }));
     expect(loadRestateDraft(store, "ws", "p")).toBeNull();
-    store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ selectedIds: [], drafts: {}, sessionId: "legacy" }));
+    store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ drafts: {}, sessions: {}, sessionId: "legacy" }));
     expect(loadRestateDraft(store, "ws", "p")).toBeNull();
   });
 });
 
-describe("sourceKeyOf / resumableSession", () => {
-  it("keys are selection-order-insensitive and distinguish different sets", () => {
-    expect(sourceKeyOf(["b", "a"])).toBe(sourceKeyOf(["a", "b"]));
-    expect(sourceKeyOf(["a", "b"])).not.toBe(sourceKeyOf(["a", "c"]));
-    expect(sourceKeyOf(["a"])).not.toBe(sourceKeyOf(["a", "b"]));
-  });
-
-  it("resumes only a session opened for exactly the current sources", () => {
-    const session = { id: "sess-1", sourceKey: sourceKeyOf(["a", "b"]) };
-    expect(resumableSession(session, sourceKeyOf(["b", "a"]))).toBe("sess-1");
-  });
-
-  it("drops the session when the selection changed (or there is none)", () => {
-    const session = { id: "sess-1", sourceKey: sourceKeyOf(["a", "b"]) };
-    expect(resumableSession(session, sourceKeyOf(["a", "c"]))).toBeUndefined();
-    expect(resumableSession(session, sourceKeyOf(["a"]))).toBeUndefined();
-    expect(resumableSession(undefined, sourceKeyOf(["a"]))).toBeUndefined();
-  });
-});
-
-describe("pruneSelection", () => {
+describe("isRestatable", () => {
   const elements = [
     { id: "a", status: "ai-draft" },
     { id: "b", status: "human-verified" },
-    { id: "c", status: "ai-draft" },
     { id: "d" },
   ];
 
-  it("keeps only ids that still exist AND are still ai-draft, preserving order", () => {
-    expect(pruneSelection(["c", "gone", "a", "b", "d"], elements)).toEqual(["c", "a"]);
-  });
-
-  it("returns [] against an empty section list", () => {
-    expect(pruneSelection(["a"], [])).toEqual([]);
+  it("holds only for a section that still exists AND is still ai-draft", () => {
+    expect(isRestatable("a", elements)).toBe(true);
+    expect(isRestatable("b", elements)).toBe(false); // verified underneath you
+    expect(isRestatable("d", elements)).toBe(false); // no status at all
+    expect(isRestatable("gone", elements)).toBe(false);
+    expect(isRestatable(null, elements)).toBe(false);
+    expect(isRestatable("a", [])).toBe(false);
   });
 });
 
-describe("pruneDrafts", () => {
-  const elements = [{ id: "a", status: "ai-draft" }, { id: "b", status: "human-verified" }];
+describe("pruneBySection", () => {
+  const elements = [{ id: "a" }, { id: "b" }];
 
-  it("keeps a stash while every section it was written for still exists", () => {
-    const drafts = {
-      [sourceKeyOf(["a"])]: "solo",
-      [sourceKeyOf(["a", "b"])]: "pair", // b is verified, not gone — the stash stands
-      [sourceKeyOf(["a", "gone"])]: "stale",
-      [sourceKeyOf(["b"])]: "", // an emptied box is still an entry
-    };
-    expect(pruneDrafts(drafts, elements)).toEqual({
-      [sourceKeyOf(["a"])]: "solo",
-      [sourceKeyOf(["a", "b"])]: "pair",
-      [sourceKeyOf(["b"])]: "",
-    });
+  it("keeps entries whose section still exists, empty values included", () => {
+    expect(pruneBySection({ a: "solo", b: "", gone: "stale" }, elements)).toEqual({ a: "solo", b: "" });
   });
 
-  it("drops everything against an empty section list", () => {
-    expect(pruneDrafts({ a: "x" }, [])).toEqual({});
+  it("works for any value type, and drops everything against an empty section list", () => {
+    expect(pruneBySection({ a: { verdict: 1 } }, elements)).toEqual({ a: { verdict: 1 } });
+    expect(pruneBySection({ a: "x" }, [])).toEqual({});
   });
 });

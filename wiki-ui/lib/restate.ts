@@ -216,34 +216,17 @@ export function asCritiqueEvent(raw: unknown): CritiqueEvent | null {
 
 // ── draft persistence (localStorage, keyed by workspace + page) ─────────────────
 
-/**
- * A critique session is only valid for the sources it was opened with (the server's
- * follow-up prompt asserts "source sections are unchanged"), so the session id always
- * travels with a key identifying those sources.
- */
-export function sourceKeyOf(ids: readonly string[]): string {
-  return [...ids].sort().join("\n");
-}
-
-/** The session id to `--resume` with, but ONLY when it was opened for exactly the current
- *  sources; any other selection starts a fresh session. */
-export function resumableSession(
-  session: { readonly id: string; readonly sourceKey: string } | undefined,
-  currentKey: string,
-): string | undefined {
-  return session !== undefined && session.sourceKey === currentKey ? session.id : undefined;
-}
-
 export interface RestateDraft {
-  readonly selectedIds: readonly string[];
-  /** Editor text per SELECTION, keyed by {@link sourceKeyOf}: every distinct set of
-   *  sections keeps its own draft, so re-selecting one restores what was typed there.
-   *  An empty string is a real entry (a deliberately cleared box) — not "unseeded". */
+  /** The section being restated, if any — the studio selects exactly one at a time. */
+  readonly selectedId?: string;
+  /** Editor text per SECTION id: each section keeps its own draft, so re-selecting one
+   *  restores what was typed there. An empty string is a real entry (a deliberately
+   *  cleared box) — not "unseeded". */
   readonly drafts: Readonly<Record<string, string>>;
-  /** Present only as a PAIR with {@link RestateDraft.sourceKey}. */
-  readonly sessionId?: string;
-  /** The {@link sourceKeyOf} of the sections `sessionId` was opened with. */
-  readonly sourceKey?: string;
+  /** Critique session id per SECTION id, so a follow-up round resumes with context. A
+   *  session is only valid for the section it was opened on (the server's follow-up
+   *  prompt asserts "the source section is unchanged"). */
+  readonly sessions: Readonly<Record<string, string>>;
 }
 
 /** The minimal Storage surface, injectable so the round-trip unit-tests in node. */
@@ -271,20 +254,22 @@ export function loadRestateDraft(store: KeyValueStore, workspaceId: string, page
     if (raw === null) return null;
     const p = JSON.parse(raw) as Record<string, unknown> | null;
     if (p === null || typeof p !== "object") return null;
-    const selectedIds = stringList(p.selectedIds);
-    const drafts = stringRecord(p.drafts);
-    // Payloads written before per-selection drafts held one flat `draft` — it belonged to
-    // the stored selection, so file it under that selection's key.
-    if (typeof p.draft === "string" && p.draft !== "" && selectedIds.length > 0 && Object.keys(drafts).length === 0) {
-      drafts[sourceKeyOf(selectedIds)] = p.draft;
+    // Multi-select payloads selected several sections and keyed drafts/sessions by a
+    // newline-joined id SET; only their single-section entries carry over.
+    const legacy = stringList(p.selectedIds);
+    const selectedId = typeof p.selectedId === "string" ? p.selectedId : legacy.length > 0 ? legacy[0] : undefined;
+    const drafts: Record<string, string> = {};
+    for (const [id, text] of Object.entries(stringRecord(p.drafts))) if (!id.includes("\n")) drafts[id] = text;
+    if (typeof p.draft === "string" && p.draft !== "" && legacy.length === 1 && drafts[legacy[0]] === undefined) {
+      drafts[legacy[0]] = p.draft; // older still: one flat draft for the stored selection
     }
-    const sessionId = typeof p.sessionId === "string" ? p.sessionId : undefined;
-    const sourceKey = typeof p.sourceKey === "string" ? p.sourceKey : undefined;
-    // A session without its source key (or vice versa) cannot be validated against the
-    // current selection — drop the pair rather than resume against unknown sources.
-    const session = sessionId !== undefined && sourceKey !== undefined ? { sessionId, sourceKey } : null;
-    if (selectedIds.length === 0 && Object.keys(drafts).length === 0 && session === null) return null;
-    return { selectedIds, drafts, ...(session ?? {}) };
+    const sessions = stringRecord(p.sessions);
+    if (typeof p.sessionId === "string" && typeof p.sourceKey === "string" && !p.sourceKey.includes("\n")) {
+      sessions[p.sourceKey] = p.sessionId;
+    }
+    const empty = Object.keys(drafts).length === 0 && Object.keys(sessions).length === 0;
+    if (selectedId === undefined && empty) return null;
+    return { ...(selectedId !== undefined ? { selectedId } : {}), drafts, sessions };
   } catch {
     return null;
   }
@@ -298,30 +283,27 @@ export function clearRestateDraft(store: KeyValueStore, workspaceId: string, pag
   }
 }
 
-/** Restored/held selection filtered against the CURRENT section list: an id survives only
- *  while it still exists AND is still ai-draft (verified/vanished sections drop out). */
-export function pruneSelection(
-  ids: readonly string[],
+/** Whether an id can still be restated: it exists AND is still ai-draft. A restored or
+ *  held selection that fails this is dropped (the section was verified or replaced). */
+export function isRestatable(
+  id: string | null,
   elements: readonly { readonly id: string; readonly status?: string }[],
-): string[] {
-  const selectable = new Set(elements.filter((e) => e.status === "ai-draft").map((e) => e.id));
-  return ids.filter((id) => selectable.has(id));
+): boolean {
+  return id !== null && elements.some((e) => e.id === id && e.status === "ai-draft");
 }
 
 /**
- * Per-selection drafts filtered against the CURRENT section list: a stash survives while
- * EVERY section it was written for still exists. Verified sections keep theirs (unaccept
- * puts the draft back within reach); only replaced/deleted sections drop one.
+ * Per-section state (drafts, critique sessions) filtered against the CURRENT section
+ * list: an entry survives while its section still exists. Verified sections keep theirs
+ * (unaccept puts the draft back within reach); only replaced/deleted sections drop one.
  */
-export function pruneDrafts(
-  drafts: Readonly<Record<string, string>>,
+export function pruneBySection<T>(
+  bySection: Readonly<Record<string, T>>,
   elements: readonly { readonly id: string }[],
-): Record<string, string> {
+): Record<string, T> {
   const live = new Set(elements.map((e) => e.id));
-  const out: Record<string, string> = {};
-  for (const [key, text] of Object.entries(drafts)) {
-    if (key.split("\n").every((id) => live.has(id))) out[key] = text;
-  }
+  const out: Record<string, T> = {};
+  for (const [id, value] of Object.entries(bySection)) if (live.has(id)) out[id] = value;
   return out;
 }
 

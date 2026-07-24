@@ -1650,13 +1650,25 @@ code {
   gap: 12px;
   margin-bottom: 4px;
 }
+/* One section is restated at a time — a toggle, not a checkbox. */
 .restate-select {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  flex: none;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 8px;
   font-size: 12px;
   color: var(--muted);
   cursor: pointer;
+}
+.restate-select:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.restate-select[aria-pressed="true"] {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--accent-dim);
 }
 .restate-section-body > :first-child {
   margin-top: 0;
@@ -1696,6 +1708,24 @@ code {
 }
 .restate-badge-resolved {
   color: var(--muted);
+}
+/* A section's critique, badged on its card: a run outlives the selection, so you can tell
+   it landed without opening the section. */
+.restate-badge-streaming {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.restate-badge-ready {
+  color: var(--green);
+  border-color: var(--green);
+  background: var(--accent-dim);
+}
+.restate-badge-seen {
+  color: var(--muted);
+}
+.restate-badge-failed {
+  color: var(--red);
+  border-color: var(--red);
 }
 /* Workbench blocks share the notice panel look. */
 .restate-block {
