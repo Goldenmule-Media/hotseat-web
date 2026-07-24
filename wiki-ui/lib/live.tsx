@@ -24,10 +24,10 @@ import type { IMutationDescriptor, IWorkspaceSummary, PageId, WorkspaceId } from
 import { notifyUnauthorized, serverBaseUrl } from "./auth";
 import { useAuth } from "./auth-context";
 import { getHost, UnsupportedBrowserError, type WikiHost } from "./host-client";
-import { classifyError, type LoadError, type WorkspaceSnapshot } from "./wiki-host-api";
+import { classifyError, type LoadError, type SectionElementSummary, type WorkspaceSnapshot } from "./wiki-host-api";
 
 // Re-exported so existing consumers (LiveIndicator, WorkspaceError) keep importing from here.
-export type { ConnectionState, LoadError, LoadErrorKind } from "./wiki-host-api";
+export type { ConnectionState, LoadError, LoadErrorKind, SectionElementSummary } from "./wiki-host-api";
 
 /** The tab's view of one workspace: its id plus the worker's authoritative snapshot. */
 export type LiveWorkspace = { readonly id: WorkspaceId } & WorkspaceSnapshot;
@@ -173,6 +173,82 @@ export function usePage(workspaceId: WorkspaceId, pageId: PageId): PageContent {
       cancelled = true;
     };
   }, [workspaceId, pageId, ws.lastEventAt]);
+
+  return content;
+}
+
+export interface SectionElements {
+  readonly elements: readonly SectionElementSummary[];
+  readonly loading: boolean;
+}
+
+const ELEMENTS_PENDING: SectionElements = { elements: [], loading: true };
+
+/**
+ * The elements of one section's list field (id / element status / title), read from the
+ * worker's folded page state — no markdown parsing. Re-read on mount and on every commit
+ * (`ws.lastEventAt`), mirroring {@link usePageMutations}. Empty on a read failure.
+ */
+export function useSectionElements(workspaceId: WorkspaceId, pageId: PageId, sectionKey: string): SectionElements {
+  const ws = useLiveWorkspace(workspaceId);
+  const [state, setState] = useState<SectionElements>(ELEMENTS_PENDING);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let cancelled = false;
+    getHost()
+      .then((h) => h.listSectionElements(workspaceId, pageId, sectionKey))
+      .then((elements) => {
+        if (!cancelled) setState({ elements, loading: false });
+      })
+      .catch(() => {
+        if (!cancelled) setState({ elements: [], loading: false });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, pageId, sectionKey, ws.lastEventAt]);
+
+  return state;
+}
+
+export interface ElementContent {
+  readonly markdown: string | null;
+  readonly loading: boolean;
+  readonly error: string | null;
+}
+
+const ELEMENT_PENDING: ElementContent = { markdown: null, loading: true, error: null };
+
+/**
+ * ONE list element rendered to Markdown exactly as the full render presents it — the
+ * per-element sibling of {@link usePage}, re-read on every commit.
+ */
+export function useElementMarkdown(
+  workspaceId: WorkspaceId,
+  pageId: PageId,
+  sectionKey: string,
+  elementId: string,
+): ElementContent {
+  const ws = useLiveWorkspace(workspaceId);
+  const [content, setContent] = useState<ElementContent>(ELEMENT_PENDING);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let cancelled = false;
+    setContent((c) => ({ ...c, loading: true }));
+    getHost()
+      .then((h) => h.renderElement(workspaceId, pageId, sectionKey, elementId))
+      .then((md) => {
+        if (!cancelled) setContent({ markdown: md, loading: false, error: null });
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setContent({ markdown: null, loading: false, error: classifyError(e).message });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, pageId, sectionKey, elementId, ws.lastEventAt]);
 
   return content;
 }

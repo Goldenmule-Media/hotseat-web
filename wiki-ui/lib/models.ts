@@ -11,6 +11,7 @@ import bugPageTypes from "wiki-models/bug";
 import documentPageTypes from "wiki-models/document";
 import featurePageTypes from "wiki-models/feature";
 import securityPageTypes from "wiki-models/security";
+import specRestatementPageTypes from "wiki-models/spec-restatement";
 import tocPageTypes from "wiki-models/toc";
 
 export const pageTypes: readonly IPageType[] = [
@@ -21,6 +22,7 @@ export const pageTypes: readonly IPageType[] = [
   ...documentPageTypes,
   ...bugPageTypes,
   ...securityPageTypes,
+  ...specRestatementPageTypes,
 ];
 
 /**

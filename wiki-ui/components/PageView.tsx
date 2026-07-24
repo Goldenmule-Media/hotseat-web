@@ -22,8 +22,10 @@ import { pageHref } from "../lib/routes";
 import { clearScrollTarget, scrollToTerms, useScrollTarget } from "../lib/search-scroll";
 import { findNode } from "../lib/tree";
 import { isTerminalStatus } from "../lib/fsm-graph";
+import { RESTATE_PAGE_TYPE } from "../lib/restate";
 import { preferredViewMode, rememberViewMode, type ViewMode } from "../lib/view-mode";
 import { FsmGraph } from "./FsmGraph";
+import { RestateStudio } from "./RestateStudio";
 import { SchemaInspector } from "./SchemaInspector";
 
 export function PageView({
@@ -39,18 +41,42 @@ export function PageView({
   const ws = useLiveWorkspace(workspaceId);
   const { markdown, loading, error, unknownType } = usePage(workspaceId, pageId);
   const { descriptors } = usePageMutations(workspaceId, pageId);
+  const structural = useStructuralMutator(workspaceId);
+
+  const node = findNode(ws.tree, pageId);
+  const pageType = node?.type;
+  const archived = node?.archived === true;
+  // Spec-restatement pages get the Restatement Studio as their DEFAULT view (no ?view
+  // param): the studio IS this type's reading surface; the raw markdown stays reachable
+  // behind an explicit ?view=content.
+  const hasStudio = pageType === RESTATE_PAGE_TYPE;
+
   // The active view is the URL's source of truth, so a refresh or shared link reopens the
   // same tab.
   const searchParams = useSearchParams();
-  const mode: ViewMode = searchParams.get("view") === "model" ? "model" : "content";
-  const structural = useStructuralMutator(workspaceId);
+  const rawView = searchParams.get("view");
+  const mode: ViewMode =
+    rawView === "model"
+      ? "model"
+      : rawView === "restate"
+        ? hasStudio
+          ? "restate"
+          : "content"
+        : rawView === "content"
+          ? "content"
+          : hasStudio
+            ? "restate"
+            : "content";
 
   const selectView = useCallback(
     (next: ViewMode) => {
       rememberViewMode(next);
-      router.replace(pageHref(workspaceId, pageId, next));
+      // A studio page's default is the studio, so Content needs an explicit stamp.
+      const href =
+        next === "content" && hasStudio ? `${pageHref(workspaceId, pageId)}?view=content` : pageHref(workspaceId, pageId, next);
+      router.replace(href);
     },
-    [router, workspaceId, pageId],
+    [router, workspaceId, pageId, hasStudio],
   );
 
   // Sticky across navigations: opening another page with no explicit ?view carries over the
@@ -94,9 +120,6 @@ export function PageView({
     return () => cancelAnimationFrame(raf);
   }, [scrollTarget, workspaceId, pageId, html, mode]);
 
-  const node = findNode(ws.tree, pageId);
-  const pageType = node?.type;
-  const archived = node?.archived === true;
   // The page renders its own curated child list in the body (e.g. a TOC's "Contents"), so
   // suppress the generic child-pages strip rather than shadow it with a raw duplicate. This
   // reads the model-declared `graphSections:false` signal — no type name is hardcoded.
@@ -181,6 +204,17 @@ export function PageView({
             )}
             {fsm !== null && (
               <div className="view-toggle" role="tablist" aria-label="Page view">
+                {hasStudio && (
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={mode === "restate"}
+                    className={`view-tab ${mode === "restate" ? "active" : ""}`}
+                    onClick={() => selectView("restate")}
+                  >
+                    Restate
+                  </button>
+                )}
                 <button
                   type="button"
                   role="tab"
@@ -243,6 +277,14 @@ export function PageView({
           />
           {def !== null && <SchemaInspector def={def} currentStatus={currentStatus} />}
         </div>
+      ) : mode === "restate" && hasStudio ? (
+        <RestateStudio
+          key={`${workspaceId}/${pageId}`}
+          workspaceId={workspaceId}
+          pageId={pageId}
+          status={currentStatus}
+          specMarkdown={markdown}
+        />
       ) : loading && markdown === null ? (
         <p className="muted">Loading page…</p>
       ) : (

@@ -21,7 +21,13 @@
 import * as Comlink from "comlink";
 import type { FsmDescriptor, IMutationDescriptor, IWorkspaceSummary, PageId, SearchHit, WorkspaceId } from "wiki";
 import { getToken, notifyUnauthorized } from "./auth";
-import { classifyError, type HostSearchOpts, type SnapshotCallback, type WikiHostApi } from "./wiki-host-api";
+import {
+  classifyError,
+  type HostSearchOpts,
+  type SectionElementSummary,
+  type SnapshotCallback,
+  type WikiHostApi,
+} from "./wiki-host-api";
 
 /** Thrown when SharedWorker (or its module-worker form) is unavailable. The app renders a
  *  clear unsupported-browser notice rather than degrading. */
@@ -51,6 +57,8 @@ export interface WikiHost {
   ensureWorkspace(ws: WorkspaceId): Promise<void>;
   toMarkdown(ws: WorkspaceId, page: PageId): Promise<string>;
   describeMutations(ws: WorkspaceId, page: PageId): Promise<readonly IMutationDescriptor[]>;
+  renderElement(ws: WorkspaceId, page: PageId, sectionKey: string, elementId: string): Promise<string>;
+  listSectionElements(ws: WorkspaceId, page: PageId, sectionKey: string): Promise<readonly SectionElementSummary[]>;
   mutate(ws: WorkspaceId, page: PageId, command: string, args: Record<string, unknown>): Promise<void>;
   archivePage(ws: WorkspaceId, page: PageId): Promise<void>;
   unarchivePage(ws: WorkspaceId, page: PageId): Promise<void>;
@@ -147,6 +155,8 @@ async function connect(): Promise<WikiHost> {
     ensureWorkspace: (ws) => guard(remote.ensureWorkspace(ws)),
     toMarkdown: (ws, page) => guard(remote.toMarkdown(ws, page)),
     describeMutations: (ws, page) => guard(remote.describeMutations(ws, page)),
+    renderElement: (ws, page, sectionKey, elementId) => guard(remote.renderElement(ws, page, sectionKey, elementId)),
+    listSectionElements: (ws, page, sectionKey) => guard(remote.listSectionElements(ws, page, sectionKey)),
     mutate: (ws, page, command, args) => guard(remote.mutate(ws, page, command, args)),
     archivePage: (ws, page) => guard(remote.archivePage(ws, page)),
     unarchivePage: (ws, page) => guard(remote.unarchivePage(ws, page)),

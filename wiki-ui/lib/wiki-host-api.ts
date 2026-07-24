@@ -119,6 +119,15 @@ export interface HandshakeResult {
   readonly fsm: Record<string, FsmDescriptor>;
 }
 
+/** One list element of a page section, summarized off the folded state in the worker —
+ *  id + element FSM status + the `title` prose field when present. Powers per-element
+ *  views (the restatement studio's section list) without markdown parsing. */
+export interface SectionElementSummary {
+  readonly id: string;
+  readonly status?: string;
+  readonly title?: string;
+}
+
 /**
  * What the worker `Comlink.expose`s, per connecting port. Every method is coarse and
  * returns plain data; rejections are {@link WikiErrorDTO} objects (see file header).
@@ -148,6 +157,11 @@ export interface WikiHostApi {
   ensureWorkspace(ws: WorkspaceId): Promise<void>;
   toMarkdown(ws: WorkspaceId, page: PageId): Promise<string>;
   describeMutations(ws: WorkspaceId, page: PageId): Promise<readonly IMutationDescriptor[]>;
+  /** Render ONE list element to Markdown exactly as the full render presents it. */
+  renderElement(ws: WorkspaceId, page: PageId, sectionKey: string, elementId: string): Promise<string>;
+  /** The elements of a section's list field (first list field under `sectionKey`), read
+   *  from the folded page state. Empty when the section (or a list field) is absent. */
+  listSectionElements(ws: WorkspaceId, page: PageId, sectionKey: string): Promise<readonly SectionElementSummary[]>;
 
   mutate(ws: WorkspaceId, page: PageId, command: string, args: Record<string, unknown>): Promise<void>;
   archivePage(ws: WorkspaceId, page: PageId): Promise<void>;

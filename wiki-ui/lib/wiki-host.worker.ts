@@ -29,6 +29,7 @@ import {
   toWikiErrorDTO,
   type HostSearchOpts,
   type LoadError,
+  type SectionElementSummary,
   type SnapshotCallback,
   type WikiHostApi,
   type WorkspaceSnapshot,
@@ -439,6 +440,40 @@ function makeApi(conn: PortConn): WikiHostApi {
         const h = await host.handle();
         const view = await h.page(page);
         return await view.describeMutations();
+      } catch (e) {
+        throw toWikiErrorDTO(e);
+      }
+    },
+    async renderElement(ws: WorkspaceId, page: PageId, sectionKey: string, elementId: string) {
+      const host = await ensureHost(ws);
+      try {
+        const h = await host.handle();
+        const view = await h.page(page);
+        return await view.renderElement(sectionKey, elementId);
+      } catch (e) {
+        throw toWikiErrorDTO(e);
+      }
+    },
+    async listSectionElements(ws: WorkspaceId, page: PageId, sectionKey: string) {
+      const host = await ensureHost(ws);
+      try {
+        const h = await host.handle();
+        const view = await h.page(page);
+        const state = await view.state();
+        const section = state.sections.find((s) => s.key === sectionKey);
+        if (section === undefined) return [];
+        for (const field of Object.values(section.fields)) {
+          if (field.kind !== "list") continue;
+          return field.elements.map((el): SectionElementSummary => {
+            const t = el.fields["title"];
+            return {
+              id: el.id,
+              ...(el.status !== undefined ? { status: el.status } : {}),
+              ...(t !== undefined && t.kind === "prose" && t.value.length > 0 ? { title: t.value } : {}),
+            };
+          });
+        }
+        return [];
       } catch (e) {
         throw toWikiErrorDTO(e);
       }

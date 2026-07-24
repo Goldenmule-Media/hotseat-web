@@ -7,7 +7,7 @@
  * preference (like a collapsed sidebar), not a per-page reset. PageView re-stamps the
  * remembered preference into a freshly-opened page's URL.
  */
-export type ViewMode = "content" | "model";
+export type ViewMode = "content" | "model" | "restate";
 
 let preferred: ViewMode = "content";
 
