@@ -1695,12 +1695,13 @@ button.restate-card-lead:hover {
   border-color: var(--border);
   background: var(--accent-dim);
 }
+/* Matches the `### Title` this row replaced — the body's h3 was ~17px/700. */
 .restate-card-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 17px;
+  font-weight: 700;
 }
 /* Structure tools stay quiet until you reach for the card — present, not shouting. */
 .restate-card-tools {
