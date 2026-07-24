@@ -343,20 +343,6 @@ function SectionCard({
     >
       <div className="restate-section-head">
         <span className="restate-card-lead">
-          {structure !== null && (
-            <button
-              type="button"
-              className="restate-collapse"
-              aria-expanded={!collapsed}
-              aria-label={collapsed ? `Expand "${titleOf(el)}"` : `Collapse "${titleOf(el)}"`}
-              onClick={(e) => {
-                e.stopPropagation();
-                structure.onToggleCollapse();
-              }}
-            >
-              {collapsed ? "▸" : "▾"}
-            </button>
-          )}
           {selectable && (
             <button
               type="button"
@@ -377,6 +363,17 @@ function SectionCard({
         <span className="restate-card-side">
           {structure !== null && (
             <span className="restate-card-tools">
+              <button
+                type="button"
+                className="restate-tool restate-tool-text"
+                aria-expanded={!collapsed}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  structure.onToggleCollapse();
+                }}
+              >
+                {collapsed ? "Expand" : "Collapse"}
+              </button>
               <button
                 type="button"
                 className="restate-tool"

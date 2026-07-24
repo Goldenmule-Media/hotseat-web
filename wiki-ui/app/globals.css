@@ -1685,27 +1685,10 @@ code {
   font-size: 13px;
   font-weight: 600;
 }
-/* A real 26px hit target — the glyph is small, the button is not. */
-.restate-collapse {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  margin-left: -6px;
-  background: none;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1;
-  cursor: pointer;
-}
-.restate-collapse:hover {
-  color: var(--text);
+/* Collapse is a WORD, not a chevron: a glyph that size is unhittable and unreadable. */
+.restate-tool-text {
   border-color: var(--border);
-  background: var(--accent-dim);
+  padding: 2px 8px;
 }
 /* Structure tools stay quiet until you reach for the card — present, not shouting. */
 .restate-card-tools {
@@ -1715,7 +1698,9 @@ code {
   transition: opacity 0.12s;
 }
 .restate-section:hover .restate-card-tools,
-.restate-card-tools:focus-within {
+.restate-card-tools:focus-within,
+/* A collapsed card is nothing BUT its head — its tools stay legible. */
+.restate-section.is-collapsed .restate-card-tools {
   opacity: 1;
 }
 .restate-tool {
