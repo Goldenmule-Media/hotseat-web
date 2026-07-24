@@ -6,9 +6,11 @@ import {
   loadRestateDraft,
   pruneSelection,
   restateStorageKey,
+  resumableSession,
   saveRestateDraft,
   severityFromHeading,
   sliceH2Section,
+  sourceKeyOf,
   splitDraft,
   splitRenderedElement,
   type KeyValueStore,
@@ -120,6 +122,25 @@ describe("sliceH2Section", () => {
     expect(sliceH2Section(page, "Missing")).toBeNull();
     expect(sliceH2Section("```\n## Overview\n```\ntext", "Overview")).toBeNull();
   });
+
+  // Section bodies preserve authored H2s and render BEFORE the real "## Review" heading.
+  const shadowed =
+    "# Spec: T\n\n## Overview\n\nSummary.\n\n## Sections\n\n### 1. A\n\nBody.\n\n## Review\n\nA literal heading INSIDE a section body.\n\n## Review\n\nThe real recorded summary.";
+
+  it('occurrence "last" skips a literal "## Review" authored inside a section body', () => {
+    expect(sliceH2Section(shadowed, "Review")).toBe("A literal heading INSIDE a section body.");
+    expect(sliceH2Section(shadowed, "Review", "last")).toBe("The real recorded summary.");
+  });
+
+  it('occurrence "first" is right for Overview — the real one renders before any section body', () => {
+    const dup = "## Overview\n\nThe real one.\n\n## Sections\n\n## Overview\n\nAuthored inside a section.";
+    expect(sliceH2Section(dup, "Overview", "first")).toBe("The real one.");
+  });
+
+  it('accepted residual: a literal "## Review" AFTER the real one still shadows last-match', () => {
+    const after = "## Review\n\nThe real one.\n\n## Review\n\nAuthored inside a note body, after it.";
+    expect(sliceH2Section(after, "Review", "last")).toBe("Authored inside a note body, after it.");
+  });
 });
 
 // ── SSE decoding ───────────────────────────────────────────────────────────────
@@ -203,16 +224,16 @@ describe("restate draft persistence", () => {
     expect(restateStorageKey("ws-1", "spec-restatement:abc")).toBe("wiki.restate.ws-1.spec-restatement:abc");
   });
 
-  it("round-trips {selectedIds, draft, sessionId} through save/load", () => {
+  it("round-trips {selectedIds, draft, sessionId, sourceKey} through save/load", () => {
     const store = memoryStore();
-    const state = { selectedIds: ["a", "b"], draft: "## X\n\nbody", sessionId: "sess-9" };
+    const state = { selectedIds: ["a", "b"], draft: "## X\n\nbody", sessionId: "sess-9", sourceKey: sourceKeyOf(["b", "a"]) };
     saveRestateDraft(store, "ws", "p", state);
     expect(loadRestateDraft(store, "ws", "p")).toEqual(state);
     // Another page's key is untouched.
     expect(loadRestateDraft(store, "ws", "other")).toBeNull();
   });
 
-  it("omits sessionId when it was never set, and clears cleanly", () => {
+  it("omits the session pair when it was never set, and clears cleanly", () => {
     const store = memoryStore();
     saveRestateDraft(store, "ws", "p", { selectedIds: ["a"], draft: "d" });
     expect(loadRestateDraft(store, "ws", "p")).toEqual({ selectedIds: ["a"], draft: "d" });
@@ -220,12 +241,43 @@ describe("restate draft persistence", () => {
     expect(loadRestateDraft(store, "ws", "p")).toBeNull();
   });
 
-  it("returns null for corrupt or empty stored payloads", () => {
+  it("drops a sessionId stored WITHOUT its sourceKey (it can't be validated against the selection)", () => {
+    const store = memoryStore();
+    store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ selectedIds: ["a"], draft: "d", sessionId: "legacy" }));
+    expect(loadRestateDraft(store, "ws", "p")).toEqual({ selectedIds: ["a"], draft: "d" });
+    // …and a sourceKey without a sessionId is equally meaningless.
+    store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ selectedIds: ["a"], draft: "d", sourceKey: "a" }));
+    expect(loadRestateDraft(store, "ws", "p")).toEqual({ selectedIds: ["a"], draft: "d" });
+  });
+
+  it("returns null for corrupt or empty stored payloads (an orphan sessionId alone counts as empty)", () => {
     const store = memoryStore();
     store.setItem(restateStorageKey("ws", "p"), "not-json");
     expect(loadRestateDraft(store, "ws", "p")).toBeNull();
     store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ selectedIds: [], draft: "" }));
     expect(loadRestateDraft(store, "ws", "p")).toBeNull();
+    store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ selectedIds: [], draft: "", sessionId: "legacy" }));
+    expect(loadRestateDraft(store, "ws", "p")).toBeNull();
+  });
+});
+
+describe("sourceKeyOf / resumableSession", () => {
+  it("keys are selection-order-insensitive and distinguish different sets", () => {
+    expect(sourceKeyOf(["b", "a"])).toBe(sourceKeyOf(["a", "b"]));
+    expect(sourceKeyOf(["a", "b"])).not.toBe(sourceKeyOf(["a", "c"]));
+    expect(sourceKeyOf(["a"])).not.toBe(sourceKeyOf(["a", "b"]));
+  });
+
+  it("resumes only a session opened for exactly the current sources", () => {
+    const session = { id: "sess-1", sourceKey: sourceKeyOf(["a", "b"]) };
+    expect(resumableSession(session, sourceKeyOf(["b", "a"]))).toBe("sess-1");
+  });
+
+  it("drops the session when the selection changed (or there is none)", () => {
+    const session = { id: "sess-1", sourceKey: sourceKeyOf(["a", "b"]) };
+    expect(resumableSession(session, sourceKeyOf(["a", "c"]))).toBeUndefined();
+    expect(resumableSession(session, sourceKeyOf(["a"]))).toBeUndefined();
+    expect(resumableSession(undefined, sourceKeyOf(["a"]))).toBeUndefined();
   });
 });
 

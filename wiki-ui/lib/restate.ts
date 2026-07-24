@@ -92,23 +92,28 @@ export function severityFromHeading(heading: string | null): NoteSeverity | null
 
 /**
  * The body of one top-level `## {heading}` section of a full page render (fence-aware),
- * or null when absent — used for the left column's Overview / Review summaries.
+ * or null when absent — used for the left column's Overview / Review summaries. Section
+ * BODIES preserve authored H2s verbatim, so a duplicate heading can appear: `occurrence`
+ * picks which match wins. The page renders overview → sections → review, so the real
+ * Overview is the FIRST match and the real Review is the LAST.
  */
-export function sliceH2Section(md: string, heading: string): string | null {
+export function sliceH2Section(md: string, heading: string, occurrence: "first" | "last" = "first"): string | null {
   let inFence = false;
-  let collecting = false;
-  const buf: string[] = [];
+  const bodies: string[] = [];
+  let buf: string[] | null = null;
   for (const line of md.replace(/\r\n/g, "\n").split("\n")) {
     if (FENCE_RE.test(line)) inFence = !inFence;
     const m = inFence ? null : H2_RE.exec(line);
     if (m !== null) {
-      if (collecting) break;
-      if (m[1].trim() === heading) collecting = true;
+      if (buf !== null) bodies.push(buf.join("\n").trim());
+      buf = m[1].trim() === heading ? [] : null;
       continue;
     }
-    if (collecting) buf.push(line);
+    if (buf !== null) buf.push(line);
   }
-  return collecting ? buf.join("\n").trim() : null;
+  if (buf !== null) bodies.push(buf.join("\n").trim());
+  if (bodies.length === 0) return null;
+  return occurrence === "last" ? bodies[bodies.length - 1] : bodies[0];
 }
 
 // ── SSE frame decoding (the /api/restate/critique stream) ───────────────────────
@@ -193,10 +198,31 @@ export function asCritiqueEvent(raw: unknown): CritiqueEvent | null {
 
 // ── draft persistence (localStorage, keyed by workspace + page) ─────────────────
 
+/**
+ * A critique session is only valid for the sources it was opened with (the server's
+ * follow-up prompt asserts "source sections are unchanged"), so the session id always
+ * travels with a key identifying those sources.
+ */
+export function sourceKeyOf(ids: readonly string[]): string {
+  return [...ids].sort().join("\n");
+}
+
+/** The session id to `--resume` with, but ONLY when it was opened for exactly the current
+ *  sources; any other selection starts a fresh session. */
+export function resumableSession(
+  session: { readonly id: string; readonly sourceKey: string } | undefined,
+  currentKey: string,
+): string | undefined {
+  return session !== undefined && session.sourceKey === currentKey ? session.id : undefined;
+}
+
 export interface RestateDraft {
   readonly selectedIds: readonly string[];
   readonly draft: string;
+  /** Present only as a PAIR with {@link RestateDraft.sourceKey}. */
   readonly sessionId?: string;
+  /** The {@link sourceKeyOf} of the sections `sessionId` was opened with. */
+  readonly sourceKey?: string;
 }
 
 /** The minimal Storage surface, injectable so the round-trip unit-tests in node. */
@@ -227,8 +253,12 @@ export function loadRestateDraft(store: KeyValueStore, workspaceId: string, page
     const selectedIds = stringList(p.selectedIds);
     const draft = typeof p.draft === "string" ? p.draft : "";
     const sessionId = typeof p.sessionId === "string" ? p.sessionId : undefined;
-    if (selectedIds.length === 0 && draft === "" && sessionId === undefined) return null;
-    return { selectedIds, draft, ...(sessionId !== undefined ? { sessionId } : {}) };
+    const sourceKey = typeof p.sourceKey === "string" ? p.sourceKey : undefined;
+    // A session without its source key (or vice versa) cannot be validated against the
+    // current selection — drop the pair rather than resume against unknown sources.
+    const session = sessionId !== undefined && sourceKey !== undefined ? { sessionId, sourceKey } : null;
+    if (selectedIds.length === 0 && draft === "" && session === null) return null;
+    return { selectedIds, draft, ...(session ?? {}) };
   } catch {
     return null;
   }

@@ -24,7 +24,8 @@ import type { IMutationDescriptor, IWorkspaceSummary, PageId, WorkspaceId } from
 import { notifyUnauthorized, serverBaseUrl } from "./auth";
 import { useAuth } from "./auth-context";
 import { getHost, UnsupportedBrowserError, type WikiHost } from "./host-client";
-import { classifyError, type LoadError, type SectionElementSummary, type WorkspaceSnapshot } from "./wiki-host-api";
+import { ELEMENTS_PENDING, foldSectionElements, type SectionElements } from "./section-elements";
+import { classifyError, type LoadError, type WorkspaceSnapshot } from "./wiki-host-api";
 
 // Re-exported so existing consumers (LiveIndicator, WorkspaceError) keep importing from here.
 export type { ConnectionState, LoadError, LoadErrorKind, SectionElementSummary } from "./wiki-host-api";
@@ -177,17 +178,13 @@ export function usePage(workspaceId: WorkspaceId, pageId: PageId): PageContent {
   return content;
 }
 
-export interface SectionElements {
-  readonly elements: readonly SectionElementSummary[];
-  readonly loading: boolean;
-}
-
-const ELEMENTS_PENDING: SectionElements = { elements: [], loading: true };
+// The state shape + pure fold live in lib/section-elements.ts (unit-tested there).
+export type { SectionElements } from "./section-elements";
 
 /**
  * The elements of one section's list field (id / element status / title), read from the
  * worker's folded page state — no markdown parsing. Re-read on mount and on every commit
- * (`ws.lastEventAt`), mirroring {@link usePageMutations}. Empty on a read failure.
+ * (`ws.lastEventAt`), mirroring {@link usePageMutations}.
  */
 export function useSectionElements(workspaceId: WorkspaceId, pageId: PageId, sectionKey: string): SectionElements {
   const ws = useLiveWorkspace(workspaceId);
@@ -199,10 +196,10 @@ export function useSectionElements(workspaceId: WorkspaceId, pageId: PageId, sec
     getHost()
       .then((h) => h.listSectionElements(workspaceId, pageId, sectionKey))
       .then((elements) => {
-        if (!cancelled) setState({ elements, loading: false });
+        if (!cancelled) setState((s) => foldSectionElements(s, { elements }));
       })
-      .catch(() => {
-        if (!cancelled) setState({ elements: [], loading: false });
+      .catch((e: unknown) => {
+        if (!cancelled) setState((s) => foldSectionElements(s, { error: classifyError(e).message }));
       });
     return () => {
       cancelled = true;

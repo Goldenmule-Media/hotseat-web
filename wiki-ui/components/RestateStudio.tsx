@@ -30,9 +30,11 @@ import {
   fetchRestateHealth,
   pruneSelection,
   requestReview,
+  resumableSession,
   saveRestateDraft,
   severityFromHeading,
   sliceH2Section,
+  sourceKeyOf,
   splitDraft,
   splitRenderedElement,
   streamCritique,
@@ -200,6 +202,12 @@ interface CritiqueState {
 
 const CRITIQUE_IDLE: CritiqueState = { streaming: false, text: "", verdict: null, error: null };
 
+/** A critique session pinned to the sources it was opened with (see sourceKeyOf). */
+interface CritiqueSession {
+  readonly id: string;
+  readonly sourceKey: string;
+}
+
 export function RestateStudio({
   workspaceId,
   pageId,
@@ -212,7 +220,7 @@ export function RestateStudio({
   /** The whole page's rendered markdown (usePage) — the holistic review's input. */
   specMarkdown: string | null;
 }): React.JSX.Element {
-  const { elements, loading: elementsLoading } = useSectionElements(workspaceId, pageId, SECTIONS_KEY);
+  const { elements, loading: elementsLoading, error: elementsError } = useSectionElements(workspaceId, pageId, SECTIONS_KEY);
   const notes = useSectionElements(workspaceId, pageId, REVIEW_KEY);
   const { run: runMutation, pending: mutating, error: mutationError, reset: resetMutation } = usePageMutator(
     workspaceId,
@@ -221,11 +229,14 @@ export function RestateStudio({
 
   const [selected, setSelected] = useState<readonly string[]>([]);
   const [draft, setDraft] = useState("");
-  const [sessionId, setSessionId] = useState<string | undefined>(undefined);
+  const [session, setSession] = useState<CritiqueSession | undefined>(undefined);
   const [restored, setRestored] = useState(false);
   const [health, setHealth] = useState<RestateHealth | null>(null);
   const [critique, setCritique] = useState<CritiqueState>(CRITIQUE_IDLE);
   const critiqueAbort = useRef<AbortController | null>(null);
+  /** Bumped whenever a critique run is superseded (new run, Accept, unmount) so a stale
+   *  stream's deltas/continuation can't touch state after the fact. */
+  const critiqueGen = useRef(0);
   const [reviewRun, setReviewRun] = useState<{ running: boolean; startedAt: number | null; error: string | null }>({
     running: false,
     startedAt: null,
@@ -241,7 +252,9 @@ export function RestateStudio({
     if (saved !== null) {
       setSelected(saved.selectedIds);
       setDraft(saved.draft);
-      setSessionId(saved.sessionId);
+      if (saved.sessionId !== undefined && saved.sourceKey !== undefined) {
+        setSession({ id: saved.sessionId, sourceKey: saved.sourceKey });
+      }
     }
     setRestored(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -259,29 +272,32 @@ export function RestateStudio({
   }, []);
 
   // Selections survive live re-renders only while their ids still exist as ai-draft.
+  // Skipped while the element read is errored — stale elements must not prune a live
+  // selection. An ACTUAL removal also drops the critique session: its sources changed.
   useEffect(() => {
-    if (!restored || elementsLoading) return;
-    setSelected((prev) => {
-      const next = pruneSelection(prev, elements);
-      return next.length === prev.length ? prev : next;
-    });
-  }, [restored, elementsLoading, elements]);
+    if (!restored || elementsLoading || elementsError !== null) return;
+    const next = pruneSelection(selected, elements);
+    if (next.length !== selected.length) {
+      setSelected(next);
+      setSession(undefined);
+    }
+  }, [restored, elementsLoading, elementsError, elements, selected]);
 
-  // Persist {selectedIds, draft, sessionId}; an all-empty state clears the key.
+  // Persist {selectedIds, draft, sessionId+sourceKey}; an all-empty state clears the key.
   useEffect(() => {
     if (!restored) return;
     const store = browserStore();
     if (store === null) return;
-    if (selected.length === 0 && draft === "" && sessionId === undefined) {
+    if (selected.length === 0 && draft === "" && session === undefined) {
       clearRestateDraft(store, workspaceId, pageId);
     } else {
       saveRestateDraft(store, workspaceId, pageId, {
         selectedIds: selected,
         draft,
-        ...(sessionId !== undefined ? { sessionId } : {}),
+        ...(session !== undefined ? { sessionId: session.id, sourceKey: session.sourceKey } : {}),
       });
     }
-  }, [restored, selected, draft, sessionId, workspaceId, pageId]);
+  }, [restored, selected, draft, session, workspaceId, pageId]);
 
   // Elapsed-seconds ticker for the long-running holistic review.
   useEffect(() => {
@@ -294,6 +310,7 @@ export function RestateStudio({
   // Abandon in-flight critic/review calls when the studio unmounts.
   useEffect(
     () => () => {
+      critiqueGen.current++;
       critiqueAbort.current?.abort();
       reviewAbort.current?.abort();
     },
@@ -319,7 +336,9 @@ export function RestateStudio({
     return body === null || body === "" || body === "_None._" ? null : body;
   }, [specMarkdown]);
   const reviewSummary = useMemo(() => {
-    const body = specMarkdown === null ? null : sliceH2Section(specMarkdown, "Review");
+    // "last": section BODIES render before the real "## Review" heading and keep authored
+    // H2s verbatim, so a section containing a literal "## Review" would shadow first-match.
+    const body = specMarkdown === null ? null : sliceH2Section(specMarkdown, "Review", "last");
     return body === null || body === "" || body === "_Not reviewed._" ? null : body;
   }, [specMarkdown]);
 
@@ -330,11 +349,14 @@ export function RestateStudio({
     if (selected.length === 0 || sections.length === 0) return;
     const ok = await runMutation("restateSections", { removeIds: [...selected], sections });
     if (ok) {
-      // Success clears everything; on ANY failure (incl. the OCC conflict) the draft,
-      // selection, critique and session all stay put.
+      // Success clears everything — including any in-flight critique, whose late deltas /
+      // terminal frame must not resurrect the panel or re-persist a session. On ANY
+      // failure (incl. the OCC conflict) the draft, selection, critique and session stay.
+      critiqueGen.current++;
+      critiqueAbort.current?.abort();
       setSelected([]);
       setDraft("");
-      setSessionId(undefined);
+      setSession(undefined);
       setCritique(CRITIQUE_IDLE);
       const store = browserStore();
       if (store !== null) clearRestateDraft(store, workspaceId, pageId);
@@ -343,9 +365,14 @@ export function RestateStudio({
 
   const onCritique = useCallback(async () => {
     if (selectedElements.length === 0 || draft.trim() === "") return;
+    const gen = ++critiqueGen.current;
     critiqueAbort.current?.abort();
     const ctrl = new AbortController();
     critiqueAbort.current = ctrl;
+    // Resume only a session opened for THESE sources — the server ignores freshly-sent
+    // sections when resuming, so a changed selection must start a fresh session.
+    const key = sourceKeyOf(selectedElements.map((el) => el.id));
+    const resume = resumableSession(session, key);
     setCritique({ streaming: true, text: "", verdict: null, error: null });
     let sources: { title: string; markdown: string }[];
     try {
@@ -358,24 +385,33 @@ export function RestateStudio({
         })),
       );
     } catch (e) {
+      if (critiqueGen.current !== gen) return;
       setCritique({ streaming: false, text: "", verdict: null, error: e instanceof Error ? e.message : String(e) });
       return;
     }
     const out = await streamCritique({
       sections: sources,
       restatement: draft,
-      sessionId,
+      sessionId: resume,
       signal: ctrl.signal,
-      onDelta: (t) => setCritique((c) => ({ ...c, text: c.text + t })),
+      onDelta: (t) => {
+        if (critiqueGen.current === gen) setCritique((c) => ({ ...c, text: c.text + t }));
+      },
     });
+    if (critiqueGen.current !== gen) return; // superseded by Accept / a newer run
     if (out.ok) {
       setCritique((c) => ({ ...c, streaming: false, verdict: out.verdict, error: null }));
-      // Keep the session so a follow-up round critiques the revision in context.
-      if (out.sessionId !== undefined) setSessionId(out.sessionId);
+      // Keep the session (pinned to these sources) so a follow-up round has context.
+      if (out.sessionId !== undefined) setSession({ id: out.sessionId, sourceKey: key });
+    } else if (ctrl.signal.aborted) {
+      setCritique((c) => ({ ...c, streaming: false })); // user cancel — not a failure
     } else {
       setCritique((c) => ({ ...c, streaming: false, error: out.message }));
+      // A failed resume usually means the claude session is gone — drop it so the next
+      // attempt starts fresh (the sources travel in every request anyway).
+      if (resume !== undefined) setSession(undefined);
     }
-  }, [selectedElements, draft, sessionId, workspaceId, pageId]);
+  }, [selectedElements, draft, session, workspaceId, pageId]);
 
   const onRunReview = useCallback(async () => {
     if (specMarkdown === null) return;
@@ -454,6 +490,10 @@ export function RestateStudio({
             )}
             {notes.loading && notes.elements.length === 0 ? (
               <p className="muted">Loading notes…</p>
+            ) : notes.error !== null && notes.elements.length === 0 ? (
+              <p className="restate-load-error" role="alert">
+                Couldn&apos;t load review notes: {notes.error}
+              </p>
             ) : notes.elements.length === 0 ? (
               <p className="muted">The review recorded no notes.</p>
             ) : (
@@ -666,6 +706,11 @@ export function RestateStudio({
             ? "Loading sections…"
             : `${verified} of ${total} section${total === 1 ? "" : "s"} verified`}
         </p>
+        {elementsError !== null && (
+          <p className="restate-load-error" role="alert">
+            Couldn&apos;t refresh sections: {elementsError}. Showing the last good read; your selection is kept.
+          </p>
+        )}
         {overview !== null && (
           /* eslint-disable-next-line react/no-danger */
           <div
@@ -684,7 +729,7 @@ export function RestateStudio({
             onToggle={() => toggle(el.id)}
           />
         ))}
-        {total === 0 && !elementsLoading && <p className="muted">No sections drafted yet.</p>}
+        {total === 0 && !elementsLoading && elementsError === null && <p className="muted">No sections drafted yet.</p>}
       </section>
       <aside className="restate-workbench" aria-label="Restatement workbench">
         {workbench}
