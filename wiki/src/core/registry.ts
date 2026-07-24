@@ -118,6 +118,24 @@ export class Registry {
           issues.push({ path: ["elements", tag, "fields", fk, "requiredIn"], message: `requiredIn is supported on section fields only` });
         }
       }
+      // An element write-gate is keyed on the ELEMENT FSM: without one it could never
+      // open, and a status outside the FSM is a dead gate.
+      if (el.mutableIn !== undefined) {
+        if (el.status === undefined) {
+          issues.push({ path: ["elements", tag, "mutableIn"], message: `mutableIn requires an element status FSM` });
+        } else {
+          const elStatuses = new Set<string>([el.status.initial]);
+          for (const tr of el.status.transitions) {
+            elStatuses.add(tr.fromState);
+            elStatuses.add(tr.toState);
+          }
+          for (const s of el.mutableIn) {
+            if (!elStatuses.has(s)) {
+              issues.push({ path: ["elements", tag, "mutableIn"], message: `references unknown element status "${s}"` });
+            }
+          }
+        }
+      }
     }
 
     // ── static reachability guards ───────────────────────────────────────────

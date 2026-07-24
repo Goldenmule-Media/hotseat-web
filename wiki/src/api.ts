@@ -626,6 +626,18 @@ export interface IPageView<K extends PageTypeName = PageTypeName> {
    */
   attentionItems(opts?: IReadOpts): Promise<readonly IAttentionItem[]>;
   toMarkdown(opts?: IReadOpts): Promise<string>;
+  /**
+   * Render ONE list element to Markdown exactly as the full render ({@link toMarkdown})
+   * presents it inside its section: for an `as: "sections"` config the numbered
+   * `### {ordinal}. {heading}` subsection plus its declared body parts (ordinal computed
+   * from current page state, so it matches the full render); for bullets/numbered/
+   * checklist the single rendered item line. An element currently filtered out by
+   * `groupBy`/`groups` still renders — using the group whose `when` matches its status,
+   * else the base config — with its stored-order position as the ordinal fallback.
+   * Token-gated like every read; throws when the section key or element id does not
+   * resolve (`SectionNotFoundError` / `ItemNotFoundError`).
+   */
+  renderElement(sectionKey: string, elementId: string, opts?: IReadOpts): Promise<string>;
   mutate<C extends CommandName<K>>(command: C, args: CommandArgs<K, C>): Promise<Committed<CommandResult<K, C>>>;
   /** Atomic ordered batch of commands on this page — see {@link IWorkspaceHandle.mutateMany}. */
   mutateMany(commands: readonly { command: CommandName<K>; args?: Record<string, unknown> }[]): Promise<Committed<BatchResult>>;
@@ -934,6 +946,18 @@ export interface SectionDecl {
 export interface ElementDecl {
   readonly fields: Readonly<Record<string, FieldDecl>>;
   readonly status?: { readonly initial: string; readonly transitions: readonly ITransition[] };
+  /**
+   * The ELEMENT-status write-gate — the element-level analogue of a section's
+   * {@link SectionDecl.mutableIn}: the element FSM statuses during which the element's
+   * FIELD CONTENT may be modified (`setElementField`, including the generated
+   * `set<Sec><Field><ElField>` commands). Evaluated per op, in op order, against the
+   * evolving in-commit state — a transition earlier in the same command/batch opens (or
+   * closes) the gate for the edits after it. Never gates addElement (creation-time
+   * fields), removeElement, moveElement, or the element's own transitions. Absent =
+   * unrestricted. Requires an element status FSM and may name only its statuses
+   * (enforced at registration).
+   */
+  readonly mutableIn?: readonly string[];
   readonly meta?: ISchema;
   readonly reduceMeta?: (meta: unknown, op: SectionOp) => unknown;
   /**

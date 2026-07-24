@@ -44,7 +44,7 @@ import type {
   WorkspaceStatus,
 } from "../api";
 import { ROOT } from "../api";
-import { displayTitle, renderPage, renderWorkspace } from "../render/read-model";
+import { displayTitle, renderPage, renderPageElement, renderWorkspace } from "../render/read-model";
 import { EventLog } from "../stores/event-log";
 import { CommandBus, type BusProjection, type CommandBusConfig, type CommitOutcome } from "./command-bus";
 import { PageNotFoundError, WorkspaceNotFoundError } from "./errors";
@@ -834,6 +834,10 @@ class WorkspaceHandle implements IWorkspaceHandle {
   renderPageMarkdown(pageId: PageId): string {
     return renderPage(this.projection.state, pageId, this.registry);
   }
+
+  renderElementMarkdown(pageId: PageId, sectionKey: string, elementId: string): string {
+    return renderPageElement(this.projection.state, pageId, sectionKey, elementId, this.registry);
+  }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1022,6 +1026,11 @@ class PageView implements IPageView {
   async toMarkdown(opts?: IReadOpts): Promise<string> {
     await this.handle.awaitConsistency(opts);
     return this.handle.renderPageMarkdown(this.id);
+  }
+
+  async renderElement(sectionKey: string, elementId: string, opts?: IReadOpts): Promise<string> {
+    await this.handle.awaitConsistency(opts);
+    return this.handle.renderElementMarkdown(this.id, sectionKey, elementId);
   }
 
   mutate(command: string, args: Record<string, unknown>): Promise<Committed<unknown>> {

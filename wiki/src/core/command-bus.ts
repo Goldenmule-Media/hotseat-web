@@ -428,6 +428,7 @@ export class CommandBus {
         const sec = contentOpSection(op);
         if (sec !== undefined) this.assertMutable(node.type, node.status, sec, req.command, allowedSet());
       }
+      this.assertElementMutable(node.type, view, ops, req.command);
 
       // element-level FSM legality.
       if (declared.transition?.level === "element" && declared.target?.element !== undefined) {
@@ -460,6 +461,7 @@ export class CommandBus {
     this.assertMutable(node.type, node.status, gen.section, req.command, allowedSet());
     const parsed = (req.args ?? {}) as Record<string, unknown>;
     const ops = this.buildGeneratedOps(gen, parsed, ctx);
+    this.assertElementMutable(node.type, view, ops, req.command);
     this.assertEditPreconditions(view, ops);
     this.assertOpTargetsExist(view, ops);
     this.dryRunAndValidate(state, node.type, view, ops);
@@ -500,6 +502,79 @@ export class CommandBus {
     const sd = this.registry.sectionDeclsOf(type)[sectionKey];
     if (sd?.mutableIn !== undefined && !sd.mutableIn.includes(status)) {
       throw new MutationNotAllowedError(type, status, command, allowed);
+    }
+  }
+
+  /**
+   * The ELEMENT-status write-gate ({@link ElementDecl.mutableIn}): a `setElementField`
+   * is legal only while its element's status is one the element type lists. Evaluated
+   * per op, IN OP ORDER, against the evolving in-commit statuses — an earlier
+   * `addElement` or element `transition` in the same op list counts, so a
+   * transition-then-edit sequence gated on the target status passes. Elements absent
+   * from the page (and this op list) are left to {@link assertOpTargetsExist}.
+   */
+  private assertElementMutable(
+    type: string,
+    view: PageState,
+    ops: readonly SectionOp[],
+    command: string,
+  ): void {
+    const evolving = new Map<string, string | undefined>();
+    const key = (section: string, field: string, id: string): string => `${section} ${field} ${id}`;
+    // The targeted list field: the named one, or (transition ops may omit `field`) the
+    // section's FIRST list field — mirroring the reducer's resolution.
+    const listOf = (
+      section: string,
+      field: string | undefined,
+    ): { field: string; f: { kind: "list"; elementType: string; elements: IItem[] } } | undefined => {
+      const sec = view.sections.find((s) => s.key === section);
+      if (sec === undefined) return undefined;
+      for (const [fk, f] of Object.entries(sec.fields)) {
+        if (f.kind === "list" && (field === undefined || fk === field)) return { field: fk, f };
+      }
+      return undefined;
+    };
+    const statusOf = (section: string, field: string, f: { elements: IItem[] }, id: string): string | undefined => {
+      const k = key(section, field, id);
+      return evolving.has(k) ? evolving.get(k) : f.elements.find((e) => e.id === id)?.status;
+    };
+
+    for (const op of ops) {
+      switch (op.op) {
+        case "addElement": {
+          const lf = listOf(op.section, op.field);
+          if (lf === undefined) break;
+          const status = op.status ?? this.registry.element(type, lf.f.elementType)?.status?.initial;
+          evolving.set(key(op.section, lf.field, op.id), status);
+          break;
+        }
+        case "transition": {
+          if (op.level !== "element" || op.section === undefined || op.element === undefined) break;
+          const lf = listOf(op.section, op.field);
+          if (lf === undefined) break;
+          const cur = statusOf(op.section, lf.field, lf.f, op.element);
+          // Applied-if-legal, like the reducer: an illegal transition leaves the status.
+          const next = this.registry.elementGuard(type, lf.f.elementType)?.next(cur ?? "", op.event);
+          if (next !== undefined) evolving.set(key(op.section, lf.field, op.element), next);
+          break;
+        }
+        case "setElementField": {
+          const lf = listOf(op.section, op.field);
+          if (lf === undefined) break;
+          const decl = this.registry.element(type, lf.f.elementType);
+          if (decl?.mutableIn === undefined) break;
+          if (!evolving.has(key(op.section, lf.field, op.id)) && !lf.f.elements.some((e) => e.id === op.id)) break;
+          const st = statusOf(op.section, lf.field, lf.f, op.id) ?? "";
+          if (!decl.mutableIn.includes(st)) {
+            throw new MutationNotAllowedError(`${type}.${lf.f.elementType}[${op.id}]`, st, command, [
+              ...decl.mutableIn,
+            ]);
+          }
+          break;
+        }
+        default:
+          break;
+      }
     }
   }
 

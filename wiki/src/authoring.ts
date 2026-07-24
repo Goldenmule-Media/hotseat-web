@@ -15,6 +15,11 @@ export { InvariantViolationError, WikiError } from "./core/errors";
 // rejects significant Markdown (it must be reified); this parser does the reification, so a
 // model command can accept a plain Markdown string and store structured runs. See core/inline-md.
 export { parseInline } from "./core/inline-md";
+// Block-level Markdown → the closed block vocabulary (paragraphs/headings/fences/quotes/
+// lists/tables), the block companion of `parseInline` — so a model command can accept a
+// whole Markdown document and store a structured `blocks` value. Ids come from the
+// injected generator. See core/block-md.
+export { parseBlocks } from "./core/block-md";
 // Re-export the engine's public TYPE vocabulary (types only — no runtime cost) so an
 // authored bundle's INFERRED export types are all nameable through `wiki/authoring`.
 export type * from "./api";

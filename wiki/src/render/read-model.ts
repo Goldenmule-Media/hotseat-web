@@ -21,6 +21,7 @@ import type {
   RootId,
 } from "../api";
 import { ROOT } from "../api";
+import { ItemNotFoundError, PageNotFoundError, SectionNotFoundError } from "../core/errors";
 import { pageStateView } from "../core/workspace";
 import type { Registry } from "../core/registry";
 import { renderBlocks, type LabelResolver } from "./blocks";
@@ -425,6 +426,63 @@ function renderDerivedList(items: readonly DerivedItem[]): string {
       return `${indent}- ${box}${it.text}`.replace(/\s+$/, "");
     })
     .join("\n");
+}
+
+/**
+ * Render ONE list element exactly as {@link renderPage} presents it inside its section:
+ * for an `as: "sections"` config the `### {ordinal}. {heading}` subsection plus the
+ * declared body parts (ordinal from the same per-group index the full render uses); for
+ * bullets/numbered/checklist the single rendered item line. An element filtered out of
+ * every rendered group still renders — via the group whose `when` matches its status,
+ * else the base config — with its stored-order position as the ordinal fallback. Throws
+ * {@link SectionNotFoundError} / {@link ItemNotFoundError} for a missing target.
+ */
+export function renderPageElement(
+  state: IWorkspaceState,
+  pageId: PageId,
+  sectionKey: string,
+  elementId: string,
+  registry: Registry,
+): string {
+  const node = state.pages.get(pageId);
+  if (node === undefined) throw new PageNotFoundError(pageId);
+  const sec = node.sections.find((s) => s.key === sectionKey);
+  if (sec === undefined) throw new SectionNotFoundError(sectionKey);
+  let fieldKey: string | undefined;
+  let list: { kind: "list"; elementType: string; elements: IItem[] } | undefined;
+  for (const [k, f] of Object.entries(sec.fields)) {
+    if (f.kind === "list" && f.elements.some((e) => e.id === elementId)) {
+      fieldKey = k;
+      list = f;
+      break;
+    }
+  }
+  if (fieldKey === undefined || list === undefined) throw new ItemNotFoundError("element", elementId);
+  const el = list.elements.find((e) => e.id === elementId)!;
+
+  const config = registry.page(node.type).render;
+  const ctx = buildRenderCtx(state, registry);
+  const ordinals = buildOrdinalIndex(node, config);
+  const label = makeLabelResolver(state, node, ctx, ordinals);
+
+  const sr: SectionRender =
+    config.sections.find((r) => r.section === sectionKey && (r.field === undefined || r.field === fieldKey)) ?? {
+      section: sectionKey,
+      field: fieldKey,
+    };
+  const ordinal =
+    ordinals.get(ordinalKey(sec.id, fieldKey, elementId)) ?? list.elements.findIndex((e) => e.id === elementId) + 1;
+
+  if (sr.as === "sections") return renderElementSection(el, ordinal, sr, label);
+  const group =
+    sr.groupBy !== undefined && sr.groups !== undefined
+      ? sr.groups.find((g) => g.when === (el.status ?? ""))
+      : undefined;
+  const template = group !== undefined ? (group.item ?? "") : (sr.item ?? "{text}");
+  const filled = fillTemplate(template, el, label);
+  if (sr.as === "checklist") return `- [${el.status === sr.checkedWhen ? "x" : " "}] ${filled}`;
+  if (sr.as === "numbered") return `${ordinal}. ${filled}`;
+  return `- ${filled}`;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
