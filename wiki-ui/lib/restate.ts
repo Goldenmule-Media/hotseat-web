@@ -73,6 +73,58 @@ export function assembleDraft(sections: readonly { title: string; body: string }
     .join("\n\n");
 }
 
+// ── block-boundary splitting (the left panel's Split affordance) ────────────────
+
+/**
+ * A section body's top-level blocks — the blank-line-separated chunks the engine's
+ * `parseBlocks` sees — so a section can only ever be cut at a real block boundary.
+ * Fence-aware: blank lines inside a ``` block never split.
+ */
+export function splitTopLevelBlocks(md: string): string[] {
+  const out: string[] = [];
+  let buf: string[] = [];
+  let inFence = false;
+  const flush = (): void => {
+    const chunk = buf.join("\n").trim();
+    buf = [];
+    if (chunk !== "") out.push(chunk);
+  };
+  for (const line of md.replace(/\r\n/g, "\n").split("\n")) {
+    if (FENCE_RE.test(line)) inFence = !inFence;
+    if (!inFence && line.trim() === "") {
+      flush();
+      continue;
+    }
+    buf.push(line);
+  }
+  flush();
+  return out;
+}
+
+export interface SectionSplit {
+  readonly topMarkdown: string;
+  readonly bottomMarkdown: string;
+  readonly newTitle: string;
+}
+
+/**
+ * `splitSection` args for cutting `chunks` before index `at`, or null when that is not a
+ * real boundary. The new section takes its title from a heading opening the bottom half
+ * (that line is consumed — it BECOMES the title), else `"{title} (cont.)"`.
+ */
+export function sectionSplitAt(chunks: readonly string[], at: number, title: string): SectionSplit | null {
+  if (at < 1 || at >= chunks.length) return null;
+  const bottom = chunks.slice(at);
+  const head = /^#{1,6}\s+(.*?)\s*#*\s*$/.exec(bottom[0] ?? "");
+  // Only consume the heading when something follows it — never leave an empty section.
+  const consume = head !== null && bottom.length > 1;
+  return {
+    topMarkdown: chunks.slice(0, at).join("\n\n"),
+    bottomMarkdown: (consume ? bottom.slice(1) : bottom).join("\n\n"),
+    newTitle: head !== null ? head[1]!.trim() : `${title} (cont.)`,
+  };
+}
+
 // ── rendered-element splitting ──────────────────────────────────────────────────
 
 export interface RenderedElement {

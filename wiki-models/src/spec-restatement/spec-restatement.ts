@@ -7,7 +7,7 @@
  * (`ai-draft` ↔ `human-verified`), enforced by the element write-gate: an AI edit must
  * downgrade a verified section back to `ai-draft` before touching its content.
  */
-import type { DeepReadonly, IField, IItem, PageState, Precondition, SectionOp } from "wiki/authoring";
+import type { DeepReadonly, IBlock, IField, IItem, PageState, Precondition, SectionOp } from "wiki/authoring";
 import { definePageType, InvariantViolationError, parseBlocks, t, z, zodSchema } from "wiki/authoring";
 
 const empty = z.object({});
@@ -84,6 +84,48 @@ function requireSectionsInStatus(
   if (wrong.length > 0) {
     throw new InvariantViolationError(`${complaint}: ${wrong.join(", ")}`);
   }
+}
+
+function blocksOf(el: DeepReadonly<IItem>): readonly DeepReadonly<IBlock>[] {
+  const f = el.fields["body"];
+  return f !== undefined && f.kind === "blocks" ? f.blocks : [];
+}
+
+/** Locate a section, throwing loudly when the id is not on this page. */
+function sectionAt(page: DeepReadonly<PageState>, sectionId: string): { index: number; el: DeepReadonly<IItem> } {
+  const elements = listOf(page, "sections", "items");
+  const index = elements.findIndex((e) => e.id === sectionId);
+  if (index === -1) throw new InvariantViolationError(`section "${sectionId}" not found in sections.items`);
+  return { index, el: elements[index]! };
+}
+
+/**
+ * A body rewrite that PRESERVES the element's status. Content is writable only while
+ * `ai-draft` (the element write-gate), so editing a verified section means downgrading
+ * first — the ops evaluate in order, so re-verifying after the write lands in the same
+ * commit and the section never publicly leaves human-verified.
+ */
+function rewriteBody(sectionId: string, blocks: readonly DeepReadonly<IBlock>[], verified: boolean): SectionOp[] {
+  const gate = (event: string): SectionOp => ({
+    op: "transition",
+    level: "element",
+    section: "sections",
+    field: "items",
+    element: sectionId,
+    event,
+  });
+  return [
+    ...(verified ? [gate("reviseAsDraft")] : []),
+    {
+      op: "setElementField",
+      section: "sections",
+      field: "items",
+      id: sectionId,
+      elementField: "body",
+      value: { kind: "blocks", blocks: blocks as IBlock[] },
+    },
+    ...(verified ? [gate("verify")] : []),
+  ];
 }
 
 const hasDraftedSections: Precondition = (page) =>
@@ -285,6 +327,110 @@ export const SpecRestatement = definePageType({
         if (a.title !== undefined) {
           ops.push({ op: "setElementField", section: "sections", field: "items", id: a.sectionId, elementField: "title", value: { kind: "prose", value: a.title } });
         }
+        return ops;
+      },
+    },
+    addSection: {
+      description:
+        "HUMAN authoring (studio only — the drafting agent uses draftSection): insert a section the human " +
+        "WROTE, born human-verified because their own words ARE the verification. Appends unless `beforeId` " +
+        "names an existing section to insert immediately before (that anchors the position to an id, so a " +
+        "concurrent insert elsewhere can't shift it).",
+      args: zodSchema(z.object({ title: z.string().min(1), markdown: z.string().min(1), beforeId: z.string().optional() })),
+      result: zodSchema(z.object({ sectionId: z.string() })),
+      target: { section: "sections", field: "items" },
+      preconditions: [activeRestatement("addSection")],
+      produces: (page, args, ctx) => {
+        const a = args as { title: string; markdown: string; beforeId?: string };
+        const index = a.beforeId === undefined ? undefined : sectionAt(page, a.beforeId).index;
+        return [
+          {
+            op: "addElement",
+            section: "sections",
+            field: "items",
+            id: ctx.newId(),
+            fields: bodyFields(a.title, a.markdown, ctx.newId),
+            status: "human-verified",
+            ...(index !== undefined ? { index } : {}),
+          },
+        ];
+      },
+    },
+    moveSection: {
+      description:
+        "Reorder: move a section to 0-based `toIndex` among sections.items (the index it lands on once " +
+        "lifted out). Pure structure — no content and no status change, so a human-verified section stays " +
+        "verified where it lands.",
+      args: zodSchema(z.object({ sectionId: z.string(), toIndex: z.number().int().min(0) })),
+      target: { section: "sections", field: "items" },
+      produces: (page, args) => {
+        const a = args as { sectionId: string; toIndex: number };
+        const { index } = sectionAt(page, a.sectionId);
+        const last = listOf(page, "sections", "items").length - 1;
+        if (a.toIndex > last) {
+          throw new InvariantViolationError(`toIndex ${a.toIndex} is past the last section (${last})`);
+        }
+        if (a.toIndex === index) return [];
+        return [{ op: "moveElement", section: "sections", field: "items", id: a.sectionId, toIndex: a.toIndex }];
+      },
+    },
+    joinSections: {
+      description:
+        "Merge `absorbId` INTO the section immediately before it: `sectionId` keeps its id, title and " +
+        "position and its body gains the absorbed blocks; `absorbId` is removed. Ids survive on purpose — a " +
+        "restatement in progress on the survivor outlives the join. Provenance stays honest: the survivor " +
+        "keeps human-verified only when BOTH were verified; absorbing an ai-draft returns it to ai-draft.",
+      args: zodSchema(z.object({ sectionId: z.string(), absorbId: z.string() })),
+      target: { section: "sections", field: "items" },
+      preconditions: [activeRestatement("joinSections")],
+      produces: (page, args) => {
+        const a = args as { sectionId: string; absorbId: string };
+        const { index, el } = sectionAt(page, a.sectionId);
+        const absorbed = listOf(page, "sections", "items")[index + 1];
+        if (absorbed === undefined || absorbed.id !== a.absorbId) {
+          throw new InvariantViolationError(
+            `absorbId "${a.absorbId}" is not the section immediately after "${a.sectionId}" — join merges adjacent sections`,
+          );
+        }
+        const stays = el.status === "human-verified" && absorbed.status === "human-verified";
+        const ops = rewriteBody(a.sectionId, [...blocksOf(el), ...blocksOf(absorbed)], el.status === "human-verified");
+        // Verified survivor + ai-draft absorbed: the merged body now holds unrestated text.
+        if (el.status === "human-verified" && !stays) ops.pop();
+        ops.push({ op: "removeElement", section: "sections", field: "items", id: a.absorbId });
+        return ops;
+      },
+    },
+    splitSection: {
+      description:
+        "Split one section in two: `sectionId` KEEPS its id, title, position and status but its body becomes " +
+        "`topMarkdown`, and a new section titled `newTitle` holding `bottomMarkdown` is inserted immediately " +
+        "after it, born with the SAME status (splitting your own verified words leaves both verified; " +
+        "splitting an ai-draft leaves two ai-drafts). The surviving id means a restatement in progress on the " +
+        "top half outlives the split.",
+      args: zodSchema(
+        z.object({
+          sectionId: z.string(),
+          topMarkdown: z.string().min(1),
+          bottomMarkdown: z.string().min(1),
+          newTitle: z.string().min(1),
+        }),
+      ),
+      result: zodSchema(z.object({ newSectionId: z.string() })),
+      target: { section: "sections", field: "items" },
+      preconditions: [activeRestatement("splitSection")],
+      produces: (page, args, ctx) => {
+        const a = args as { sectionId: string; topMarkdown: string; bottomMarkdown: string; newTitle: string };
+        const { index, el } = sectionAt(page, a.sectionId);
+        const ops = rewriteBody(a.sectionId, parseBlocks(a.topMarkdown, ctx.newId), el.status === "human-verified");
+        ops.push({
+          op: "addElement",
+          section: "sections",
+          field: "items",
+          id: ctx.newId(),
+          fields: bodyFields(a.newTitle, a.bottomMarkdown, ctx.newId),
+          ...(el.status !== undefined ? { status: el.status } : {}),
+          index: index + 1,
+        });
         return ops;
       },
     },

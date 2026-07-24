@@ -22,9 +22,15 @@
  * ONE claude session serves the whole page (persisted alongside the drafts): every section
  * and every re-critique resumes it, so the critic accumulates the spec. That session is a
  * single mutable resource, so only ONE critique runs at a time.
+ *
+ * The left panel also RESTRUCTURES the spec — add/join/split/reorder, each a curated model
+ * command. Structural controls never read the restatement selection: they belong to a card
+ * (↑ ↓ ✂, collapse) or to the gap between two cards (insert here, join this pair). Ids
+ * survive by design — a join keeps the top section's id and a split keeps the top half's —
+ * so a draft or critique in progress there outlives the edit.
  */
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PageId, WorkspaceId } from "wiki";
 import { getHost } from "../lib/host-client";
 import {
@@ -44,14 +50,17 @@ import {
   requestCritique,
   requestReview,
   saveRestateDraft,
+  sectionSplitAt,
   severityFromHeading,
   sliceH2Section,
   splitDraft,
   splitRenderedElement,
+  splitTopLevelBlocks,
   type CritiqueGrade,
   type CritiqueVerdict,
   type KeyValueStore,
   type RestateHealth,
+  type SectionSplit,
 } from "../lib/restate";
 import { clampSplit, DEFAULT_SPLIT, loadSplit, saveSplit } from "../lib/restate-split";
 import { pageHref } from "../lib/routes";
@@ -130,6 +139,145 @@ function useElapsedSeconds(startedAt: number | null): number {
   return elapsed;
 }
 
+// ── left column: structure affordances ──────────────────────────────────────────
+
+/**
+ * The live gap between two cards (and at either end of the list): where a section is
+ * INSERTED, and where two adjacent sections are JOINED. Structural actions never read the
+ * restatement selection — they name the sections they touch.
+ */
+function GapStrip({
+  onAdd,
+  join,
+  busy,
+}: {
+  onAdd: () => void;
+  /** The pair this gap separates, top first; null at the ends of the list. */
+  join: { topTitle: string; bottomTitle: string; onRun: () => void } | null;
+  busy: boolean;
+}): React.JSX.Element {
+  return (
+    <div className="restate-gap">
+      <div className="restate-gap-actions">
+        <button type="button" className="restate-gap-btn" disabled={busy} title="Write a new section here" onClick={onAdd}>
+          + Add section
+        </button>
+        {join !== null && (
+          <button
+            type="button"
+            className="restate-gap-btn"
+            disabled={busy}
+            title={`Merge "${join.bottomTitle}" into "${join.topTitle}"`}
+            onClick={join.onRun}
+          >
+            ⇕ Join
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** The section's body as its top-level blocks, with a cut point between each pair. */
+function SplitPicker({
+  chunks,
+  title,
+  workspaceId,
+  busy,
+  onSplit,
+  onCancel,
+}: {
+  chunks: readonly string[];
+  title: string;
+  workspaceId: WorkspaceId;
+  busy: boolean;
+  onSplit: (split: SectionSplit) => void;
+  onCancel: () => void;
+}): React.JSX.Element {
+  const [at, setAt] = useState<number | null>(null);
+  const proposed = useMemo(() => (at === null ? null : sectionSplitAt(chunks, at, title)), [at, chunks, title]);
+  const [newTitle, setNewTitle] = useState("");
+  useEffect(() => {
+    if (proposed !== null) setNewTitle(proposed.newTitle);
+  }, [proposed]);
+
+  if (chunks.length < 2) {
+    return (
+      <div className="restate-split">
+        <p className="muted restate-split-hint">
+          This section is a single block — there is no boundary to split at. Restate it into several sections instead
+          (<code>## Heading</code> lines in the editor).
+        </p>
+        <button type="button" className="restate-cancel" onClick={onCancel}>
+          Done
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="restate-split">
+      <p className="muted restate-split-hint">Pick where to cut — everything below the line becomes a new section.</p>
+      {chunks.map((chunk, i) => (
+        <div key={i}>
+          {i > 0 && (
+            <div className="restate-cut">
+              <button
+                type="button"
+                className={`restate-cut-btn ${at === i ? "is-armed" : ""}`}
+                disabled={busy}
+                onClick={() => setAt(at === i ? null : i)}
+              >
+                {at === i ? "Cut here" : "Split here"}
+              </button>
+            </div>
+          )}
+          {/* eslint-disable-next-line react/no-danger */}
+          <div
+            className={`markdown restate-section-body restate-chunk${at !== null && i >= at ? " is-below" : ""}`}
+            dangerouslySetInnerHTML={{ __html: renderMarkdown(chunk, workspaceId) }}
+          />
+        </div>
+      ))}
+      <div className="restate-split-confirm">
+        {proposed !== null && (
+          <input
+            type="text"
+            value={newTitle}
+            aria-label="Title for the new section"
+            placeholder="Title for the new section"
+            onChange={(e) => setNewTitle(e.target.value)}
+          />
+        )}
+        <button
+          type="button"
+          className="tf-btn tf-btn-primary"
+          disabled={busy || proposed === null || newTitle.trim() === ""}
+          onClick={() => proposed !== null && onSplit({ ...proposed, newTitle: newTitle.trim() })}
+        >
+          Split
+        </button>
+        <button type="button" className="restate-cancel" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Reorder / split / collapse for one card — structure, never selection. */
+interface CardStructure {
+  readonly canUp: boolean;
+  readonly canDown: boolean;
+  readonly onUp: () => void;
+  readonly onDown: () => void;
+  readonly collapsed: boolean;
+  readonly onToggleCollapse: () => void;
+  readonly splitting: boolean;
+  readonly onToggleSplit: () => void;
+  readonly onSplit: (split: SectionSplit) => void;
+  readonly busy: boolean;
+}
+
 // ── left column: one spec section, rendered + selectable ────────────────────────
 
 function SectionCard({
@@ -141,6 +289,7 @@ function SectionCard({
   onToggle,
   critique,
   action,
+  structure,
 }: {
   workspaceId: WorkspaceId;
   pageId: PageId;
@@ -152,15 +301,24 @@ function SectionCard({
   critique: CritiqueTag | null;
   /** Per-card quick action ("Accept as-is" / "Unaccept"); null hides it. */
   action: { label: string; busy: boolean; onRun: () => void } | null;
+  /** Structural controls; null outside the statuses that allow restructuring. */
+  structure: CardStructure | null;
 }): React.JSX.Element {
   const { markdown, loading, error } = useElementMarkdown(workspaceId, pageId, SECTIONS_KEY, el.id);
+  const body = markdown === null ? null : splitRenderedElement(markdown).body;
   const html = useMemo(() => (markdown === null ? "" : renderMarkdown(markdown, workspaceId)), [markdown, workspaceId]);
+  const chunks = useMemo(
+    () => (body === null || structure?.splitting !== true ? [] : splitTopLevelBlocks(body)),
+    [body, structure?.splitting],
+  );
   const verified = el.status === "human-verified";
+  const collapsed = structure?.collapsed === true;
   const classes = [
     "restate-section",
     verified ? "restate-section-verified" : "restate-section-ai",
     selected ? "is-selected" : "",
     selectable ? "is-selectable" : "",
+    collapsed ? "is-collapsed" : "",
   ]
     .filter((c) => c !== "")
     .join(" ");
@@ -176,23 +334,82 @@ function SectionCard({
       }}
     >
       <div className="restate-section-head">
-        {selectable ? (
-          <button
-            type="button"
-            className="restate-select"
-            aria-pressed={selected}
-            aria-label={`Restate "${titleOf(el)}"`}
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggle();
-            }}
-          >
-            {selected ? "Restating" : "Restate"}
-          </button>
-        ) : (
-          <span aria-hidden="true" />
-        )}
+        <span className="restate-card-lead">
+          {structure !== null && (
+            <button
+              type="button"
+              className="restate-collapse"
+              aria-expanded={!collapsed}
+              aria-label={collapsed ? `Expand "${titleOf(el)}"` : `Collapse "${titleOf(el)}"`}
+              onClick={(e) => {
+                e.stopPropagation();
+                structure.onToggleCollapse();
+              }}
+            >
+              {collapsed ? "▸" : "▾"}
+            </button>
+          )}
+          {selectable && (
+            <button
+              type="button"
+              className="restate-select"
+              aria-pressed={selected}
+              aria-label={`Restate "${titleOf(el)}"`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggle();
+              }}
+            >
+              {selected ? "Restating" : "Restate"}
+            </button>
+          )}
+          {/* Expanded, the rendered body already carries the heading. */}
+          {collapsed && <span className="restate-card-title">{titleOf(el)}</span>}
+        </span>
         <span className="restate-card-side">
+          {structure !== null && (
+            <span className="restate-card-tools">
+              <button
+                type="button"
+                className="restate-tool"
+                disabled={!structure.canUp || structure.busy}
+                aria-label={`Move "${titleOf(el)}" up`}
+                title="Move up"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  structure.onUp();
+                }}
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                className="restate-tool"
+                disabled={!structure.canDown || structure.busy}
+                aria-label={`Move "${titleOf(el)}" down`}
+                title="Move down"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  structure.onDown();
+                }}
+              >
+                ↓
+              </button>
+              <button
+                type="button"
+                className={`restate-tool ${structure.splitting ? "is-armed" : ""}`}
+                aria-pressed={structure.splitting}
+                aria-label={`Split "${titleOf(el)}"`}
+                title="Split into two sections"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  structure.onToggleSplit();
+                }}
+              >
+                ✂
+              </button>
+            </span>
+          )}
           {critique !== null && (
             <span className={`restate-badge restate-badge-${critique}`}>{CRITIQUE_TAG_LABEL[critique]}</span>
           )}
@@ -218,6 +435,15 @@ function SectionCard({
         <p className="error">{error}</p>
       ) : markdown === null && loading ? (
         <p className="muted">Loading section…</p>
+      ) : collapsed ? null : structure?.splitting === true ? (
+        <SplitPicker
+          chunks={chunks}
+          title={titleOf(el)}
+          workspaceId={workspaceId}
+          busy={structure.busy}
+          onSplit={structure.onSplit}
+          onCancel={structure.onToggleSplit}
+        />
       ) : (
         /* eslint-disable-next-line react/no-danger */
         <div className="markdown restate-section-body" dangerouslySetInnerHTML={{ __html: html }} />
@@ -340,6 +566,12 @@ export function RestateStudio({
   const [seedError, setSeedError] = useState<string | null>(null);
   /** The section currently being seeded — dedupes the effect across re-renders. */
   const seeding = useRef<string | null>(null);
+  /** Structure: collapsed card ids, the card in split mode, and the pending insert. */
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const [splitting, setSplitting] = useState<string | null>(null);
+  const [composing, setComposing] = useState<{ beforeId?: string } | null>(null);
+  const [composeTitle, setComposeTitle] = useState("");
+  const [composeBody, setComposeBody] = useState("");
 
   const draft = selectedId === null ? "" : (drafts[selectedId] ?? "");
   const setDraft = useCallback(
@@ -394,7 +626,20 @@ export function RestateStudio({
     const keptCritiques = pruneBySection(critiques, restatable);
     if (Object.keys(keptCritiques).length !== Object.keys(critiques).length) setCritiques(keptCritiques);
     if (critiqueRun !== null && !restatable.some((e) => e.id === critiqueRun.id)) endCritique();
-  }, [restored, elementsLoading, elementsError, elements, selectedId, drafts, critiques, critiqueRun, endCritique]);
+    // Split mode is pure UI state — drop it when its card goes (a join, someone else's edit).
+    if (splitting !== null && !elements.some((e) => e.id === splitting)) setSplitting(null);
+  }, [
+    restored,
+    elementsLoading,
+    elementsError,
+    elements,
+    selectedId,
+    drafts,
+    critiques,
+    critiqueRun,
+    endCritique,
+    splitting,
+  ]);
 
   // Looking at a critique marks it read (whether it landed before or during the visit).
   useEffect(() => {
@@ -485,6 +730,7 @@ export function RestateStudio({
   const toggle = useCallback(
     (id: string) => {
       setSelectedId((prev) => (prev === id ? null : id));
+      setComposing(null); // the workbench shows the editor OR the composer, never both
       if (selectedId !== id) scrollToSection(id);
     },
     [selectedId, scrollToSection],
@@ -517,6 +763,10 @@ export function RestateStudio({
   const draftHtml = useMemo(
     () => (preview && draft.trim() !== "" ? renderMarkdown(draft, workspaceId) : ""),
     [preview, draft, workspaceId],
+  );
+  const composeHtml = useMemo(
+    () => (preview && composeBody.trim() !== "" ? renderMarkdown(composeBody, workspaceId) : ""),
+    [preview, composeBody, workspaceId],
   );
 
   const conflict = mutationError !== null && mutationError.includes("removeIds not found");
@@ -629,6 +879,66 @@ export function RestateStudio({
     [runMutation],
   );
 
+  // ── structure (the left panel): move · join · split · add ─────────────────────
+  // Ids survive on purpose. Join keeps the TOP section's id and split keeps the top
+  // half's, so a draft or critique in progress there outlives the edit — only the
+  // absorbed section's own state is pruned (its id is gone).
+
+  const onMove = useCallback(
+    (id: string, toIndex: number) => {
+      void runMutation("moveSection", { sectionId: id, toIndex });
+    },
+    [runMutation],
+  );
+
+  const onJoin = useCallback(
+    (topId: string, bottomId: string) => {
+      void runMutation("joinSections", { sectionId: topId, absorbId: bottomId });
+    },
+    [runMutation],
+  );
+
+  const onSplit = useCallback(
+    async (id: string, split: SectionSplit) => {
+      const ok = await runMutation("splitSection", { sectionId: id, ...split });
+      if (ok) setSplitting(null);
+    },
+    [runMutation],
+  );
+
+  const onCompose = useCallback((beforeId: string | undefined) => {
+    setSplitting(null);
+    setSelectedId(null);
+    setComposeTitle("");
+    setComposeBody("");
+    setComposing(beforeId === undefined ? {} : { beforeId });
+  }, []);
+
+  const onAddSection = useCallback(async () => {
+    if (composing === null) return;
+    const title = composeTitle.trim();
+    const markdown = composeBody.trim();
+    if (title === "" || markdown === "") return;
+    const ok = await runMutation("addSection", {
+      title,
+      markdown,
+      ...(composing.beforeId !== undefined ? { beforeId: composing.beforeId } : {}),
+    });
+    if (ok) {
+      setComposing(null);
+      setComposeTitle("");
+      setComposeBody("");
+    }
+  }, [composing, composeTitle, composeBody, runMutation]);
+
+  const toggleCollapse = useCallback((id: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  }, []);
+
   // A changed selection invalidates an armed "Discard your edits?" confirmation.
   useEffect(() => {
     setResetArm(false);
@@ -680,6 +990,48 @@ export function RestateStudio({
 
   const criticGate =
     health === null ? "Probing the critic…" : criticReady ? null : (health.reason ?? "the critic is not available");
+
+  const mutationNotice =
+    mutationError === null ? null : conflict ? (
+      <div className="notice error restate-conflict">
+        <strong>This section changed underneath you</strong>
+        <p className="muted">
+          Someone else edited or replaced it since you selected it. Your draft is kept — re-select the current section
+          and accept again.
+        </p>
+        <p className="muted">{mutationError}</p>
+      </div>
+    ) : (
+      <div className="notice error">
+        {mutationError}{" "}
+        <button type="button" className="restate-cancel" onClick={resetMutation}>
+          Dismiss
+        </button>
+      </div>
+    );
+
+  const editorTabs = (
+    <div className="view-toggle" role="tablist" aria-label="Editor or preview">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={!preview}
+        className={`view-tab ${preview ? "" : "active"}`}
+        onClick={() => setPreview(false)}
+      >
+        Edit
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={preview}
+        className={`view-tab ${preview ? "active" : ""}`}
+        onClick={() => setPreview(true)}
+      >
+        Preview
+      </button>
+    </div>
+  );
 
   // ── right column per page status ──────────────────────────────────────────────
 
@@ -807,33 +1159,74 @@ export function RestateStudio({
         )}
         {reviewRun.error !== null && <div className="notice error">Holistic review failed: {reviewRun.error}</div>}
 
-        <section className={`restate-block${selectedEl !== undefined ? " restate-block-editor" : ""}`}>
+        {composing !== null && (
+          <section className="restate-block restate-block-editor">
+            <div className="restate-block-head-row">
+              <h2 className="restate-block-head">New section</h2>
+              {editorTabs}
+            </div>
+            <p className="restate-sources">
+              Inserting{" "}
+              {composing.beforeId === undefined ? (
+                <span className="restate-source">at the end</span>
+              ) : (
+                <>
+                  before <span className="restate-source">{titleOf(elements.find((e) => e.id === composing.beforeId))}</span>
+                </>
+              )}
+              . Your own words, so it is born human-verified.
+            </p>
+            <input
+              type="text"
+              className="restate-compose-title"
+              value={composeTitle}
+              placeholder="Section title"
+              aria-label="Section title"
+              onChange={(e) => setComposeTitle(e.target.value)}
+            />
+            {preview ? (
+              composeHtml === "" ? (
+                <p className="muted restate-preview restate-preview-empty">Nothing to preview yet.</p>
+              ) : (
+                /* eslint-disable-next-line react/no-danger */
+                <div className="markdown restate-preview" dangerouslySetInnerHTML={{ __html: composeHtml }} />
+              )
+            ) : (
+              <textarea
+                className="restate-draft"
+                value={composeBody}
+                spellCheck
+                placeholder="Write the section…"
+                onChange={(e) => setComposeBody(e.target.value)}
+              />
+            )}
+            <div className="restate-actions">
+              <button type="button" className="tf-btn tf-btn-secondary" onClick={() => setComposing(null)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="tf-btn tf-btn-primary"
+                disabled={mutating || composeTitle.trim() === "" || composeBody.trim() === ""}
+                onClick={() => void onAddSection()}
+              >
+                {mutating ? "Committing…" : "Add section"}
+              </button>
+            </div>
+            {mutationNotice}
+          </section>
+        )}
+
+        <section
+          className={`restate-block${selectedEl !== undefined && composing === null ? " restate-block-editor" : ""}`}
+        >
           <div className="restate-block-head-row">
             <h2 className="restate-block-head">Restate</h2>
-            {selectedEl !== undefined && (
-              <div className="view-toggle" role="tablist" aria-label="Editor or preview">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={!preview}
-                  className={`view-tab ${preview ? "" : "active"}`}
-                  onClick={() => setPreview(false)}
-                >
-                  Edit
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={preview}
-                  className={`view-tab ${preview ? "active" : ""}`}
-                  onClick={() => setPreview(true)}
-                >
-                  Preview
-                </button>
-              </div>
-            )}
+            {selectedEl !== undefined && composing === null && editorTabs}
           </div>
-          {selectedEl === undefined ? (
+          {composing !== null ? (
+            <p className="muted">Finish or cancel the new section above to get back to restating.</p>
+          ) : selectedEl === undefined ? (
             <p className="muted">Select an AI-draft section on the left to restate it in your own words.</p>
           ) : (
             <>
@@ -921,26 +1314,9 @@ export function RestateStudio({
             </>
           )}
 
-          {mutationError !== null &&
-            (conflict ? (
-              <div className="notice error restate-conflict">
-                <strong>This section changed underneath you</strong>
-                <p className="muted">
-                  Someone else edited or replaced it since you selected it. Your draft is kept — re-select the current
-                  section and accept again.
-                </p>
-                <p className="muted">{mutationError}</p>
-              </div>
-            ) : (
-              <div className="notice error">
-                {mutationError}{" "}
-                <button type="button" className="restate-cancel" onClick={resetMutation}>
-                  Dismiss
-                </button>
-              </div>
-            ))}
+          {composing === null && mutationNotice}
 
-          {selectedId !== null && (critiquing || critique !== undefined) && (
+          {composing === null && selectedId !== null && (critiquing || critique !== undefined) && (
             <div className="restate-critique">
               <div className="restate-critique-head">
                 <span>
@@ -1018,30 +1394,77 @@ export function RestateStudio({
             Couldn&apos;t refresh sections: {elementsError}. Showing the last good read; your selection is kept.
           </p>
         )}
+        {workbenchActive && total > 0 && (
+          <button
+            type="button"
+            className="restate-bar-btn"
+            title="Collapsed cards make reordering a long spec manageable"
+            onClick={() =>
+              setCollapsed((prev) => (prev.size === total ? new Set() : new Set(elements.map((e) => e.id))))
+            }
+          >
+            {collapsed.size === total ? "Expand all" : "Collapse all"}
+          </button>
+        )}
       </div>
       <div ref={studioRef} className="restate-studio">
         <section ref={specColRef} className="restate-spec" aria-label="Spec sections">
-          {elements.map((el) => (
-            <SectionCard
-              key={el.id}
-              workspaceId={workspaceId}
-              pageId={pageId}
-              el={el}
-              selectable={workbenchActive && el.status === "ai-draft"}
-              selected={selectedId === el.id}
-              onToggle={() => toggle(el.id)}
-              critique={critiqueTag(critiques[el.id], critiqueRun?.id === el.id)}
-              action={
-                !workbenchActive
-                  ? null
-                  : el.status === "ai-draft"
-                    ? { label: "Accept as-is", busy: mutating, onRun: () => onAcceptAsIs(el.id) }
-                    : el.status === "human-verified"
-                      ? { label: "Unaccept", busy: mutating, onRun: () => onUnaccept(el.id) }
-                      : null
-              }
-            />
+          {elements.map((el, i) => (
+            <Fragment key={el.id}>
+              {workbenchActive && (
+                <GapStrip
+                  onAdd={() => onCompose(el.id)}
+                  join={
+                    i === 0
+                      ? null
+                      : {
+                          topTitle: titleOf(elements[i - 1]),
+                          bottomTitle: titleOf(el),
+                          onRun: () => onJoin(elements[i - 1]!.id, el.id),
+                        }
+                  }
+                  busy={mutating}
+                />
+              )}
+              <SectionCard
+                workspaceId={workspaceId}
+                pageId={pageId}
+                el={el}
+                selectable={workbenchActive && el.status === "ai-draft"}
+                selected={selectedId === el.id}
+                onToggle={() => toggle(el.id)}
+                critique={critiqueTag(critiques[el.id], critiqueRun?.id === el.id)}
+                action={
+                  !workbenchActive
+                    ? null
+                    : el.status === "ai-draft"
+                      ? { label: "Accept as-is", busy: mutating, onRun: () => onAcceptAsIs(el.id) }
+                      : el.status === "human-verified"
+                        ? { label: "Unaccept", busy: mutating, onRun: () => onUnaccept(el.id) }
+                        : null
+                }
+                structure={
+                  !workbenchActive
+                    ? null
+                    : {
+                        canUp: i > 0,
+                        canDown: i < total - 1,
+                        onUp: () => onMove(el.id, i - 1),
+                        onDown: () => onMove(el.id, i + 1),
+                        collapsed: collapsed.has(el.id),
+                        onToggleCollapse: () => toggleCollapse(el.id),
+                        splitting: splitting === el.id,
+                        onToggleSplit: () => setSplitting((prev) => (prev === el.id ? null : el.id)),
+                        onSplit: (split) => void onSplit(el.id, split),
+                        busy: mutating,
+                      }
+                }
+              />
+            </Fragment>
           ))}
+          {workbenchActive && total > 0 && (
+            <GapStrip onAdd={() => onCompose(undefined)} join={null} busy={mutating} />
+          )}
           {total === 0 && !elementsLoading && elementsError === null && (
             <p className="muted">No sections drafted yet.</p>
           )}

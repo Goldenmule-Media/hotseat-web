@@ -245,6 +245,131 @@ describe("spec-restatement model", () => {
     ).rejects.toThrow(MutationNotAllowedError);
   });
 
+  // ── structural edits (the studio's left panel: add / move / join / split) ──────
+
+  it("addSection inserts a human-written section, born human-verified, before `beforeId`", async () => {
+    const { page, ids } = await restatableSpec("Structure", [["Alpha", "A."], ["Beta", "B."]]);
+    const add = await ws.mutate(page, "addSection", { title: "Between", markdown: "Mine.", beforeId: ids[1]! });
+    const items = els(await stateOf(page, add.token), "sections", "items");
+    expect(items.map(titleOf)).toEqual(["Alpha", "Between", "Beta"]);
+    expect(items[1]!.status).toBe("human-verified");
+    expect((add.value as { sectionId: string }).sectionId).toBe(items[1]!.id);
+    // beforeId the FIRST section reaches the very top; no beforeId appends.
+    await ws.mutate(page, "addSection", { title: "Overview", markdown: "Mine, first.", beforeId: ids[0]! });
+    const end = await ws.mutate(page, "addSection", { title: "Last", markdown: "Also mine." });
+    expect(els(await stateOf(page, end.token), "sections", "items").map(titleOf)).toEqual([
+      "Overview",
+      "Alpha",
+      "Between",
+      "Beta",
+      "Last",
+    ]);
+  });
+
+  it("moveSection reorders without touching content or status", async () => {
+    const { page, ids } = await restatableSpec("Reorder", [["Alpha", "A."], ["Beta", "B."], ["Gamma", "G."]]);
+    await ws.mutate(page, "restateSections", { removeIds: [ids[1]!], sections: [{ title: "Beta", markdown: "Mine." }] });
+    const beta = els(await stateOf(page), "sections", "items").find((e) => titleOf(e) === "Beta")!;
+    const mv = await ws.mutate(page, "moveSection", { sectionId: beta.id, toIndex: 0 });
+    const items = els(await stateOf(page, mv.token), "sections", "items");
+    expect(items.map(titleOf)).toEqual(["Beta", "Alpha", "Gamma"]);
+    // A verified section stays verified where it lands — moving is not a content change.
+    expect(items[0]!.id).toBe(beta.id);
+    expect(items[0]!.status).toBe("human-verified");
+    await expect(ws.mutate(page, "moveSection", { sectionId: beta.id, toIndex: 3 })).rejects.toThrow(
+      InvariantViolationError,
+    );
+  });
+
+  it("joinSections merges the next section into this one, keeping THIS id", async () => {
+    const { page, ids } = await restatableSpec("Join", [["Alpha", "A body."], ["Beta", "B body."], ["Gamma", "G."]]);
+    const j = await ws.mutate(page, "joinSections", { sectionId: ids[0]!, absorbId: ids[1]! });
+    const items = els(await stateOf(page, j.token), "sections", "items");
+    expect(items.map(titleOf)).toEqual(["Alpha", "Gamma"]);
+    expect(items[0]!.id).toBe(ids[0]!); // the survivor's id is stable — drafts/critiques survive
+    const md = await ws.toMarkdown(page);
+    expect(md).toContain("A body.\n\nB body.");
+    // Only adjacent sections join, and only in that order.
+    await expect(ws.mutate(page, "joinSections", { sectionId: items[1]!.id, absorbId: items[0]!.id })).rejects.toThrow(
+      InvariantViolationError,
+    );
+  });
+
+  it("joining two verified sections stays verified; absorbing an ai-draft returns to ai-draft", async () => {
+    const { page, ids } = await restatableSpec("Provenance", [["Alpha", "A."], ["Beta", "B."], ["Gamma", "G."]]);
+    for (const [i, title] of [
+      [0, "Alpha"],
+      [1, "Beta"],
+    ] as const) {
+      await ws.mutate(page, "restateSections", { removeIds: [ids[i]!], sections: [{ title, markdown: `${title} mine.` }] });
+    }
+    const verified = els(await stateOf(page), "sections", "items");
+    const both = await ws.mutate(page, "joinSections", { sectionId: verified[0]!.id, absorbId: verified[1]!.id });
+    const merged = els(await stateOf(page, both.token), "sections", "items")[0]!;
+    expect(merged.status).toBe("human-verified");
+
+    // …but pulling unrestated AI text into it makes the whole section unrestated again.
+    const mixed = await ws.mutate(page, "joinSections", { sectionId: merged.id, absorbId: ids[2]! });
+    const after = els(await stateOf(page, mixed.token), "sections", "items");
+    expect(after).toHaveLength(1);
+    expect(after[0]!.status).toBe("ai-draft");
+    expect(await ws.toMarkdown(page)).toContain("G.");
+  });
+
+  it("splitSection keeps the top id and status, and inserts the bottom right after it", async () => {
+    const { page, ids } = await restatableSpec("Split", [["Alpha", "First half.\n\nSecond half."], ["Beta", "B."]]);
+    const sp = await ws.mutate(page, "splitSection", {
+      sectionId: ids[0]!,
+      topMarkdown: "First half.",
+      bottomMarkdown: "Second half.",
+      newTitle: "Alpha, part two",
+    });
+    const items = els(await stateOf(page, sp.token), "sections", "items");
+    expect(items.map(titleOf)).toEqual(["Alpha", "Alpha, part two", "Beta"]);
+    expect(items[0]!.id).toBe(ids[0]!); // the top half's id is stable
+    expect(items.map((e) => e.status)).toEqual(["ai-draft", "ai-draft", "ai-draft"]);
+    expect((sp.value as { newSectionId: string }).newSectionId).toBe(items[1]!.id);
+    const md = await ws.toMarkdown(page);
+    expect(md).toContain("### Alpha\nFirst half.");
+    expect(md).toContain("### Alpha, part two\nSecond half.");
+  });
+
+  it("splitting a verified section leaves BOTH halves verified (same words, two buckets)", async () => {
+    const { page, ids } = await restatableSpec("Split verified", [["Alpha", "A."]]);
+    await ws.mutate(page, "restateSections", {
+      removeIds: [ids[0]!],
+      sections: [{ title: "Alpha", markdown: "Mine, one.\n\nMine, two." }],
+    });
+    const verified = els(await stateOf(page), "sections", "items")[0]!;
+    const sp = await ws.mutate(page, "splitSection", {
+      sectionId: verified.id,
+      topMarkdown: "Mine, one.",
+      bottomMarkdown: "Mine, two.",
+      newTitle: "Alpha (cont.)",
+    });
+    const items = els(await stateOf(page, sp.token), "sections", "items");
+    expect(items.map((e) => e.status)).toEqual(["human-verified", "human-verified"]);
+    expect(items[0]!.id).toBe(verified.id);
+  });
+
+  it("refuses the structural human commands outside restating/reviewing", async () => {
+    const p = (await ws.createPage("spec-restatement", { title: "Structure too early", parentId: null })).value;
+    const a = ((await ws.mutate(p, "draftSection", { title: "Alpha", markdown: "A." })).value as { sectionId: string })
+      .sectionId;
+    const b = ((await ws.mutate(p, "draftSection", { title: "Beta", markdown: "B." })).value as { sectionId: string })
+      .sectionId;
+    await expect(ws.mutate(p, "addSection", { title: "Mine", markdown: "Text." })).rejects.toThrow(
+      PreconditionUnmetError,
+    );
+    await expect(ws.mutate(p, "joinSections", { sectionId: a, absorbId: b })).rejects.toThrow(PreconditionUnmetError);
+    await expect(
+      ws.mutate(p, "splitSection", { sectionId: a, topMarkdown: "x", bottomMarkdown: "y", newTitle: "Y" }),
+    ).rejects.toThrow(PreconditionUnmetError);
+    // …but the drafting agent may still reorder what it drafted.
+    const mv = await ws.mutate(p, "moveSection", { sectionId: b, toIndex: 0 });
+    expect(els(await stateOf(p, mv.token), "sections", "items").map(titleOf)).toEqual(["Beta", "Alpha"]);
+  });
+
   it("renders deterministic Markdown at a mid-lifecycle state (byte-exact)", async () => {
     const p = (await ws.createPage("spec-restatement", { title: "Render demo", parentId: null })).value;
     const a = ((await ws.mutate(p, "draftSection", { title: "Alpha", markdown: "AI alpha." })).value as { sectionId: string }).sectionId;

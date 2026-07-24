@@ -8,10 +8,12 @@ import {
   pruneBySection,
   restateStorageKey,
   saveRestateDraft,
+  sectionSplitAt,
   severityFromHeading,
   sliceH2Section,
   splitDraft,
   splitRenderedElement,
+  splitTopLevelBlocks,
   type KeyValueStore,
 } from "./restate";
 
@@ -99,6 +101,58 @@ describe("assembleDraft", () => {
       { title: "Code", markdown: "```md\n## not a heading\n```" },
       { title: "After", markdown: "Tail." },
     ]);
+  });
+});
+
+// ── block-boundary splitting ───────────────────────────────────────────────────
+
+describe("splitTopLevelBlocks", () => {
+  it("splits on blank lines into the blocks parseBlocks sees", () => {
+    expect(splitTopLevelBlocks("One.\n\nTwo,\nstill two.\n\n- a\n- b")).toEqual(["One.", "Two,\nstill two.", "- a\n- b"]);
+  });
+
+  it("keeps a fenced block whole, blank lines and all", () => {
+    const md = "Intro.\n\n```ts\nconst a = 1;\n\nconst b = 2;\n```\n\nOutro.";
+    expect(splitTopLevelBlocks(md)).toEqual(["Intro.", "```ts\nconst a = 1;\n\nconst b = 2;\n```", "Outro."]);
+  });
+
+  it("ignores leading/trailing blank runs and returns [] for empty input", () => {
+    expect(splitTopLevelBlocks("\n\n  \n\nOnly.\n\n\n")).toEqual(["Only."]);
+    expect(splitTopLevelBlocks("   ")).toEqual([]);
+  });
+});
+
+describe("sectionSplitAt", () => {
+  const chunks = ["Opening.", "## Second half", "Body of the second half.", "Tail."];
+
+  it("cuts before the given block, taking the new title from a heading it consumes", () => {
+    expect(sectionSplitAt(chunks, 1, "Storage")).toEqual({
+      topMarkdown: "Opening.",
+      bottomMarkdown: "Body of the second half.\n\nTail.",
+      newTitle: "Second half",
+    });
+  });
+
+  it("falls back to `{title} (cont.)` when the bottom does not open with a heading", () => {
+    expect(sectionSplitAt(chunks, 3, "Storage")).toEqual({
+      topMarkdown: "Opening.\n\n## Second half\n\nBody of the second half.",
+      bottomMarkdown: "Tail.",
+      newTitle: "Storage (cont.)",
+    });
+  });
+
+  it("keeps a trailing heading as the body rather than leaving the new section empty", () => {
+    expect(sectionSplitAt(["Opening.", "## Dangling"], 1, "Storage")).toEqual({
+      topMarkdown: "Opening.",
+      bottomMarkdown: "## Dangling",
+      newTitle: "Dangling",
+    });
+  });
+
+  it("returns null for a non-boundary (the ends are not cut points)", () => {
+    expect(sectionSplitAt(chunks, 0, "Storage")).toBeNull();
+    expect(sectionSplitAt(chunks, 4, "Storage")).toBeNull();
+    expect(sectionSplitAt(["Only one block."], 1, "Storage")).toBeNull();
   });
 });
 

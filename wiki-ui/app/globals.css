@@ -1524,8 +1524,12 @@ code {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  /* No column gap: the gap STRIPS between cards carry the spacing (and the insert/join
+     affordances). Where there are none, adjacent cards space themselves. */
   padding-right: 6px;
+}
+.restate-section + .restate-section {
+  margin-top: 14px;
 }
 .restate-divider {
   flex: 0 0 12px;
@@ -1611,6 +1615,21 @@ code {
   margin-bottom: 14px;
   border-bottom: 1px solid var(--border);
 }
+.restate-bar-btn {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.restate-bar-btn:hover {
+  color: var(--text);
+  background: var(--accent-dim);
+}
 .restate-progress {
   margin: 0;
   font-size: 13px;
@@ -1643,12 +1662,201 @@ code {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
 }
+.restate-section.is-collapsed {
+  padding-bottom: 10px;
+}
 .restate-section-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 4px;
+}
+.restate-card-lead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.restate-card-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+.restate-collapse {
+  flex: none;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 3px;
+  cursor: pointer;
+}
+.restate-collapse:hover {
+  color: var(--text);
+}
+/* Structure tools stay quiet until you reach for the card — present, not shouting. */
+.restate-card-tools {
+  display: inline-flex;
+  gap: 2px;
+  opacity: 0.35;
+  transition: opacity 0.12s;
+}
+.restate-section:hover .restate-card-tools,
+.restate-card-tools:focus-within {
+  opacity: 1;
+}
+.restate-tool {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 1px 5px;
+  cursor: pointer;
+}
+.restate-tool:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border);
+  background: var(--accent-dim);
+}
+.restate-tool:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.restate-tool.is-armed {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+/* The live gap between cards: insert a section here, or join the pair it separates. */
+/* Tall enough to hold its own buttons: the hover area and the hit area are the same box,
+   so the controls never overhang a card (an invisible overlay would eat card clicks). */
+.restate-gap {
+  position: relative;
+  height: 20px;
+  flex: none;
+}
+.restate-gap::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 1px dashed var(--accent);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.restate-gap-actions {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.restate-gap:hover::before,
+.restate-gap:focus-within::before,
+.restate-gap:hover .restate-gap-actions,
+.restate-gap:focus-within .restate-gap-actions {
+  opacity: 1;
+}
+.restate-gap-btn {
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 1px 8px;
+  cursor: pointer;
+}
+.restate-gap-btn:hover:not(:disabled) {
+  background: var(--accent-dim);
+}
+.restate-gap-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* Split mode: the body as its blocks, with a cut point between each pair. */
+.restate-split-hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+.restate-chunk.is-below {
+  opacity: 0.6;
+}
+.restate-cut {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+.restate-cut::before,
+.restate-cut::after {
+  content: "";
+  flex: 1;
+  border-top: 1px dashed var(--border);
+}
+.restate-cut-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  padding: 0 8px;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.12s;
+}
+.restate-split:hover .restate-cut-btn {
+  opacity: 1;
+}
+.restate-cut-btn:hover,
+.restate-cut-btn.is-armed {
+  color: var(--accent);
+  border-color: var(--accent);
+  opacity: 1;
+}
+.restate-split-confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.restate-split-confirm input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+.restate-compose-title {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--code-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+.restate-compose-title:focus,
+.restate-split-confirm input:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 /* One section is restated at a time — a toggle, not a checkbox. */
 .restate-select {
