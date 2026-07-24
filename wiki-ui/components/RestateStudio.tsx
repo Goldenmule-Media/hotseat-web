@@ -14,10 +14,14 @@
  *
  * Everything the workbench holds is keyed BY SECTION and outlives the selection: drafts
  * (seeded from the section's current markdown on first select, then persisted per
- * workspace+page in localStorage) and critiques — so a critique keeps streaming while you
- * move on to another section, its card badges "Critique ready" when it lands, and
- * selecting that section re-opens its panel. Per-section state is dropped when the
- * section stops being restatable underneath you (verified, replaced, deleted).
+ * workspace+page in localStorage) and critique verdicts — so a critique keeps running while
+ * you move on to another section, its card badges "Critique ready" when it lands, and
+ * selecting that section re-opens its panel. Per-section state is dropped when the section
+ * stops being restatable underneath you (verified, replaced, deleted).
+ *
+ * ONE claude session serves the whole page (persisted alongside the drafts): every section
+ * and every re-critique resumes it, so the critic accumulates the spec. That session is a
+ * single mutable resource, so only ONE critique runs at a time.
  */
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -37,13 +41,14 @@ import {
   loadRestateDraft,
   fetchRestateHealth,
   pruneBySection,
+  requestCritique,
   requestReview,
   saveRestateDraft,
   severityFromHeading,
   sliceH2Section,
   splitDraft,
   splitRenderedElement,
-  streamCritique,
+  type CritiqueGrade,
   type CritiqueVerdict,
   type KeyValueStore,
   type RestateHealth,
@@ -80,34 +85,49 @@ function omit<T>(record: Readonly<Record<string, T>>, key: string): Record<strin
 // ── per-section critique state ──────────────────────────────────────────────────
 
 interface CritiqueState {
-  readonly streaming: boolean;
-  readonly text: string;
   readonly verdict: CritiqueVerdict | null;
   readonly error: string | null;
-  /** Resume id for a follow-up round on this same section. */
-  readonly sessionId?: string;
   /** Landed while you were elsewhere — the section's card says so until you open it. */
   readonly unread: boolean;
 }
 
-const CRITIQUE_IDLE: CritiqueState = { streaming: false, text: "", verdict: null, error: null, unread: false };
-
 /** What a section's card shows about its critique; null = nothing worth saying. */
-type CritiqueTag = "streaming" | "ready" | "seen" | "failed";
+type CritiqueTag = "running" | "ready" | "seen" | "failed";
 
 const CRITIQUE_TAG_LABEL: Record<CritiqueTag, string> = {
-  streaming: "Critiquing…",
+  running: "Critiquing…",
   ready: "Critique ready",
   seen: "Critiqued",
   failed: "Critique failed",
 };
 
-function critiqueTag(c: CritiqueState | undefined): CritiqueTag | null {
+function critiqueTag(c: CritiqueState | undefined, running: boolean): CritiqueTag | null {
+  if (running) return "running";
   if (c === undefined) return null;
-  if (c.streaming) return "streaming";
   if (c.error !== null) return "failed";
   if (c.verdict === null) return null;
   return c.unread ? "ready" : "seen";
+}
+
+const GRADE_LABEL: Record<CritiqueGrade, string> = {
+  understood: "Understood",
+  partial: "Partial",
+  surface: "Surface",
+};
+
+/** Seconds since `startedAt` (null = not running), ticking once a second. */
+function useElapsedSeconds(startedAt: number | null): number {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (startedAt === null) {
+      setElapsed(0);
+      return;
+    }
+    setElapsed(0);
+    const t = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 1000);
+    return () => clearInterval(t);
+  }, [startedAt]);
+  return elapsed;
 }
 
 // ── left column: one spec section, rendered + selectable ────────────────────────
@@ -293,20 +313,22 @@ export function RestateStudio({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   /** Editor text per section id; see the seeding effect below. */
   const [drafts, setDrafts] = useState<Readonly<Record<string, string>>>({});
-  /** Critique per section id — runs outlive the selection, so these are keyed, not one. */
+  /** The last critique per section id — a run outlives the selection, so these are keyed. */
   const [critiques, setCritiques] = useState<Readonly<Record<string, CritiqueState>>>({});
+  /** The page's ONE critique session; every section and round resumes it. */
+  const [sessionId, setSessionId] = useState<string | undefined>(undefined);
   const [restored, setRestored] = useState(false);
   const [health, setHealth] = useState<RestateHealth | null>(null);
-  /** In-flight critique streams, and a per-section generation bumped whenever a run is
-   *  superseded (new run, Accept, unmount) so a stale stream can't touch state after. */
-  const critiqueRuns = useRef(new Map<string, AbortController>());
-  const critiqueGen = useRef(new Map<string, number>());
+  /** The single in-flight critique (the session admits one at a time), and a generation
+   *  bumped whenever a run is superseded (new run, cancel, Accept, unmount). */
+  const [critiqueRun, setCritiqueRun] = useState<{ id: string; startedAt: number } | null>(null);
+  const critiqueAbort = useRef<AbortController | null>(null);
+  const critiqueGen = useRef(0);
   const [reviewRun, setReviewRun] = useState<{ running: boolean; startedAt: number | null; error: string | null }>({
     running: false,
     startedAt: null,
     error: null,
   });
-  const [elapsed, setElapsed] = useState(0);
   const reviewAbort = useRef<AbortController | null>(null);
   const studioRef = useRef<HTMLDivElement | null>(null);
   const specColRef = useRef<HTMLElement | null>(null);
@@ -327,19 +349,12 @@ export function RestateStudio({
     [selectedId],
   );
 
-  /** Patch one section's critique, but never resurrect an entry that was pruned. */
-  const patchCritique = useCallback((id: string, patch: (prev: CritiqueState) => CritiqueState) => {
-    setCritiques((c) => {
-      const prev = c[id];
-      return prev === undefined ? c : { ...c, [id]: patch(prev) };
-    });
-  }, []);
-
-  /** Supersede any in-flight critique for a section (its late frames become no-ops). */
-  const endCritique = useCallback((id: string) => {
-    critiqueGen.current.set(id, (critiqueGen.current.get(id) ?? 0) + 1);
-    critiqueRuns.current.get(id)?.abort();
-    critiqueRuns.current.delete(id);
+  /** Supersede the in-flight critique, if any (its late result becomes a no-op). */
+  const endCritique = useCallback(() => {
+    critiqueGen.current += 1;
+    critiqueAbort.current?.abort();
+    critiqueAbort.current = null;
+    setCritiqueRun(null);
   }, []);
 
   // Restore the persisted draft once per mount (the parent keys this component by page).
@@ -349,10 +364,7 @@ export function RestateStudio({
     if (saved !== null) {
       if (saved.selectedId !== undefined) setSelectedId(saved.selectedId);
       setDrafts(saved.drafts);
-      // Sessions restore as idle critiques: nothing to show, but a follow-up round resumes.
-      const resumable: Record<string, CritiqueState> = {};
-      for (const [id, sessionId] of Object.entries(saved.sessions)) resumable[id] = { ...CRITIQUE_IDLE, sessionId };
-      setCritiques(resumable);
+      setSessionId(saved.sessionId);
     }
     setRestored(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -377,64 +389,41 @@ export function RestateStudio({
     const keptDrafts = pruneBySection(drafts, elements);
     if (Object.keys(keptDrafts).length !== Object.keys(drafts).length) setDrafts(keptDrafts);
     // A critique belongs to a restatement in progress: once the section is verified (or
-    // gone) its panel is unreachable, so end the run and drop it.
-    const keptCritiques = pruneBySection(
-      critiques,
-      elements.filter((e) => e.status === "ai-draft"),
-    );
-    if (Object.keys(keptCritiques).length !== Object.keys(critiques).length) {
-      for (const id of Object.keys(critiques)) if (keptCritiques[id] === undefined) endCritique(id);
-      setCritiques(keptCritiques);
-    }
-  }, [restored, elementsLoading, elementsError, elements, selectedId, drafts, critiques, endCritique]);
+    // gone) its panel is unreachable, so drop it — and end a run still pointed at it.
+    const restatable = elements.filter((e) => e.status === "ai-draft");
+    const keptCritiques = pruneBySection(critiques, restatable);
+    if (Object.keys(keptCritiques).length !== Object.keys(critiques).length) setCritiques(keptCritiques);
+    if (critiqueRun !== null && !restatable.some((e) => e.id === critiqueRun.id)) endCritique();
+  }, [restored, elementsLoading, elementsError, elements, selectedId, drafts, critiques, critiqueRun, endCritique]);
 
   // Looking at a critique marks it read (whether it landed before or during the visit).
   useEffect(() => {
     if (selectedId === null || critiques[selectedId]?.unread !== true) return;
-    patchCritique(selectedId, (prev) => ({ ...prev, unread: false }));
-  }, [selectedId, critiques, patchCritique]);
+    setCritiques((c) => (c[selectedId] === undefined ? c : { ...c, [selectedId]: { ...c[selectedId], unread: false } }));
+  }, [selectedId, critiques]);
 
-  const sessions = useMemo(() => {
-    const out: Record<string, string> = {};
-    for (const [id, c] of Object.entries(critiques)) if (c.sessionId !== undefined) out[id] = c.sessionId;
-    return out;
-  }, [critiques]);
-
-  // Persist {selectedId, drafts, sessions}; an all-empty state clears the key.
+  // Persist {selectedId, drafts, sessionId}; an all-empty state clears the key.
   useEffect(() => {
     if (!restored) return;
     const store = browserStore();
     if (store === null) return;
-    if (selectedId === null && Object.keys(drafts).length === 0 && Object.keys(sessions).length === 0) {
+    if (selectedId === null && sessionId === undefined && Object.keys(drafts).length === 0) {
       clearRestateDraft(store, workspaceId, pageId);
     } else {
       saveRestateDraft(store, workspaceId, pageId, {
         ...(selectedId !== null ? { selectedId } : {}),
         drafts,
-        sessions,
+        ...(sessionId !== undefined ? { sessionId } : {}),
       });
     }
-  }, [restored, selectedId, drafts, sessions, workspaceId, pageId]);
-
-  // Elapsed-seconds ticker for the long-running holistic review.
-  useEffect(() => {
-    if (!reviewRun.running || reviewRun.startedAt === null) return;
-    const startedAt = reviewRun.startedAt;
-    const t = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 1000);
-    return () => clearInterval(t);
-  }, [reviewRun.running, reviewRun.startedAt]);
+  }, [restored, selectedId, drafts, sessionId, workspaceId, pageId]);
 
   // Abandon in-flight critic/review calls when the studio unmounts.
   useEffect(() => {
-    const runs = critiqueRuns.current;
-    const gens = critiqueGen.current;
+    const critic = critiqueAbort;
     const review = reviewAbort;
     return () => {
-      for (const [id, ctrl] of runs) {
-        gens.set(id, (gens.get(id) ?? 0) + 1);
-        ctrl.abort();
-      }
-      runs.clear();
+      critic.current?.abort();
       review.current?.abort();
     };
   }, []);
@@ -503,6 +492,11 @@ export function RestateStudio({
 
   const selectedEl = useMemo(() => elements.find((e) => e.id === selectedId), [elements, selectedId]);
   const critique = selectedId === null ? undefined : critiques[selectedId];
+  const critiqueVerdict = critique?.verdict ?? null;
+  const critiqueError = critique?.error ?? null;
+  const critiquing = critiqueRun !== null && critiqueRun.id === selectedId;
+  const critiqueElapsed = useElapsedSeconds(critiquing ? critiqueRun.startedAt : null);
+  const reviewElapsed = useElapsedSeconds(reviewRun.running ? reviewRun.startedAt : null);
   const fallbackTitle = titleOf(selectedEl);
   const verified = elements.filter((e) => e.status === "human-verified").length;
   const total = elements.length;
@@ -534,15 +528,15 @@ export function RestateStudio({
     if (sections.length === 0) return;
     const ok = await runMutation("restateSections", { removeIds: [id], sections });
     if (ok) {
-      // Success clears this section's work — including any in-flight critique, whose late
-      // deltas must not resurrect the panel. On ANY failure (incl. the OCC conflict) the
-      // draft, selection and critique stay.
-      endCritique(id);
+      // Success clears this section's work — including a critique still running on it,
+      // whose result must not resurrect the panel. On ANY failure (incl. the OCC conflict)
+      // the draft, selection and critique stay.
+      if (critiqueRun?.id === id) endCritique();
       setSelectedId(null);
       setDrafts((d) => omit(d, id));
       setCritiques((c) => omit(c, id));
     }
-  }, [selectedId, draft, fallbackTitle, runMutation, endCritique]);
+  }, [selectedId, draft, fallbackTitle, runMutation, critiqueRun, endCritique]);
 
   const onCritique = useCallback(async () => {
     const id = selectedId;
@@ -550,68 +544,52 @@ export function RestateStudio({
     if (id === null || el === undefined) return;
     const restatement = drafts[id] ?? "";
     if (restatement.trim() === "") return;
-    const gen = (critiqueGen.current.get(id) ?? 0) + 1;
-    critiqueGen.current.set(id, gen);
-    critiqueRuns.current.get(id)?.abort();
+    critiqueGen.current += 1;
+    const gen = critiqueGen.current;
+    critiqueAbort.current?.abort();
     const ctrl = new AbortController();
-    critiqueRuns.current.set(id, ctrl);
-    const live = (): boolean => critiqueGen.current.get(id) === gen;
-    // Same section, so an existing session is always resumable — the server ignores the
-    // freshly-sent source when resuming, and the source hasn't changed.
-    const resume = critiques[id]?.sessionId;
-    setCritiques((c) => ({
-      ...c,
-      [id]: { ...CRITIQUE_IDLE, streaming: true, ...(resume !== undefined ? { sessionId: resume } : {}) },
-    }));
+    critiqueAbort.current = ctrl;
+    const live = (): boolean => critiqueGen.current === gen;
+    setCritiqueRun({ id, startedAt: Date.now() });
+    setCritiques((c) => omit(c, id)); // the previous verdict is about text that no longer exists
+    const land = (state: CritiqueState): void => {
+      setCritiques((c) => ({ ...c, [id]: state }));
+      setCritiqueRun(null);
+    };
     let source: string;
     try {
       const h = await getHost();
       // The critic wants the source content; the rendered heading would duplicate the title.
       source = splitRenderedElement(await h.renderElement(workspaceId, pageId, SECTIONS_KEY, id)).body;
     } catch (e) {
-      if (live()) patchCritique(id, (p) => ({ ...p, streaming: false, error: errText(e), unread: true }));
+      if (live()) land({ verdict: null, error: errText(e), unread: true });
       return;
     }
-    const out = await streamCritique({
-      sections: [{ title: titleOf(el), markdown: source }],
+    const out = await requestCritique({
+      section: { title: titleOf(el), markdown: source },
       restatement,
-      sessionId: resume,
+      sessionId,
       signal: ctrl.signal,
-      onDelta: (t) => {
-        if (live()) patchCritique(id, (p) => ({ ...p, text: p.text + t }));
-      },
     });
-    if (!live()) return; // superseded by Accept / a newer run / unmount
+    if (!live()) return; // superseded by Accept / a newer run / a cancel
     if (out.ok) {
-      patchCritique(id, (p) => ({
-        ...p,
-        streaming: false,
-        verdict: out.verdict,
-        error: null,
-        unread: true, // cleared on sight; badges the card when you've moved on
-        ...(out.sessionId !== undefined ? { sessionId: out.sessionId } : {}),
-      }));
+      // The reply names the session to keep: the one just opened, or the fresh one the
+      // server fell back to when the stored id was dead.
+      if (out.sessionId !== undefined) setSessionId(out.sessionId);
+      // unread is cleared on sight; it badges the card when you've moved on.
+      land({ verdict: out.verdict, error: null, unread: true });
     } else if (ctrl.signal.aborted) {
-      patchCritique(id, (p) => ({ ...p, streaming: false })); // user cancel — not a failure
+      setCritiqueRun(null); // user cancel — not a failure
     } else {
-      patchCritique(id, (p) => ({
-        ...p,
-        streaming: false,
-        error: out.message,
-        unread: true,
-        // A failed resume usually means the claude session is gone — drop it so the next
-        // attempt starts fresh (the source travels in every request anyway).
-        ...(resume !== undefined ? { sessionId: undefined } : {}),
-      }));
+      land({ verdict: null, error: out.message, unread: true });
     }
-  }, [selectedId, selectedEl, drafts, critiques, workspaceId, pageId, patchCritique]);
+  }, [selectedId, selectedEl, drafts, sessionId, workspaceId, pageId]);
 
   const onRunReview = useCallback(async () => {
     if (specMarkdown === null) return;
     reviewAbort.current?.abort();
     const ctrl = new AbortController();
     reviewAbort.current = ctrl;
-    setElapsed(0);
     setReviewRun({ running: true, startedAt: Date.now(), error: null });
     // The route runs FIRST; only its success mutates the page, so a failed/cancelled
     // review leaves the wiki untouched.
@@ -821,7 +799,7 @@ export function RestateStudio({
 
         {reviewRun.running && (
           <p className="restate-review-status" role="status">
-            Reviewing… {elapsed}s — the page is untouched until the review returns (this can take minutes).{" "}
+            Reviewing… {reviewElapsed}s — the page is untouched until the review returns (this can take minutes).{" "}
             <button type="button" className="restate-cancel" onClick={() => reviewAbort.current?.abort()}>
               Cancel
             </button>
@@ -915,15 +893,16 @@ export function RestateStudio({
                 <button
                   type="button"
                   className="tf-btn tf-btn-secondary"
-                  disabled={!criticReady || critique?.streaming === true || draft.trim() === "" || mutating}
-                  title={criticGate ?? undefined}
+                  disabled={!criticReady || critiqueRun !== null || draft.trim() === "" || mutating}
+                  title={
+                    criticGate ??
+                    (critiqueRun !== null && !critiquing
+                      ? "another section is being critiqued — one at a time"
+                      : undefined)
+                  }
                   onClick={() => void onCritique()}
                 >
-                  {critique?.streaming === true
-                    ? "Critiquing…"
-                    : critique !== undefined && critique.verdict !== null
-                      ? "Get another critique"
-                      : "Get critique"}
+                  {critiquing ? "Critiquing…" : critiqueVerdict !== null ? "Re-critique" : "Get critique"}
                 </button>
                 <button
                   type="button"
@@ -961,70 +940,65 @@ export function RestateStudio({
               </div>
             ))}
 
-          {selectedId !== null &&
-            critique !== undefined &&
-            (critique.streaming || critique.text !== "" || critique.verdict !== null || critique.error !== null) && (
-              <div className="restate-critique">
-                <div className="restate-critique-head">
-                  <span>Critique{critique.streaming ? " — streaming…" : ""}</span>
-                  {critique.streaming ? (
-                    <button
-                      type="button"
-                      className="restate-cancel"
-                      onClick={() => critiqueRuns.current.get(selectedId)?.abort()}
-                    >
-                      Cancel
-                    </button>
+          {selectedId !== null && (critiquing || critique !== undefined) && (
+            <div className="restate-critique">
+              <div className="restate-critique-head">
+                <span>
+                  {critiquing ? (
+                    `Critiquing… ${critiqueElapsed}s`
+                  ) : critiqueVerdict !== null ? (
+                    <>
+                      Critique{" "}
+                      <span className={`restate-badge restate-grade-${critiqueVerdict.grade}`}>
+                        {GRADE_LABEL[critiqueVerdict.grade]}
+                      </span>
+                    </>
                   ) : (
-                    <button
-                      type="button"
-                      className="restate-cancel"
-                      onClick={() => {
-                        endCritique(selectedId);
-                        setCritiques((c) => omit(c, selectedId));
-                      }}
-                    >
-                      Clear
-                    </button>
+                    "Critique"
+                  )}
+                </span>
+                {critiquing ? (
+                  <button type="button" className="restate-cancel" onClick={endCritique}>
+                    Cancel
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="restate-cancel"
+                    onClick={() => setCritiques((c) => omit(c, selectedId))}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              {critiqueVerdict !== null && (
+                <div className="restate-verdict">
+                  <p className="restate-verdict-summary">{critiqueVerdict.summary}</p>
+                  {critiqueVerdict.gaps.length > 0 && (
+                    <div className="restate-verdict-group">
+                      <span className="restate-verdict-label restate-verdict-gaps">Gaps</span>
+                      <ul>
+                        {critiqueVerdict.gaps.map((g, i) => (
+                          <li key={i}>{g}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {critiqueVerdict.improvements.length > 0 && (
+                    <div className="restate-verdict-group">
+                      <span className="restate-verdict-label restate-verdict-improvements">Improvements</span>
+                      <ul>
+                        {critiqueVerdict.improvements.map((g, i) => (
+                          <li key={i}>{g}</li>
+                        ))}
+                      </ul>
+                    </div>
                   )}
                 </div>
-                {critique.text !== "" && (
-                  /* eslint-disable-next-line react/no-danger */
-                  <div
-                    className="markdown restate-critique-body"
-                    dangerouslySetInnerHTML={{ __html: renderMarkdown(critique.text, workspaceId) }}
-                  />
-                )}
-                {critique.verdict !== null && (
-                  <div className="restate-verdict">
-                    <p>
-                      <strong>Verdict.</strong> {critique.verdict.summary}
-                    </p>
-                    {critique.verdict.gaps.length > 0 && (
-                      <div className="restate-verdict-group">
-                        <span className="restate-verdict-label restate-verdict-gaps">Gaps</span>
-                        <ul>
-                          {critique.verdict.gaps.map((g, i) => (
-                            <li key={i}>{g}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                    {critique.verdict.improvements.length > 0 && (
-                      <div className="restate-verdict-group">
-                        <span className="restate-verdict-label restate-verdict-improvements">Improvements</span>
-                        <ul>
-                          {critique.verdict.improvements.map((g, i) => (
-                            <li key={i}>{g}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                  </div>
-                )}
-                {critique.error !== null && <p className="error">{critique.error}</p>}
-              </div>
-            )}
+              )}
+              {critiqueError !== null && <p className="error">{critiqueError}</p>}
+            </div>
+          )}
         </section>
       </>
     );
@@ -1056,7 +1030,7 @@ export function RestateStudio({
               selectable={workbenchActive && el.status === "ai-draft"}
               selected={selectedId === el.id}
               onToggle={() => toggle(el.id)}
-              critique={critiqueTag(critiques[el.id])}
+              critique={critiqueTag(critiques[el.id], critiqueRun?.id === el.id)}
               action={
                 !workbenchActive
                   ? null

@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  asCritiqueEvent,
+  asCritiqueVerdict,
   assembleDraft,
   clearRestateDraft,
-  createSseDecoder,
   isRestatable,
   loadRestateDraft,
   pruneBySection,
@@ -179,67 +178,23 @@ describe("sliceH2Section", () => {
   });
 });
 
-// ── SSE decoding ───────────────────────────────────────────────────────────────
+// ── the critique verdict ───────────────────────────────────────────────────────
 
-describe("createSseDecoder", () => {
-  it("decodes multiple frames arriving in one chunk", () => {
-    const sse = createSseDecoder();
-    const events = sse.push('data: {"type":"delta","text":"a"}\n\ndata: {"type":"delta","text":"b"}\n\n');
-    expect(events).toEqual([
-      { type: "delta", text: "a" },
-      { type: "delta", text: "b" },
-    ]);
+describe("asCritiqueVerdict", () => {
+  it("narrows a well-formed verdict", () => {
+    const raw = { grade: "surface", summary: "s", gaps: ["g1", 2, "g2"], improvements: "not-a-list" };
+    expect(asCritiqueVerdict(raw)).toEqual({ grade: "surface", summary: "s", gaps: ["g1", "g2"], improvements: [] });
   });
 
-  it("reassembles a frame split across arbitrary chunk boundaries", () => {
-    const sse = createSseDecoder();
-    expect(sse.push("da")).toEqual([]);
-    expect(sse.push('ta: {"type":"delta","te')).toEqual([]);
-    expect(sse.push('xt":"hi"}\n')).toEqual([]);
-    expect(sse.push("\n")).toEqual([{ type: "delta", text: "hi" }]);
+  it("defaults an absent or unknown grade to partial", () => {
+    expect(asCritiqueVerdict({ summary: "s" })?.grade).toBe("partial");
+    expect(asCritiqueVerdict({ summary: "s", grade: "excellent" })?.grade).toBe("partial");
   });
 
-  it("drops comment/keepalive lines and unparseable payloads", () => {
-    const sse = createSseDecoder();
-    expect(sse.push(": ping\n\ndata: not-json\n\ndata: {\"ok\":1}\n\n")).toEqual([{ ok: 1 }]);
-  });
-
-  it("joins multi-data-line frames with newlines (SSE spec)", () => {
-    const sse = createSseDecoder();
-    expect(sse.push('data: {"a":\ndata: 1}\n\n')).toEqual([{ a: 1 }]);
-  });
-
-  it("end() flushes a trailing unterminated frame", () => {
-    const sse = createSseDecoder();
-    expect(sse.push('data: {"type":"error","message":"boom"}')).toEqual([]);
-    expect(sse.end()).toEqual([{ type: "error", message: "boom" }]);
-  });
-});
-
-describe("asCritiqueEvent", () => {
-  it("passes through delta and error frames", () => {
-    expect(asCritiqueEvent({ type: "delta", text: "t" })).toEqual({ type: "delta", text: "t" });
-    expect(asCritiqueEvent({ type: "error", message: "m" })).toEqual({ type: "error", message: "m" });
-  });
-
-  it("narrows a verdict frame, coercing gap/improvement lists and keeping sessionId", () => {
-    const raw = {
-      type: "verdict",
-      verdict: { summary: "s", gaps: ["g1", 2, "g2"], improvements: "not-a-list" },
-      sessionId: "sess-1",
-    };
-    expect(asCritiqueEvent(raw)).toEqual({
-      type: "verdict",
-      verdict: { summary: "s", gaps: ["g1", "g2"], improvements: [] },
-      sessionId: "sess-1",
-    });
-  });
-
-  it("returns null for malformed frames", () => {
-    expect(asCritiqueEvent(null)).toBeNull();
-    expect(asCritiqueEvent({ type: "delta" })).toBeNull();
-    expect(asCritiqueEvent({ type: "verdict", verdict: { gaps: [] } })).toBeNull();
-    expect(asCritiqueEvent({ type: "mystery" })).toBeNull();
+  it("returns null without a usable summary", () => {
+    expect(asCritiqueVerdict(null)).toBeNull();
+    expect(asCritiqueVerdict({ gaps: [] })).toBeNull();
+    expect(asCritiqueVerdict({ summary: "  " })).toBeNull();
   });
 });
 
@@ -260,12 +215,12 @@ describe("restate draft persistence", () => {
     expect(restateStorageKey("ws-1", "spec-restatement:abc")).toBe("wiki.restate.ws-1.spec-restatement:abc");
   });
 
-  it("round-trips {selectedId, drafts, sessions} through save/load", () => {
+  it("round-trips {selectedId, drafts, sessionId} through save/load", () => {
     const store = memoryStore();
     const state = {
       selectedId: "a",
       drafts: { a: "## X\n\nbody", b: "other section's draft" },
-      sessions: { a: "sess-9" },
+      sessionId: "sess-9",
     };
     saveRestateDraft(store, "ws", "p", state);
     expect(loadRestateDraft(store, "ws", "p")).toEqual(state);
@@ -275,14 +230,20 @@ describe("restate draft persistence", () => {
 
   it("keeps a deliberately-emptied draft as an entry (absent ≠ empty — absent re-seeds)", () => {
     const store = memoryStore();
-    saveRestateDraft(store, "ws", "p", { selectedId: "a", drafts: { a: "" }, sessions: {} });
-    expect(loadRestateDraft(store, "ws", "p")).toEqual({ selectedId: "a", drafts: { a: "" }, sessions: {} });
+    saveRestateDraft(store, "ws", "p", { selectedId: "a", drafts: { a: "" } });
+    expect(loadRestateDraft(store, "ws", "p")).toEqual({ selectedId: "a", drafts: { a: "" } });
+  });
+
+  it("keeps the page session with nothing else selected or drafted", () => {
+    const store = memoryStore();
+    saveRestateDraft(store, "ws", "p", { drafts: {}, sessionId: "sess-9" });
+    expect(loadRestateDraft(store, "ws", "p")).toEqual({ drafts: {}, sessionId: "sess-9" });
   });
 
   it("round-trips with no selection, and clears cleanly", () => {
     const store = memoryStore();
-    saveRestateDraft(store, "ws", "p", { drafts: { a: "d" }, sessions: {} });
-    expect(loadRestateDraft(store, "ws", "p")).toEqual({ drafts: { a: "d" }, sessions: {} });
+    saveRestateDraft(store, "ws", "p", { drafts: { a: "d" } });
+    expect(loadRestateDraft(store, "ws", "p")).toEqual({ drafts: { a: "d" } });
     clearRestateDraft(store, "ws", "p");
     expect(loadRestateDraft(store, "ws", "p")).toBeNull();
   });
@@ -295,42 +256,34 @@ describe("restate draft persistence", () => {
         selectedIds: ["b", "a"],
         drafts: { "a\nb": "the pair's draft", b: "b's draft" },
         sessionId: "sess-1",
-        sourceKey: "a\nb", // opened over two sections — unusable for one
+        sourceKey: "a\nb",
       }),
     );
-    expect(loadRestateDraft(store, "ws", "p")).toEqual({ selectedId: "b", drafts: { b: "b's draft" }, sessions: {} });
+    expect(loadRestateDraft(store, "ws", "p")).toEqual({ selectedId: "b", drafts: { b: "b's draft" } });
   });
 
-  it("carries a single-section session and an older flat `draft` over", () => {
+  it("carries an older flat `draft` over", () => {
     const store = memoryStore();
-    store.setItem(
-      restateStorageKey("ws", "p"),
-      JSON.stringify({ selectedIds: ["a"], draft: "old text", sessionId: "sess-1", sourceKey: "a" }),
-    );
-    expect(loadRestateDraft(store, "ws", "p")).toEqual({
-      selectedId: "a",
-      drafts: { a: "old text" },
-      sessions: { a: "sess-1" },
-    });
+    store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ selectedIds: ["a"], draft: "old text" }));
+    expect(loadRestateDraft(store, "ws", "p")).toEqual({ selectedId: "a", drafts: { a: "old text" } });
   });
 
-  it("drops a sessionId stored WITHOUT its section (it can't be tied to one)", () => {
+  it("drops per-section-era sessions — they were opened under a different prompt contract", () => {
     const store = memoryStore();
-    const stored = { selectedId: "a", drafts: { a: "d" }, sessions: {} };
-    store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ ...stored, sessionId: "legacy" }));
-    expect(loadRestateDraft(store, "ws", "p")).toEqual(stored);
-    // …and a sourceKey without a sessionId is equally meaningless.
-    store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ ...stored, sourceKey: "a" }));
-    expect(loadRestateDraft(store, "ws", "p")).toEqual(stored);
+    const kept = { selectedId: "a", drafts: { a: "d" } };
+    for (const legacy of [{ sessions: { a: "sess-1" } }, { sessionId: "sess-1", sourceKey: "a" }]) {
+      store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ ...kept, ...legacy }));
+      expect(loadRestateDraft(store, "ws", "p")).toEqual(kept);
+    }
   });
 
-  it("returns null for corrupt or empty stored payloads (an orphan sessionId alone counts as empty)", () => {
+  it("returns null for corrupt or empty stored payloads", () => {
     const store = memoryStore();
     store.setItem(restateStorageKey("ws", "p"), "not-json");
     expect(loadRestateDraft(store, "ws", "p")).toBeNull();
-    store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ drafts: {}, sessions: {} }));
+    store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ drafts: {} }));
     expect(loadRestateDraft(store, "ws", "p")).toBeNull();
-    store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ drafts: {}, sessions: {}, sessionId: "legacy" }));
+    store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ drafts: {}, sessions: { a: "legacy" } }));
     expect(loadRestateDraft(store, "ws", "p")).toBeNull();
   });
 });

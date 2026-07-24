@@ -80,13 +80,7 @@ export interface BuildArgsOptions {
 }
 
 export function buildArgs(prompt: string, opts: BuildArgsOptions): string[] {
-  const args: string[] = [
-    "--dangerously-skip-permissions",
-    "--output-format",
-    "stream-json",
-    "--include-partial-messages",
-    "--verbose",
-  ];
+  const args: string[] = ["--dangerously-skip-permissions", "--output-format", "stream-json", "--verbose"];
   if (opts.disallowedTools !== undefined && opts.disallowedTools.length > 0) {
     args.push("--disallowed-tools", opts.disallowedTools.join(","));
   }
@@ -103,8 +97,6 @@ export interface RunClaudeOptions {
   timeoutMs?: number;
   /** Wire a route's request.signal here — client disconnect kills the process. */
   signal?: AbortSignal;
-  /** Incremental assistant text from the partial-message stream (for SSE re-emission). */
-  onDelta?: (text: string) => void;
 }
 
 export interface RunClaudeResult {
@@ -231,11 +223,6 @@ export function runClaude(prompt: string, opts: RunClaudeOptions = {}): Promise<
           // Captured so a session that dies before its result event (e.g. timeout)
           // is still resumable on the next attempt.
           if (typeof parsed.session_id === "string") initSessionId = parsed.session_id;
-        } else if (parsed.type === "stream_event") {
-          const delta = parsed.event?.delta;
-          if (delta?.type === "text_delta" && typeof delta.text === "string") {
-            opts.onDelta?.(delta.text);
-          }
         } else if (parsed.type === "assistant") {
           const content = parsed.message?.content;
           if (Array.isArray(content)) {
@@ -283,7 +270,15 @@ function stringList(raw: unknown): string[] {
   return raw.filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "");
 }
 
+export type CritiqueGrade = "understood" | "partial" | "surface";
+
+/** The prompt asks for these caps; the validator enforces them, so a chatty model
+ *  can't make the panel long again. Entries are ordered most-damaging first. */
+export const MAX_GAPS = 4;
+export const MAX_IMPROVEMENTS = 2;
+
 export interface CritiqueVerdict {
+  grade: CritiqueGrade;
   summary: string;
   /** Things the restatement missed, misunderstood, or distorted relative to the source. */
   gaps: string[];
@@ -291,12 +286,25 @@ export interface CritiqueVerdict {
   improvements: string[];
 }
 
-/** Lenient coercion; null when unusable (not an object, or no usable summary). */
+function coerceGrade(raw: unknown): CritiqueGrade {
+  if (typeof raw === "string") {
+    const g = raw.trim().toLowerCase();
+    if (g === "understood" || g === "surface") return g;
+  }
+  return "partial";
+}
+
+/** Lenient coercion + the length caps; null when unusable (not an object, or no summary). */
 export function validateCritiqueVerdict(raw: unknown): CritiqueVerdict | null {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
   const obj = raw as Record<string, unknown>;
   if (typeof obj.summary !== "string" || obj.summary.trim() === "") return null;
-  return { summary: obj.summary, gaps: stringList(obj.gaps), improvements: stringList(obj.improvements) };
+  return {
+    grade: coerceGrade(obj.grade),
+    summary: obj.summary,
+    gaps: stringList(obj.gaps).slice(0, MAX_GAPS),
+    improvements: stringList(obj.improvements).slice(0, MAX_IMPROVEMENTS),
+  };
 }
 
 export type ReviewSeverity = "minor" | "major" | "critical";

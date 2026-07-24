@@ -1,7 +1,15 @@
 /**
- * Server-only critic orchestration for the restatement studio: the prompts, the
- * critique/review runs (each with one --resume reinforcement retry when the reply's
- * trailing JSON is missing or invalid), and the SSE framing helper.
+ * Server-only critic orchestration for the restatement studio: the prompts and the
+ * critique/review runs.
+ *
+ * The critic is an LLM-as-function: every reply is one JSON object and nothing else — no
+ * prose to stream, no essay to skim. Length caps live in the prompt AND in
+ * {@link validateCritiqueVerdict}, so a chatty reply still lands short.
+ *
+ * ONE claude session serves a whole page: the first critique opens it, every later
+ * critique — other sections, later rounds — resumes it, so the critic accumulates the
+ * spec as it goes. That session is a mutable on-disk resource, hence {@link onSession}
+ * serializes runs against it; a resume that fails is retried once from a fresh session.
  */
 
 import {
@@ -9,6 +17,8 @@ import {
   extractJson,
   validateCritiqueVerdict,
   validateReviewVerdict,
+  MAX_GAPS,
+  MAX_IMPROVEMENTS,
   type CritiqueVerdict,
   type ReviewVerdict,
   type RunClaudeResult,
@@ -20,80 +30,76 @@ export interface SourceSection {
 }
 
 const CRITIQUE_JSON_SHAPE =
-  '{"summary": "<one- or two-sentence overall judgement>", "gaps": ["<something missed, misunderstood, or distorted>", ...], "improvements": ["<a genuine improvement over the source>", ...]}';
+  '{"grade": "understood"|"partial"|"surface", "summary": "<one sentence, <=25 words>", "gaps": ["<one specific miss, <=20 words>"], "improvements": ["<one real gain over the source, <=20 words>"]}';
 
 const REVIEW_JSON_SHAPE =
-  '{"summary": "<overall assessment, one or two sentences>", "notes": [{"title": "<short label>", "markdown": "<the finding, as markdown>", "severity": "minor" | "major" | "critical"}, ...]}';
+  '{"summary": "<one or two sentences>", "notes": [{"title": "<short label>", "markdown": "<the finding, <=3 sentences>", "severity": "minor"|"major"|"critical"}]}';
 
-export function critiqueFirstPrompt(sections: readonly SourceSection[], restatement: string): string {
-  const source = sections.map((s) => `### ${s.title}\n\n${s.markdown.trim()}`).join("\n\n---\n\n");
+const JSON_ONLY = "Reply with EXACTLY one JSON object and nothing else: no prose, no preamble, no code fence.";
+
+const CRITIQUE_PREAMBLE = [
+  "You are the critic in a spec-restatement studio. A human rewrites AI-drafted spec sections in their own",
+  "words to prove they understand them. You judge understanding, not prose style.",
+  "",
+  `You are a function, not a chat partner. ${JSON_ONLY} Shape:`,
+  CRITIQUE_JSON_SHAPE,
+  "",
+  'grade: "understood" = the mechanism is theirs; "partial" = right shape, something real missed;',
+  '"surface" = reworded, substance lost.',
+  `gaps: at most ${MAX_GAPS}, most damaging first. Each names ONE claim, constraint or mechanism they missed,`,
+  "inverted or distorted, and what the source actually says. An inversion outranks an omission.",
+  `improvements: at most ${MAX_IMPROVEMENTS}, only where they genuinely beat the source. Usually [].`,
+  "",
+  "Every entry is one specific thing, stated once. No flattery, no hedging, no summarising the source back,",
+  "no restating the same miss twice, no praise for effort.",
+  "This session will bring you further sections of the same spec, and revised drafts of ones you have already",
+  "seen. Use them as context only: never narrate what changed since your last critique, and never grade a",
+  "draft on its history. Judge only the text in front of you.",
+].join("\n");
+
+function critiqueTask(section: SourceSection, restatement: string): string {
   return [
-    "You are the critic in a restatement studio. A spec document was drafted with AI help;",
-    "a human has now restated part of it in their own words to prove they actually understand it.",
-    "Your job is to judge that understanding — not the prose style.",
+    `SECTION: ${section.title}`,
     "",
-    "SOURCE SECTIONS (the original spec content being restated):",
+    "--- SOURCE ---",
+    section.markdown.trim(),
     "",
-    source,
-    "",
-    "THE HUMAN'S RESTATEMENT (they may restructure or merge sections):",
-    "",
+    "--- RESTATEMENT ---",
     restatement.trim(),
-    "",
-    "Critique the restatement against the source:",
-    "- Decide whether it demonstrates real understanding, or is a reworded surface with the substance lost.",
-    "- Identify concretely what was missed, misunderstood, or distorted: name the specific claim, constraint, or mechanism, and say what the source actually establishes. Quote short phrases from both texts where that sharpens a point.",
-    "- Acknowledge genuine improvements on the source — tighter scope, better structure, corrected errors. Credit only real improvements; do not manufacture praise.",
-    "- Be direct and specific. No flattery, no hedging.",
-    "",
-    "Reply in two parts, in this order:",
-    "1. The critique itself, as readable markdown (it streams to the human as you write).",
-    "2. At the very end, EXACTLY ONE JSON object on its own lines, no code fence, the only JSON object in the reply, matching:",
-    CRITIQUE_JSON_SHAPE,
-    "gaps = things the restatement missed, misunderstood, or distorted relative to the source sections; improvements = ways it genuinely improved on the source. Empty arrays are fine when nothing qualifies.",
   ].join("\n");
 }
 
-/** Round 2+ over --resume: the session already has the source, so only the new restatement is sent. */
-export function critiqueFollowUpPrompt(restatement: string): string {
-  return [
-    "The human has revised their restatement. The source sections are unchanged from earlier in this session.",
-    "Critique this new restatement fresh against that same source: what improved since your last critique, what still stands, and anything newly introduced that misses or distorts the source.",
-    "Same reply format: readable markdown critique first, then at the very end EXACTLY ONE JSON object on its own lines, no code fence, matching:",
-    CRITIQUE_JSON_SHAPE,
-    "",
-    "REVISED RESTATEMENT:",
-    "",
-    restatement.trim(),
-  ].join("\n");
+export function critiqueFirstPrompt(section: SourceSection, restatement: string): string {
+  return `${CRITIQUE_PREAMBLE}\n\n${critiqueTask(section, restatement)}`;
+}
+
+/** Over `--resume`: the contract is in the session, so only the task and a one-line reminder go. */
+export function critiqueFollowUpPrompt(section: SourceSection, restatement: string): string {
+  return `${critiqueTask(section, restatement)}\n\n${JSON_ONLY} Shape:\n${CRITIQUE_JSON_SHAPE}`;
 }
 
 export function reviewPrompt(specMarkdown: string): string {
   return [
     "You are reviewing a complete specification document holistically.",
     "",
-    "THE SPEC:",
-    "",
+    "--- THE SPEC ---",
     specMarkdown.trim(),
     "",
-    "Assess the document as a whole, not section by section:",
-    "- Coherence: do the sections tell one consistent story, with stable terminology throughout?",
-    "- Contradictions: places where one section's claims conflict with another's.",
-    "- Gaps between sections: hand-offs the document assumes but never specifies; questions a careful reader is left with.",
-    "- Scope creep: content that drifts beyond the document's stated purpose.",
-    "- Missing concerns: risks, constraints, or failure modes the spec never addresses.",
+    "Assess the document as a whole, not section by section: coherence and stable terminology across sections;",
+    "contradictions between them; hand-offs the document assumes but never specifies; scope creep past its stated",
+    "purpose; risks, constraints or failure modes it never addresses.",
     "",
-    "Be direct and specific; reference sections by their headings. No flattery.",
-    "Reply in two parts, in this order:",
-    "1. Your feedback as readable markdown.",
-    "2. At the very end, EXACTLY ONE JSON object on its own lines, no code fence, the only JSON object in the reply, matching:",
+    "One note per finding, most severe first. Reference sections by heading. No flattery, no summary of the spec.",
+    'severity: "critical" = the spec cannot be built correctly as written; "major" = significant risk of',
+    'misbuilding; "minor" = worth fixing, not blocking.',
+    "",
+    `${JSON_ONLY} Shape:`,
     REVIEW_JSON_SHAPE,
-    'severity: "critical" = the spec cannot be built correctly as written; "major" = significant risk of misbuilding; "minor" = worth fixing, not blocking.',
   ].join("\n");
 }
 
 function reinforcementPrompt(shape: string): string {
-  return `Your previous reply did not end with a single valid JSON object of the required shape. Reply now with ONLY one JSON object matching ${shape} — no prose, no markdown, no code fences, nothing else.`;
+  return `That was not a single valid JSON object. Reply now with ONLY one JSON object matching ${shape} — nothing else.`;
 }
 
 function tryVerdict<T>(text: string, validate: (raw: unknown) => T | null): T | null {
@@ -110,47 +116,84 @@ function failureMessage(what: string, res: RunClaudeResult): string {
   return `${what} failed: ${res.result.slice(0, 300)}`;
 }
 
+// ── session serialization ───────────────────────────────────────────────────────
+
+const sessionQueues = new Map<string, Promise<void>>();
+
+/** `claude --resume <id>` mutates one on-disk session; concurrent runs would interleave it. */
+function onSession<T>(sessionId: string, task: () => Promise<T>): Promise<T> {
+  const run = (sessionQueues.get(sessionId) ?? Promise.resolve()).then(task, task);
+  const tail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  sessionQueues.set(sessionId, tail);
+  void tail.then(() => {
+    if (sessionQueues.get(sessionId) === tail) sessionQueues.delete(sessionId);
+  });
+  return run;
+}
+
+// ── runs ────────────────────────────────────────────────────────────────────────
+
 export type CritiqueOutcome =
   | { ok: true; verdict: CritiqueVerdict; sessionId?: string }
   | { ok: false; message: string };
 
-export async function runCritique(input: {
-  sections: readonly SourceSection[];
+interface CritiqueInput {
+  section: SourceSection;
   restatement: string;
+  /** The PAGE's session — every section and every round resumes the same one. */
   sessionId?: string;
   timeoutMs?: number;
   signal?: AbortSignal;
-  onDelta?: (text: string) => void;
-}): Promise<CritiqueOutcome> {
+}
+
+/** `retryFresh`: the run died in a way a dead session id would explain (not a cancel/timeout). */
+type Attempt = { outcome: CritiqueOutcome; retryFresh: boolean };
+
+async function critiqueAttempt(input: CritiqueInput): Promise<Attempt> {
+  const done = (outcome: CritiqueOutcome, retryFresh = false): Attempt => ({ outcome, retryFresh });
   const prompt =
     input.sessionId !== undefined
-      ? critiqueFollowUpPrompt(input.restatement)
-      : critiqueFirstPrompt(input.sections, input.restatement);
+      ? critiqueFollowUpPrompt(input.section, input.restatement)
+      : critiqueFirstPrompt(input.section, input.restatement);
 
   const first = await runClaude(prompt, {
     resumeSessionId: input.sessionId,
     timeoutMs: input.timeoutMs,
     signal: input.signal,
-    onDelta: input.onDelta,
   });
-  if (!first.success) return { ok: false, message: failureMessage("critique", first) };
+  if (!first.success) {
+    return done({ ok: false, message: failureMessage("critique", first) }, !first.aborted && !first.timedOut);
+  }
 
   const verdict = tryVerdict(first.result, validateCritiqueVerdict);
-  if (verdict !== null) return { ok: true, verdict, sessionId: first.sessionId };
+  if (verdict !== null) return done({ ok: true, verdict, sessionId: first.sessionId });
 
   if (first.sessionId === undefined) {
-    return { ok: false, message: "critique reply had no usable JSON verdict and no session to retry" };
+    return done({ ok: false, message: "critique reply had no usable JSON verdict and no session to retry" });
   }
-  // Retry is not streamed: it re-emits only the JSON, which the UI never renders.
   const retry = await runClaude(reinforcementPrompt(CRITIQUE_JSON_SHAPE), {
     resumeSessionId: first.sessionId,
     timeoutMs: input.timeoutMs,
     signal: input.signal,
   });
-  if (!retry.success) return { ok: false, message: failureMessage("critique retry", retry) };
+  if (!retry.success) return done({ ok: false, message: failureMessage("critique retry", retry) });
   const retried = tryVerdict(retry.result, validateCritiqueVerdict);
-  if (retried !== null) return { ok: true, verdict: retried, sessionId: first.sessionId };
-  return { ok: false, message: "critique reply had no usable JSON verdict after a retry" };
+  if (retried !== null) return done({ ok: true, verdict: retried, sessionId: first.sessionId });
+  return done({ ok: false, message: "critique reply had no usable JSON verdict after a retry" });
+}
+
+export async function runCritique(input: CritiqueInput): Promise<CritiqueOutcome> {
+  const resume = input.sessionId;
+  if (resume === undefined) return (await critiqueAttempt(input)).outcome;
+
+  const attempt = await onSession(resume, () => critiqueAttempt(input));
+  if (!attempt.retryFresh) return attempt.outcome;
+  // A dead session id (pruned, or opened under an older prompt contract) fails the whole
+  // run — the source travels in every request, so a fresh session just re-opens the critic.
+  return (await critiqueAttempt({ ...input, sessionId: undefined })).outcome;
 }
 
 export type ReviewOutcome = { ok: true; verdict: ReviewVerdict } | { ok: false; message: string };
@@ -181,13 +224,6 @@ export async function runReview(input: {
   const retried = tryVerdict(retry.result, validateReviewVerdict);
   if (retried !== null) return { ok: true, verdict: retried };
   return { ok: false, message: "review reply had no usable JSON verdict after a retry" };
-}
-
-// ── route plumbing ──────────────────────────────────────────────────────────────
-
-/** One SSE frame: a single `data:` line carrying the event as JSON (stringify keeps newlines escaped). */
-export function sseData(event: object): string {
-  return `data: ${JSON.stringify(event)}\n\n`;
 }
 
 export function timeoutMsFromEnv(env: Record<string, string | undefined>, fallbackMs: number): number {

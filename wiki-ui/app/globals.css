@@ -1711,7 +1711,7 @@ code {
 }
 /* A section's critique, badged on its card: a run outlives the selection, so you can tell
    it landed without opening the section. */
-.restate-badge-streaming {
+.restate-badge-running {
   color: var(--accent);
   border-color: var(--accent);
 }
@@ -1871,14 +1871,18 @@ code {
   font-size: 13px;
   color: var(--muted);
 }
-.restate-critique-body {
-  max-height: 320px;
-  overflow-y: auto;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
-  background: var(--code-bg);
-  font-size: 13px;
+/* The critic's whole answer: a grade, one sentence, a few bullets. */
+.restate-grade-understood {
+  color: var(--green);
+  border-color: var(--green);
+}
+.restate-grade-partial {
+  color: var(--amber);
+  border-color: var(--amber);
+}
+.restate-grade-surface {
+  color: var(--red);
+  border-color: var(--red);
 }
 .restate-verdict {
   display: flex;
@@ -1888,6 +1892,9 @@ code {
 }
 .restate-verdict > p {
   margin: 0;
+}
+.restate-verdict-summary {
+  color: var(--text);
 }
 .restate-verdict-group ul {
   margin: 4px 0 0;

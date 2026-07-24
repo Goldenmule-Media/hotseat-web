@@ -2,10 +2,10 @@
 
 /**
  * Restatement-studio helpers (feature: spec-restatement studio). The pure pieces — the
- * `## `-heading draft splitter, the rendered-element splitter, the SSE frame decoder, and
- * the localStorage draft persistence — live here so they unit-test without a browser; the
- * fetch wrappers for the /api/restate routes (same-origin Next API, bearer-token attached,
- * 401 → notifyUnauthorized per app convention) sit alongside them.
+ * `## `-heading draft splitter, the rendered-element splitter and the localStorage draft
+ * persistence — live here so they unit-test without a browser; the fetch wrappers for the
+ * /api/restate routes (same-origin Next API, bearer-token attached, 401 → notifyUnauthorized
+ * per app convention) sit alongside them.
  */
 import { getToken, notifyUnauthorized } from "./auth";
 
@@ -127,91 +127,38 @@ export function sliceH2Section(md: string, heading: string, occurrence: "first" 
   return occurrence === "last" ? bodies[bodies.length - 1] : bodies[0];
 }
 
-// ── SSE frame decoding (the /api/restate/critique stream) ───────────────────────
+// ── the critique verdict (the critic's only output) ─────────────────────────────
 
-export interface SseDecoder {
-  /** Feed a chunk; returns the JSON payloads of every frame completed by it. */
-  push(chunk: string): unknown[];
-  /** Flush: parse a trailing frame the stream closed without terminating. */
-  end(): unknown[];
-}
-
-/** Decode `data: <json>\n\n` SSE frames across arbitrary chunk boundaries. Non-`data`
- *  lines (comments, keepalives) and unparseable payloads are dropped. */
-export function createSseDecoder(): SseDecoder {
-  let buffer = "";
-  const parseFrame = (frame: string): unknown => {
-    const dataLines = frame.split("\n").filter((l) => l.startsWith("data:"));
-    if (dataLines.length === 0) return undefined;
-    const payload = dataLines.map((l) => l.slice(5).replace(/^ /, "")).join("\n");
-    try {
-      return JSON.parse(payload) as unknown;
-    } catch {
-      return undefined;
-    }
-  };
-  const drain = (final: boolean): unknown[] => {
-    const events: unknown[] = [];
-    let idx: number;
-    while ((idx = buffer.indexOf("\n\n")) !== -1) {
-      const ev = parseFrame(buffer.slice(0, idx));
-      buffer = buffer.slice(idx + 2);
-      if (ev !== undefined) events.push(ev);
-    }
-    if (final && buffer.trim() !== "") {
-      const ev = parseFrame(buffer);
-      buffer = "";
-      if (ev !== undefined) events.push(ev);
-    }
-    return events;
-  };
-  return {
-    push: (chunk) => {
-      buffer += chunk.replace(/\r\n/g, "\n");
-      return drain(false);
-    },
-    end: () => drain(true),
-  };
-}
+/** "understood" = the mechanism is theirs; "partial" = right shape, something real
+ *  missed; "surface" = reworded, substance lost. */
+export type CritiqueGrade = "understood" | "partial" | "surface";
 
 export interface CritiqueVerdict {
+  grade: CritiqueGrade;
   summary: string;
   gaps: string[];
   improvements: string[];
 }
 
-export type CritiqueEvent =
-  | { type: "delta"; text: string }
-  | { type: "verdict"; verdict: CritiqueVerdict; sessionId?: string }
-  | { type: "error"; message: string };
-
 function stringList(raw: unknown): string[] {
   return Array.isArray(raw) ? raw.filter((s): s is string => typeof s === "string") : [];
 }
 
-function stringRecord(raw: unknown): Record<string, string> {
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return {};
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) if (typeof v === "string") out[k] = v;
-  return out;
+function coerceGrade(raw: unknown): CritiqueGrade {
+  return raw === "understood" || raw === "surface" ? raw : "partial";
 }
 
-/** Narrow one decoded SSE payload to a typed critique event; null for anything else. */
-export function asCritiqueEvent(raw: unknown): CritiqueEvent | null {
+/** Narrow a route payload to a verdict; null when there is no usable summary. */
+export function asCritiqueVerdict(raw: unknown): CritiqueVerdict | null {
   if (raw === null || typeof raw !== "object") return null;
-  const o = raw as Record<string, unknown>;
-  if (o.type === "delta" && typeof o.text === "string") return { type: "delta", text: o.text };
-  if (o.type === "error" && typeof o.message === "string") return { type: "error", message: o.message };
-  if (o.type === "verdict" && o.verdict !== null && typeof o.verdict === "object") {
-    const v = o.verdict as Record<string, unknown>;
-    if (typeof v.summary !== "string") return null;
-    return {
-      type: "verdict",
-      verdict: { summary: v.summary, gaps: stringList(v.gaps), improvements: stringList(v.improvements) },
-      ...(typeof o.sessionId === "string" ? { sessionId: o.sessionId } : {}),
-    };
-  }
-  return null;
+  const v = raw as Record<string, unknown>;
+  if (typeof v.summary !== "string" || v.summary.trim() === "") return null;
+  return {
+    grade: coerceGrade(v.grade),
+    summary: v.summary,
+    gaps: stringList(v.gaps),
+    improvements: stringList(v.improvements),
+  };
 }
 
 // ── draft persistence (localStorage, keyed by workspace + page) ─────────────────
@@ -223,10 +170,16 @@ export interface RestateDraft {
    *  restores what was typed there. An empty string is a real entry (a deliberately
    *  cleared box) — not "unseeded". */
   readonly drafts: Readonly<Record<string, string>>;
-  /** Critique session id per SECTION id, so a follow-up round resumes with context. A
-   *  session is only valid for the section it was opened on (the server's follow-up
-   *  prompt asserts "the source section is unchanged"). */
-  readonly sessions: Readonly<Record<string, string>>;
+  /** The page's ONE critique session: every section and every round resumes it, so the
+   *  critic accumulates the spec instead of meeting each section cold. */
+  readonly sessionId?: string;
+}
+
+function stringRecord(raw: unknown): Record<string, string> {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) if (typeof v === "string") out[k] = v;
+  return out;
 }
 
 /** The minimal Storage surface, injectable so the round-trip unit-tests in node. */
@@ -254,8 +207,8 @@ export function loadRestateDraft(store: KeyValueStore, workspaceId: string, page
     if (raw === null) return null;
     const p = JSON.parse(raw) as Record<string, unknown> | null;
     if (p === null || typeof p !== "object") return null;
-    // Multi-select payloads selected several sections and keyed drafts/sessions by a
-    // newline-joined id SET; only their single-section entries carry over.
+    // Multi-select payloads selected several sections and keyed drafts by a newline-joined
+    // id SET; only their single-section entries carry over.
     const legacy = stringList(p.selectedIds);
     const selectedId = typeof p.selectedId === "string" ? p.selectedId : legacy.length > 0 ? legacy[0] : undefined;
     const drafts: Record<string, string> = {};
@@ -263,13 +216,16 @@ export function loadRestateDraft(store: KeyValueStore, workspaceId: string, page
     if (typeof p.draft === "string" && p.draft !== "" && legacy.length === 1 && drafts[legacy[0]] === undefined) {
       drafts[legacy[0]] = p.draft; // older still: one flat draft for the stored selection
     }
-    const sessions = stringRecord(p.sessions);
-    if (typeof p.sessionId === "string" && typeof p.sourceKey === "string" && !p.sourceKey.includes("\n")) {
-      sessions[p.sourceKey] = p.sessionId;
-    }
-    const empty = Object.keys(drafts).length === 0 && Object.keys(sessions).length === 0;
-    if (selectedId === undefined && empty) return null;
-    return { ...(selectedId !== undefined ? { selectedId } : {}), drafts, sessions };
+    // Sessions from the per-section era (`sessions`, or `sessionId` + `sourceKey`) were
+    // opened under a different prompt contract — drop them and let the next critique open one.
+    const perSection = p.sessions !== undefined || p.sourceKey !== undefined;
+    const sessionId = !perSection && typeof p.sessionId === "string" ? p.sessionId : undefined;
+    if (selectedId === undefined && sessionId === undefined && Object.keys(drafts).length === 0) return null;
+    return {
+      ...(selectedId !== undefined ? { selectedId } : {}),
+      drafts,
+      ...(sessionId !== undefined ? { sessionId } : {}),
+    };
   } catch {
     return null;
   }
@@ -416,15 +372,15 @@ export async function requestReview(specMarkdown: string, signal?: AbortSignal):
 export type CritiqueResult = { ok: true; verdict: CritiqueVerdict; sessionId?: string } | { ok: false; message: string };
 
 /**
- * POST /api/restate/critique and consume its SSE stream: `delta` frames reach `onDelta`
- * as they arrive; the terminal frame becomes the result. Never throws.
+ * POST /api/restate/critique. The critic replies with one JSON verdict and nothing else,
+ * so there is nothing to stream — this is a plain request. Never throws.
  */
-export async function streamCritique(req: {
-  sections: readonly DraftSection[];
+export async function requestCritique(req: {
+  section: DraftSection;
   restatement: string;
+  /** The page's session id, if one is open; the reply carries the one to keep. */
   sessionId?: string;
   signal?: AbortSignal;
-  onDelta?: (text: string) => void;
 }): Promise<CritiqueResult> {
   let res: Response;
   try {
@@ -432,7 +388,7 @@ export async function streamCritique(req: {
       method: "POST",
       headers: restateHeaders(true),
       body: JSON.stringify({
-        sections: req.sections,
+        section: req.section,
         restatement: req.restatement,
         ...(req.sessionId !== undefined ? { sessionId: req.sessionId } : {}),
       }),
@@ -443,37 +399,14 @@ export async function streamCritique(req: {
   }
   if (sawUnauthorized(res)) return { ok: false, message: "signed out (the critic route returned 401)" };
   if (!res.ok) return { ok: false, message: await errorFromBody(res, "critique") };
-  if (res.body === null) return { ok: false, message: "critique stream had no body" };
-
-  let verdict: CritiqueVerdict | null = null;
-  let sessionId: string | undefined;
-  let errorMessage: string | null = null;
-  const handle = (raw: unknown): void => {
-    const ev = asCritiqueEvent(raw);
-    if (ev === null) return;
-    if (ev.type === "delta") req.onDelta?.(ev.text);
-    else if (ev.type === "verdict") {
-      verdict = ev.verdict;
-      sessionId = ev.sessionId;
-    } else errorMessage = ev.message;
-  };
-
-  const reader = res.body.getReader();
-  const text = new TextDecoder();
-  const sse = createSseDecoder();
+  let body: unknown;
   try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      for (const raw of sse.push(text.decode(value, { stream: true }))) handle(raw);
-    }
-    for (const raw of sse.end()) handle(raw);
-  } catch (e) {
-    return { ok: false, message: req.signal?.aborted === true ? "critique cancelled" : errText(e) };
+    body = await res.json();
+  } catch {
+    return { ok: false, message: "critique returned a non-JSON body" };
   }
-
-  if (verdict !== null) {
-    return { ok: true, verdict, ...(sessionId !== undefined ? { sessionId } : {}) };
-  }
-  return { ok: false, message: errorMessage ?? "critique stream ended without a verdict" };
+  const obj = body === null || typeof body !== "object" ? {} : (body as Record<string, unknown>);
+  const verdict = asCritiqueVerdict(obj.verdict);
+  if (verdict === null) return { ok: false, message: "critique returned an unusable verdict" };
+  return { ok: true, verdict, ...(typeof obj.sessionId === "string" ? { sessionId: obj.sessionId } : {}) };
 }

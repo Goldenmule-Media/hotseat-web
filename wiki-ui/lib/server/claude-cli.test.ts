@@ -15,8 +15,9 @@ describe("buildArgs", () => {
     const args = buildArgs("hi", base);
     expect(args).toContain("--dangerously-skip-permissions");
     expect(args[args.indexOf("--output-format") + 1]).toBe("stream-json");
-    expect(args).toContain("--include-partial-messages");
     expect(args).toContain("--verbose");
+    // Nothing is streamed to the browser any more — only the result event is read.
+    expect(args).not.toContain("--include-partial-messages");
   });
 
   it("always pins the MCP config with --strict-mcp-config", () => {
@@ -68,27 +69,44 @@ describe("extractJson", () => {
 
 describe("validateCritiqueVerdict", () => {
   it("passes a well-formed verdict through", () => {
-    expect(
-      validateCritiqueVerdict({ summary: "solid", gaps: ["missed OCC"], improvements: ["tighter scope"] }),
-    ).toEqual({ summary: "solid", gaps: ["missed OCC"], improvements: ["tighter scope"] });
+    const raw = { grade: "understood", summary: "solid", gaps: ["missed OCC"], improvements: ["tighter scope"] };
+    expect(validateCritiqueVerdict(raw)).toEqual(raw);
   });
 
   it("wraps bare-string arrays", () => {
     expect(validateCritiqueVerdict({ summary: "s", gaps: "missed X", improvements: "tighter" })).toEqual({
+      grade: "partial",
       summary: "s",
       gaps: ["missed X"],
       improvements: ["tighter"],
     });
   });
 
-  it("defaults missing arrays to []", () => {
-    expect(validateCritiqueVerdict({ summary: "s" })).toEqual({ summary: "s", gaps: [], improvements: [] });
+  it("defaults missing arrays to [] and an unknown grade to partial", () => {
+    expect(validateCritiqueVerdict({ summary: "s" })).toEqual({
+      grade: "partial",
+      summary: "s",
+      gaps: [],
+      improvements: [],
+    });
+    expect(validateCritiqueVerdict({ summary: "s", grade: "excellent" })?.grade).toBe("partial");
+    expect(validateCritiqueVerdict({ summary: "s", grade: " SURFACE " })?.grade).toBe("surface");
   });
 
   it("drops non-string and blank entries", () => {
     expect(
       validateCritiqueVerdict({ summary: "s", gaps: ["a", 1, null, "  ", "b"], improvements: [{}, false] }),
-    ).toEqual({ summary: "s", gaps: ["a", "b"], improvements: [] });
+    ).toEqual({ grade: "partial", summary: "s", gaps: ["a", "b"], improvements: [] });
+  });
+
+  it("enforces the caps a chatty reply ignored", () => {
+    const out = validateCritiqueVerdict({
+      summary: "s",
+      gaps: ["1", "2", "3", "4", "5", "6"],
+      improvements: ["a", "b", "c"],
+    });
+    expect(out?.gaps).toEqual(["1", "2", "3", "4"]);
+    expect(out?.improvements).toEqual(["a", "b"]);
   });
 
   it.each([
