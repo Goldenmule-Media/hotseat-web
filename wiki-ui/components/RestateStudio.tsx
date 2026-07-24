@@ -25,6 +25,7 @@ import {
 } from "../lib/live";
 import { renderMarkdown } from "../lib/markdown";
 import {
+  assembleDraft,
   clearRestateDraft,
   loadRestateDraft,
   fetchRestateHealth,
@@ -70,6 +71,7 @@ function SectionCard({
   selectable,
   selected,
   onToggle,
+  action,
 }: {
   workspaceId: WorkspaceId;
   pageId: PageId;
@@ -77,6 +79,8 @@ function SectionCard({
   selectable: boolean;
   selected: boolean;
   onToggle: () => void;
+  /** Per-card quick action ("Accept as-is" / "Unaccept"); null hides it. */
+  action: { label: string; busy: boolean; onRun: () => void } | null;
 }): React.JSX.Element {
   const { markdown, loading, error } = useElementMarkdown(workspaceId, pageId, SECTIONS_KEY, el.id);
   const html = useMemo(() => (markdown === null ? "" : renderMarkdown(markdown, workspaceId)), [markdown, workspaceId]);
@@ -114,8 +118,23 @@ function SectionCard({
         ) : (
           <span aria-hidden="true" />
         )}
-        <span className={`restate-badge ${verified ? "restate-badge-verified" : "restate-badge-ai"}`}>
-          {verified ? "Human-verified" : "AI draft"}
+        <span className="restate-card-side">
+          {action !== null && (
+            <button
+              type="button"
+              className="restate-card-btn"
+              disabled={action.busy}
+              onClick={(e) => {
+                e.stopPropagation(); // quick action, never a selection toggle
+                action.onRun();
+              }}
+            >
+              {action.label}
+            </button>
+          )}
+          <span className={`restate-badge ${verified ? "restate-badge-verified" : "restate-badge-ai"}`}>
+            {verified ? "Human-verified" : "AI draft"}
+          </span>
         </span>
       </div>
       {error !== null ? (
@@ -248,6 +267,11 @@ export function RestateStudio({
   const reviewAbort = useRef<AbortController | null>(null);
   const studioRef = useRef<HTMLDivElement | null>(null);
   const specColRef = useRef<HTMLElement | null>(null);
+  const draftRef = useRef<HTMLTextAreaElement | null>(null);
+  const [loadBusy, setLoadBusy] = useState(false);
+  /** Two-step confirm: first click arms "Replace current draft?", second replaces. */
+  const [loadArm, setLoadArm] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Restore the persisted draft once per mount (the parent keys this component by page).
   useEffect(() => {
@@ -500,6 +524,54 @@ export function RestateStudio({
     [runMutation],
   );
 
+  // Human sign-off without restatement: reading the draft and judging it correct IS the
+  // verification. The live tail flips the card(s); prune then drops them from selection.
+  const onAcceptAsIs = useCallback(
+    (ids: readonly string[]) => {
+      if (ids.length === 0) return;
+      void runMutation("acceptSections", { sectionIds: [...ids] });
+    },
+    [runMutation],
+  );
+
+  const onUnaccept = useCallback(
+    (id: string) => {
+      void runMutation("unacceptSections", { sectionIds: [id] });
+    },
+    [runMutation],
+  );
+
+  // A changed selection invalidates an armed "Replace current draft?" confirmation.
+  useEffect(() => {
+    setLoadArm(false);
+  }, [selected]);
+
+  const onLoadIntoEditor = useCallback(async () => {
+    if (selectedElements.length === 0 || loadBusy) return;
+    if (draft.trim() !== "" && !loadArm) {
+      setLoadArm(true);
+      return;
+    }
+    setLoadArm(false);
+    setLoadBusy(true);
+    setLoadError(null);
+    try {
+      const h = await getHost();
+      const sections = await Promise.all(
+        selectedElements.map(async (el) => ({
+          title: titleOf(el),
+          body: splitRenderedElement(await h.renderElement(workspaceId, pageId, SECTIONS_KEY, el.id)).body,
+        })),
+      );
+      setDraft(assembleDraft(sections));
+      draftRef.current?.focus();
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoadBusy(false);
+    }
+  }, [selectedElements, loadBusy, draft, loadArm, workspaceId, pageId]);
+
   const criticGate =
     health === null ? "Probing the critic…" : criticReady ? null : (health.reason ?? "the critic is not available");
 
@@ -643,7 +715,33 @@ export function RestateStudio({
                   </span>
                 ))}
               </p>
+              <div className="restate-selection-actions">
+                <button
+                  type="button"
+                  className={`tf-btn ${loadArm ? "tf-btn-primary" : "tf-btn-secondary"}`}
+                  disabled={loadBusy || mutating}
+                  title="Copy the selected sections' current markdown into the editor as ## blocks"
+                  onClick={() => void onLoadIntoEditor()}
+                >
+                  {loadArm ? "Replace current draft?" : loadBusy ? "Loading…" : "Load into editor"}
+                </button>
+                <button
+                  type="button"
+                  className="tf-btn tf-btn-secondary"
+                  disabled={mutating}
+                  title="Verify the selected sections exactly as written — no restatement"
+                  onClick={() => onAcceptAsIs(selected)}
+                >
+                  Accept selected as-is
+                </button>
+              </div>
+              {loadError !== null && (
+                <p className="restate-load-error" role="alert">
+                  Couldn&apos;t load the sections into the editor: {loadError}
+                </p>
+              )}
               <textarea
+                ref={draftRef}
                 className="restate-draft"
                 value={draft}
                 spellCheck
@@ -778,6 +876,15 @@ export function RestateStudio({
             selectable={workbenchActive && el.status === "ai-draft"}
             selected={selected.includes(el.id)}
             onToggle={() => toggle(el.id)}
+            action={
+              !workbenchActive
+                ? null
+                : el.status === "ai-draft"
+                  ? { label: "Accept as-is", busy: mutating, onRun: () => onAcceptAsIs([el.id]) }
+                  : el.status === "human-verified"
+                    ? { label: "Unaccept", busy: mutating, onRun: () => onUnaccept(el.id) }
+                    : null
+            }
           />
         ))}
         {total === 0 && !elementsLoading && elementsError === null && <p className="muted">No sections drafted yet.</p>}

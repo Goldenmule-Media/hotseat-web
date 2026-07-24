@@ -61,6 +61,18 @@ export function splitDraft(draft: string, fallbackTitle: string): DraftSection[]
   return sections;
 }
 
+/**
+ * Inverse of {@link splitDraft}, for populating the editor from selected sections: one
+ * `## {title}` block per section (blank line before a non-empty body), blank-line
+ * separated, in the given order. Contract: `splitDraft(assembleDraft(xs), any)` yields
+ * the same title/markdown pairs (bodies trimmed).
+ */
+export function assembleDraft(sections: readonly { title: string; body: string }[]): string {
+  return sections
+    .map((s) => (s.body.trim() === "" ? `## ${s.title}` : `## ${s.title}\n\n${s.body.trim()}`))
+    .join("\n\n");
+}
+
 // ── rendered-element splitting ──────────────────────────────────────────────────
 
 export interface RenderedElement {

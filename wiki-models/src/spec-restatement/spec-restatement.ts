@@ -59,6 +59,33 @@ const noOpenNotes: Precondition = (page) => {
   return open.length === 0 ? true : { unmet: `resolve the open review notes first: ${open.map(titleOf).join(", ")}` };
 };
 
+const activeRestatement =
+  (command: string): Precondition =>
+  (page) =>
+    page.status === "restating" || page.status === "reviewing"
+      ? true
+      : { unmet: `${command} runs while "restating" or "reviewing" (page is "${page.status}")` };
+
+/** Resolve `sectionIds` to elements, throwing loudly on a missing id or a wrong status —
+ *  produces-emitted transition ops silently no-op on an illegal edge, so acceptance
+ *  mistakes must fail the command instead. */
+function requireSectionsInStatus(
+  page: DeepReadonly<PageState>,
+  sectionIds: readonly string[],
+  status: string,
+  complaint: string,
+): void {
+  const byId = new Map(listOf(page, "sections", "items").map((e) => [e.id, e]));
+  const missing = sectionIds.filter((id) => !byId.has(id));
+  if (missing.length > 0) {
+    throw new InvariantViolationError(`sectionIds not found in sections.items: ${missing.join(", ")}`);
+  }
+  const wrong = sectionIds.filter((id) => byId.get(id)!.status !== status);
+  if (wrong.length > 0) {
+    throw new InvariantViolationError(`${complaint}: ${wrong.join(", ")}`);
+  }
+}
+
 const hasDraftedSections: Precondition = (page) =>
   listOf(page, "sections", "items").length > 0
     ? true
@@ -197,6 +224,39 @@ export const SpecRestatement = definePageType({
           });
         });
         return ops;
+      },
+    },
+    acceptSections: {
+      description:
+        "HUMAN sign-off only (studio — never call as an agent, on the user's behalf or otherwise): accept " +
+        "the named ai-draft sections AS-IS, with no restatement. Reading the draft and judging it correct " +
+        "as written IS the verification; each section flips to human-verified with no content change. " +
+        "Fails loudly when an id is missing or not ai-draft.",
+      args: zodSchema(z.object({ sectionIds: z.array(z.string()).min(1) })),
+      target: { section: "sections", field: "items" },
+      preconditions: [activeRestatement("acceptSections")],
+      produces: (page, args) => {
+        const a = args as { sectionIds: string[] };
+        requireSectionsInStatus(page, a.sectionIds, "ai-draft", "sections not ai-draft (already verified?)");
+        return a.sectionIds.map(
+          (id): SectionOp => ({ op: "transition", level: "element", section: "sections", field: "items", element: id, event: "verify" }),
+        );
+      },
+    },
+    unacceptSections: {
+      description:
+        "Human-driven UNDO of acceptance: send the named human-verified sections back to ai-draft with NO " +
+        "content changes (they rejoin the restatement queue). An agent wanting to change verified content " +
+        "uses reviseSection instead. Fails loudly when an id is missing or not human-verified.",
+      args: zodSchema(z.object({ sectionIds: z.array(z.string()).min(1) })),
+      target: { section: "sections", field: "items" },
+      preconditions: [activeRestatement("unacceptSections")],
+      produces: (page, args) => {
+        const a = args as { sectionIds: string[] };
+        requireSectionsInStatus(page, a.sectionIds, "human-verified", "sections not human-verified");
+        return a.sectionIds.map(
+          (id): SectionOp => ({ op: "transition", level: "element", section: "sections", field: "items", element: id, event: "reviseAsDraft" }),
+        );
       },
     },
     reviseSection: {

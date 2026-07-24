@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   asCritiqueEvent,
+  assembleDraft,
   clearRestateDraft,
   createSseDecoder,
   loadRestateDraft,
@@ -65,6 +66,41 @@ describe("splitDraft", () => {
 
   it("normalizes CRLF line endings", () => {
     expect(splitDraft("## A\r\n\r\nBody.\r\n", "F")).toEqual([{ title: "A", markdown: "Body." }]);
+  });
+});
+
+// ── assembleDraft (the splitDraft inverse) ─────────────────────────────────────
+
+describe("assembleDraft", () => {
+  it("round-trips through splitDraft: same title/markdown pairs back (multi-section)", () => {
+    const xs = [
+      { title: "Alpha", body: "First body.\n\nSecond paragraph." },
+      { title: "Beta", body: "- a list\n- of items" },
+      { title: "Gamma", body: "" },
+    ];
+    expect(splitDraft(assembleDraft(xs), "unused-fallback")).toEqual([
+      { title: "Alpha", markdown: "First body.\n\nSecond paragraph." },
+      { title: "Beta", markdown: "- a list\n- of items" },
+      { title: "Gamma", markdown: "" },
+    ]);
+  });
+
+  it("assembles a single section as one ## block", () => {
+    expect(assembleDraft([{ title: "Only", body: "Text." }])).toBe("## Only\n\nText.");
+    expect(splitDraft(assembleDraft([{ title: "Only", body: "Text." }]), "f")).toEqual([
+      { title: "Only", markdown: "Text." },
+    ]);
+  });
+
+  it("bodies containing fenced ``` blocks (even with ## inside) survive the round-trip", () => {
+    const xs = [
+      { title: "Code", body: "```md\n## not a heading\n```" },
+      { title: "After", body: "Tail." },
+    ];
+    expect(splitDraft(assembleDraft(xs), "f")).toEqual([
+      { title: "Code", markdown: "```md\n## not a heading\n```" },
+      { title: "After", markdown: "Tail." },
+    ]);
   });
 });
 

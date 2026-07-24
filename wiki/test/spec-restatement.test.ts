@@ -167,6 +167,63 @@ describe("spec-restatement model", () => {
     expect(els(await stateOf(page), "sections", "items").map((e) => e.id)).toEqual([ids[0]!]);
   });
 
+  it("acceptSections flips multiple ai-draft sections to human-verified in one commit, content untouched", async () => {
+    const { page, ids } = await restatableSpec("Accept as-is", [["One", "1."], ["Two", "2."], ["Three", "3."]]);
+    const before = (await ws.history()).length;
+    const acc = await ws.mutate(page, "acceptSections", { sectionIds: [ids[0]!, ids[1]!] });
+    expect((await ws.history({ consistentWith: acc.token })).length).toBe(before + 1);
+    const items = els(await stateOf(page, acc.token), "sections", "items");
+    expect(items.map((e) => e.status)).toEqual(["human-verified", "human-verified", "ai-draft"]);
+    expect(items.map(titleOf)).toEqual(["One", "Two", "Three"]);
+    expect(await ws.toMarkdown(page)).toContain("1.");
+  });
+
+  it("unacceptSections sends verified sections back to ai-draft without content changes", async () => {
+    const { page, ids } = await restatableSpec("Unaccept", [["Kept", "Body kept."]]);
+    await ws.mutate(page, "acceptSections", { sectionIds: [ids[0]!] });
+    const un = await ws.mutate(page, "unacceptSections", { sectionIds: [ids[0]!] });
+    const item = els(await stateOf(page, un.token), "sections", "items")[0]!;
+    expect(item.id).toBe(ids[0]!);
+    expect(item.status).toBe("ai-draft");
+    expect(titleOf(item)).toBe("Kept");
+    expect(await ws.toMarkdown(page)).toContain("Body kept.");
+  });
+
+  it("acceptSections throws loudly, naming a section that is not ai-draft (and a missing id)", async () => {
+    const { page, ids } = await restatableSpec("Accept guard", [["Solid", "S."]]);
+    await ws.mutate(page, "acceptSections", { sectionIds: [ids[0]!] });
+    const again = ws.mutate(page, "acceptSections", { sectionIds: [ids[0]!] });
+    await expect(again).rejects.toThrow(InvariantViolationError);
+    await expect(again).rejects.toThrow(new RegExp(`not ai-draft.*${ids[0]!}`));
+    const ghost = ws.mutate(page, "acceptSections", { sectionIds: ["ghost-9"] });
+    await expect(ghost).rejects.toThrow(/not found in sections\.items: ghost-9/);
+  });
+
+  it("unacceptSections throws loudly, naming a section that is not human-verified", async () => {
+    const { page, ids } = await restatableSpec("Unaccept guard", [["Still draft", "D."]]);
+    const attempt = ws.mutate(page, "unacceptSections", { sectionIds: [ids[0]!] });
+    await expect(attempt).rejects.toThrow(InvariantViolationError);
+    await expect(attempt).rejects.toThrow(new RegExp(`not human-verified: ${ids[0]!}`));
+  });
+
+  it("accept/unaccept refuse outside restating/reviewing, naming the actual page status", async () => {
+    // drafting: the page was never submitted.
+    const p = (await ws.createPage("spec-restatement", { title: "Too early", parentId: null })).value;
+    const early = ((await ws.mutate(p, "draftSection", { title: "Alpha", markdown: "A." })).value as { sectionId: string }).sectionId;
+    const inDrafting = ws.mutate(p, "acceptSections", { sectionIds: [early] });
+    await expect(inDrafting).rejects.toThrow(PreconditionUnmetError);
+    await expect(inDrafting).rejects.toThrow(/page is "drafting"/);
+
+    // approved: run one spec to the terminal gate, then try to unaccept.
+    const { page, ids } = await restatableSpec("Sealed", [["Omega", "O."]]);
+    await ws.mutate(page, "acceptSections", { sectionIds: [ids[0]!] });
+    await ws.mutate(page, "recordHolisticReview", { summary: "Clean.", notes: [] });
+    await ws.mutate(page, "approve", {});
+    const inApproved = ws.mutate(page, "unacceptSections", { sectionIds: [ids[0]!] });
+    await expect(inApproved).rejects.toThrow(PreconditionUnmetError);
+    await expect(inApproved).rejects.toThrow(/page is "approved"/);
+  });
+
   it("reviseSection on a human-verified section downgrades it to ai-draft in the same commit", async () => {
     const { page, ids } = await restatableSpec("Revise", [["Epsilon", "E."]]);
     await ws.mutate(page, "restateSections", { removeIds: [ids[0]!], sections: [{ title: "Epsilon", markdown: "Restated." }] });

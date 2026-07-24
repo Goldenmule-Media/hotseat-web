@@ -1895,3 +1895,33 @@ code {
   font-size: 12px;
   color: var(--amber);
 }
+/* Per-card quick actions (Accept as-is / Unaccept) beside the provenance badge. */
+.restate-card-side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.restate-card-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.restate-card-btn:hover {
+  color: var(--text);
+  background: var(--accent-dim);
+}
+.restate-card-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.restate-selection-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
