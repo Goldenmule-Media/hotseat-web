@@ -223,12 +223,48 @@ code {
   height: 100vh;
   overflow-y: auto;
 }
+/* Collapsed sidebar: the tree gives way to a slim rail carrying only the expand chevron. */
+.shell.sidebar-collapsed {
+  grid-template-columns: 40px 1fr;
+}
+.sidebar-rail {
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 14px;
+}
+.sidebar-toggle {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  padding: 4px 7px;
+  cursor: pointer;
+}
+.sidebar-toggle:hover {
+  color: var(--text);
+  background: var(--accent-dim);
+}
 .sidebar-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 12px;
+}
+.sidebar-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .home-link {
   font-size: 13px;
@@ -1472,35 +1508,93 @@ code {
 }
 
 /* ── restatement studio (spec-restatement pages) ─────────────────────────── */
-/* Two columns: the spec (left) and the status-driven workbench (right). */
+/* Two columns — spec (left) and the status-driven workbench (right) — split by a
+   draggable divider (`--restate-split` = the left column's fraction). The view spans the
+   full content width; other views keep the reading measure. */
+.content:has(.page-restate) {
+  max-width: none;
+}
 .restate-studio {
   display: flex;
-  gap: 24px;
-  align-items: flex-start;
+  align-items: stretch;
 }
 .restate-spec {
-  flex: 1 1 55%;
+  flex: 0 0 auto;
+  width: calc(var(--restate-split, 0.55) * (100% - 12px));
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 14px;
+  padding-right: 6px;
+}
+.restate-divider {
+  flex: 0 0 12px;
+  cursor: col-resize;
+  position: relative;
+  touch-action: none;
+}
+.restate-divider::after {
+  content: "";
+  position: absolute;
+  inset: 0 calc(50% - 1px);
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.restate-divider:hover::after,
+.restate-divider.is-dragging::after {
+  opacity: 1;
 }
 .restate-workbench {
-  flex: 1 1 45%;
+  flex: 1 1 auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  position: sticky;
-  top: 16px;
+  padding-left: 6px;
 }
+/* Side-by-side layout: the app header + page header stay put; each column is its own
+   scroll container filling the rest of the viewport (the page body never scrolls). */
+@media (min-width: 981px) {
+  .content:has(.page-restate) {
+    height: 100dvh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .page-restate {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .page-restate .restate-studio {
+    flex: 1;
+    min-height: 0;
+  }
+  .restate-spec,
+  .restate-workbench {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-bottom: 24px;
+  }
+}
+/* Narrow viewports: stacked columns, normal page scrolling, no divider. */
 @media (max-width: 980px) {
   .restate-studio {
     flex-direction: column;
+    gap: 24px;
+  }
+  .restate-spec {
+    width: auto;
+    padding-right: 0;
+  }
+  .restate-divider {
+    display: none;
   }
   .restate-workbench {
-    position: static;
-    width: 100%;
+    padding-left: 0;
   }
 }
 .restate-progress {

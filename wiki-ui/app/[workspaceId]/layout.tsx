@@ -15,6 +15,7 @@ import { TreeNav } from "../../components/TreeNav";
 import { WorkspaceError } from "../../components/WorkspaceError";
 import { WorkspaceTitle } from "../../components/WorkspaceTitle";
 import { useLiveWorkspace } from "../../lib/live";
+import { useSidebarCollapsed } from "../../lib/useSidebarCollapsed";
 
 export default function WorkspaceLayout({ children }: { children: ReactNode }): React.JSX.Element {
   const params = useParams<{ workspaceId: string }>();
@@ -22,33 +23,62 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }): 
   // re-encodes it, or ids with a colon get double-encoded (ws%3A → ws%253A → 404).
   const workspaceId = decodeURIComponent(params.workspaceId) as WorkspaceId;
   const ws = useLiveWorkspace(workspaceId);
+  const { collapsed, toggle } = useSidebarCollapsed();
 
   return (
-    <div className="shell">
-      <aside className="sidebar">
-        <div className="sidebar-head">
-          <Link href="/" className="home-link">
-            ← Workspaces
-          </Link>
-          <LiveIndicator connection={ws.connection} lastEventAt={ws.lastEventAt} error={ws.error} />
-        </div>
-        <WorkspaceTitle id={workspaceId} />
-        <nav className="tree-nav" aria-label="Pages">
-          {ws.tree === null && ws.error !== null ? (
-            <WorkspaceError error={ws.error} compact />
-          ) : (
-            <TreeNav tree={ws.tree} workspaceId={workspaceId} />
-          )}
-        </nav>
-        {/* Sidebar foot: local mirror (emitter) status above the account. AccountMenu renders
-            nothing when auth is disabled, leaving just the mirror status. */}
-        <div className="sidebar-foot">
-          <MirrorIndicator workspaceId={workspaceId} />
-          <AccountMenu />
-          <BuildBadge />
-        </div>
-      </aside>
-      <SidebarResizer />
+    <div className={`shell${collapsed ? " sidebar-collapsed" : ""}`}>
+      {collapsed ? (
+        // A slim rail keeps the expand affordance visible without reflowing the shell grid away.
+        <aside className="sidebar-rail">
+          <button
+            type="button"
+            className="sidebar-toggle"
+            title="Expand sidebar"
+            aria-label="Expand sidebar"
+            aria-expanded={false}
+            onClick={toggle}
+          >
+            »
+          </button>
+        </aside>
+      ) : (
+        <aside className="sidebar">
+          <div className="sidebar-head">
+            <Link href="/" className="home-link">
+              ← Workspaces
+            </Link>
+            <div className="sidebar-head-actions">
+              <LiveIndicator connection={ws.connection} lastEventAt={ws.lastEventAt} error={ws.error} />
+              <button
+                type="button"
+                className="sidebar-toggle"
+                title="Collapse sidebar"
+                aria-label="Collapse sidebar"
+                aria-expanded={true}
+                onClick={toggle}
+              >
+                «
+              </button>
+            </div>
+          </div>
+          <WorkspaceTitle id={workspaceId} />
+          <nav className="tree-nav" aria-label="Pages">
+            {ws.tree === null && ws.error !== null ? (
+              <WorkspaceError error={ws.error} compact />
+            ) : (
+              <TreeNav tree={ws.tree} workspaceId={workspaceId} />
+            )}
+          </nav>
+          {/* Sidebar foot: local mirror (emitter) status above the account. AccountMenu renders
+              nothing when auth is disabled, leaving just the mirror status. */}
+          <div className="sidebar-foot">
+            <MirrorIndicator workspaceId={workspaceId} />
+            <AccountMenu />
+            <BuildBadge />
+          </div>
+        </aside>
+      )}
+      {!collapsed && <SidebarResizer />}
       <main className="content">{children}</main>
     </div>
   );

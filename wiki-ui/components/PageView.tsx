@@ -170,9 +170,12 @@ export function PageView({
   }
 
   const headerTitle = title ?? node?.title ?? null;
+  // The restate view opts out of the content column's reading max-width and pins the
+  // header while its two columns scroll independently (globals.css, `.page-restate`).
+  const restateActive = mode === "restate" && hasStudio;
 
   return (
-    <div className="page">
+    <div className={restateActive ? "page page-restate" : "page"}>
       <header className="page-header">
         <div className="page-header-meta">
           <div className="page-meta-chips">

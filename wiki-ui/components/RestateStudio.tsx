@@ -42,6 +42,7 @@ import {
   type KeyValueStore,
   type RestateHealth,
 } from "../lib/restate";
+import { clampSplit, DEFAULT_SPLIT, loadSplit, saveSplit } from "../lib/restate-split";
 import { pageHref } from "../lib/routes";
 
 const SECTIONS_KEY = "sections";
@@ -91,6 +92,7 @@ function SectionCard({
   return (
     <div
       className={classes}
+      data-el-id={el.id}
       onClick={(e) => {
         if (!selectable) return;
         // Links/controls inside the rendered body keep their own behaviour.
@@ -244,6 +246,8 @@ export function RestateStudio({
   });
   const [elapsed, setElapsed] = useState(0);
   const reviewAbort = useRef<AbortController | null>(null);
+  const studioRef = useRef<HTMLDivElement | null>(null);
+  const specColRef = useRef<HTMLElement | null>(null);
 
   // Restore the persisted draft once per mount (the parent keys this component by page).
   useEffect(() => {
@@ -317,9 +321,67 @@ export function RestateStudio({
     [],
   );
 
-  const toggle = useCallback((id: string) => {
-    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  // Restore the persisted column split; drags write the CSS var directly (no re-render
+  // per pointermove — the SidebarResizer pattern).
+  useEffect(() => {
+    const store = browserStore();
+    const stored = store !== null ? loadSplit(store) : null;
+    if (stored !== null) studioRef.current?.style.setProperty("--restate-split", String(stored));
   }, []);
+
+  const onDividerPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const handle = e.currentTarget;
+    const container = studioRef.current;
+    if (container === null) return;
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    handle.classList.add("is-dragging");
+    const apply = (clientX: number): number => {
+      const rect = container.getBoundingClientRect();
+      const ratio = clampSplit((clientX - rect.left) / rect.width, rect.width);
+      container.style.setProperty("--restate-split", String(ratio));
+      return ratio;
+    };
+    const onMove = (ev: PointerEvent): void => void apply(ev.clientX);
+    const onUp = (ev: PointerEvent): void => {
+      handle.classList.remove("is-dragging");
+      handle.releasePointerCapture(e.pointerId);
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onUp);
+      const store = browserStore();
+      if (store !== null) saveSplit(store, apply(ev.clientX));
+    };
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onUp);
+  }, []);
+
+  const onDividerReset = useCallback(() => {
+    studioRef.current?.style.setProperty("--restate-split", String(DEFAULT_SPLIT));
+    const store = browserStore();
+    if (store !== null) saveSplit(store, DEFAULT_SPLIT);
+  }, []);
+
+  /** Align a section card's top with the spec column's top (the column scrolls, never
+   *  the window). No-op outside the two-scroll-container layout. */
+  const scrollToSection = useCallback((id: string) => {
+    const col = specColRef.current;
+    if (col === null) return;
+    const target = col.querySelector<HTMLElement>(`[data-el-id="${CSS.escape(id)}"]`);
+    if (target === null) return;
+    const delta = target.getBoundingClientRect().top - col.getBoundingClientRect().top;
+    col.scrollTo({ top: col.scrollTop + delta, behavior: "smooth" });
+  }, []);
+
+  // Selecting scrolls the spec column to the section; deselecting (and the mount-time
+  // restore, which never passes through here) does not.
+  const toggle = useCallback(
+    (id: string) => {
+      const selecting = !selected.includes(id);
+      setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+      if (selecting) scrollToSection(id);
+    },
+    [selected, scrollToSection],
+  );
 
   const selectedElements = useMemo(() => elements.filter((e) => selected.includes(e.id)), [elements, selected]);
   const fallbackTitle = titleOf(selectedElements[0]);
@@ -699,8 +761,8 @@ export function RestateStudio({
   }
 
   return (
-    <div className="restate-studio">
-      <section className="restate-spec" aria-label="Spec sections">
+    <div ref={studioRef} className="restate-studio">
+      <section ref={specColRef} className="restate-spec" aria-label="Spec sections">
         <p className="restate-progress">
           {total === 0 && elementsLoading
             ? "Loading sections…"
@@ -731,6 +793,15 @@ export function RestateStudio({
         ))}
         {total === 0 && !elementsLoading && elementsError === null && <p className="muted">No sections drafted yet.</p>}
       </section>
+      <div
+        className="restate-divider"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize studio columns"
+        title="Drag to resize · double-click to reset"
+        onPointerDown={onDividerPointerDown}
+        onDoubleClick={onDividerReset}
+      />
       <aside className="restate-workbench" aria-label="Restatement workbench">
         {workbench}
       </aside>
