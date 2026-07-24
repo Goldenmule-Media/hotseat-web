@@ -9,9 +9,10 @@
  * (/api/restate/critique), Accept to atomically REPLACE them via `restateSections`
  * (born human-verified), then run the holistic review (/api/restate/review →
  * `recordHolisticReview`) and resolve notes. Page transitions (approve, reopen…) stay in
- * the existing Model view — the studio only points at them. Drafts persist per
- * workspace+page in localStorage and survive live re-renders; a selection is pruned when
- * a section vanishes or gets verified underneath it.
+ * the existing Model view — the studio only points at them. Selecting sections seeds the
+ * editor with their current markdown, and every distinct selection keeps its own draft
+ * (persisted per workspace+page in localStorage), so re-selecting one restores what was
+ * typed there; a selection is pruned when a section vanishes or gets verified underneath it.
  */
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -29,6 +30,7 @@ import {
   clearRestateDraft,
   loadRestateDraft,
   fetchRestateHealth,
+  pruneDrafts,
   pruneSelection,
   requestReview,
   resumableSession,
@@ -249,7 +251,8 @@ export function RestateStudio({
   );
 
   const [selected, setSelected] = useState<readonly string[]>([]);
-  const [draft, setDraft] = useState("");
+  /** Editor text per selection (sourceKeyOf → markdown); see the seeding effect below. */
+  const [drafts, setDrafts] = useState<Readonly<Record<string, string>>>({});
   const [session, setSession] = useState<CritiqueSession | undefined>(undefined);
   const [restored, setRestored] = useState(false);
   const [health, setHealth] = useState<RestateHealth | null>(null);
@@ -268,10 +271,21 @@ export function RestateStudio({
   const studioRef = useRef<HTMLDivElement | null>(null);
   const specColRef = useRef<HTMLElement | null>(null);
   const draftRef = useRef<HTMLTextAreaElement | null>(null);
-  const [loadBusy, setLoadBusy] = useState(false);
-  /** Two-step confirm: first click arms "Replace current draft?", second replaces. */
-  const [loadArm, setLoadArm] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [seedBusy, setSeedBusy] = useState(false);
+  /** Two-step confirm: first click arms "Discard your edits?", second re-seeds. */
+  const [resetArm, setResetArm] = useState(false);
+  const [seedError, setSeedError] = useState<string | null>(null);
+  /** The selection currently being seeded — dedupes the effect across re-renders. */
+  const seeding = useRef<string | null>(null);
+  /** The previous selection, so growing one carries its in-progress text over. */
+  const lastSelection = useRef<readonly string[]>([]);
+
+  const selectionKey = useMemo(() => sourceKeyOf(selected), [selected]);
+  const draft = drafts[selectionKey] ?? "";
+  const setDraft = useCallback(
+    (text: string) => setDrafts((d) => ({ ...d, [selectionKey]: text })),
+    [selectionKey],
+  );
 
   // Restore the persisted draft once per mount (the parent keys this component by page).
   useEffect(() => {
@@ -279,7 +293,8 @@ export function RestateStudio({
     const saved = store !== null ? loadRestateDraft(store, workspaceId, pageId) : null;
     if (saved !== null) {
       setSelected(saved.selectedIds);
-      setDraft(saved.draft);
+      setDrafts(saved.drafts);
+      lastSelection.current = saved.selectedIds;
       if (saved.sessionId !== undefined && saved.sourceKey !== undefined) {
         setSession({ id: saved.sessionId, sourceKey: saved.sourceKey });
       }
@@ -309,23 +324,25 @@ export function RestateStudio({
       setSelected(next);
       setSession(undefined);
     }
-  }, [restored, elementsLoading, elementsError, elements, selected]);
+    const kept = pruneDrafts(drafts, elements);
+    if (Object.keys(kept).length !== Object.keys(drafts).length) setDrafts(kept);
+  }, [restored, elementsLoading, elementsError, elements, selected, drafts]);
 
-  // Persist {selectedIds, draft, sessionId+sourceKey}; an all-empty state clears the key.
+  // Persist {selectedIds, drafts, sessionId+sourceKey}; an all-empty state clears the key.
   useEffect(() => {
     if (!restored) return;
     const store = browserStore();
     if (store === null) return;
-    if (selected.length === 0 && draft === "" && session === undefined) {
+    if (selected.length === 0 && Object.keys(drafts).length === 0 && session === undefined) {
       clearRestateDraft(store, workspaceId, pageId);
     } else {
       saveRestateDraft(store, workspaceId, pageId, {
         selectedIds: selected,
-        draft,
+        drafts,
         ...(session !== undefined ? { sessionId: session.id, sourceKey: session.sourceKey } : {}),
       });
     }
-  }, [restored, selected, draft, session, workspaceId, pageId]);
+  }, [restored, selected, drafts, session, workspaceId, pageId]);
 
   // Elapsed-seconds ticker for the long-running holistic review.
   useEffect(() => {
@@ -437,13 +454,16 @@ export function RestateStudio({
       critiqueGen.current++;
       critiqueAbort.current?.abort();
       setSelected([]);
-      setDraft("");
+      lastSelection.current = [];
+      setDrafts((d) => {
+        const next = { ...d }; // only THIS selection's draft — other stashes stand
+        delete next[selectionKey];
+        return next;
+      });
       setSession(undefined);
       setCritique(CRITIQUE_IDLE);
-      const store = browserStore();
-      if (store !== null) clearRestateDraft(store, workspaceId, pageId);
     }
-  }, [draft, fallbackTitle, selected, runMutation, workspaceId, pageId]);
+  }, [draft, fallbackTitle, selected, selectionKey, runMutation]);
 
   const onCritique = useCallback(async () => {
     if (selectedElements.length === 0 || draft.trim() === "") return;
@@ -541,36 +561,73 @@ export function RestateStudio({
     [runMutation],
   );
 
-  // A changed selection invalidates an armed "Replace current draft?" confirmation.
+  // A changed selection invalidates an armed "Discard your edits?" confirmation.
   useEffect(() => {
-    setLoadArm(false);
+    setResetArm(false);
   }, [selected]);
 
-  const onLoadIntoEditor = useCallback(async () => {
-    if (selectedElements.length === 0 || loadBusy) return;
-    if (draft.trim() !== "" && !loadArm) {
-      setLoadArm(true);
+  /**
+   * Selecting sections fills the editor with their current markdown — but only the FIRST
+   * time that exact selection is made: each selection keeps its own entry in `drafts`, so
+   * unchecking a section and coming back restores what you had typed (an emptied box
+   * included — `""` is an entry, absence is not). Growing a selection carries the
+   * in-progress text over and appends only the newly-added sections.
+   */
+  useEffect(() => {
+    if (!restored || !workbenchActive) return;
+    if (selected.length === 0) {
+      lastSelection.current = [];
       return;
     }
-    setLoadArm(false);
-    setLoadBusy(true);
-    setLoadError(null);
-    try {
-      const h = await getHost();
-      const sections = await Promise.all(
-        selectedElements.map(async (el) => ({
-          title: titleOf(el),
-          body: splitRenderedElement(await h.renderElement(workspaceId, pageId, SECTIONS_KEY, el.id)).body,
-        })),
-      );
-      setDraft(assembleDraft(sections));
-      draftRef.current?.focus();
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoadBusy(false);
+    const key = selectionKey;
+    if (drafts[key] !== undefined || seeding.current === key) return;
+    if (selectedElements.length !== selected.length) return; // sections not read yet
+    const prev = lastSelection.current;
+    const carried = prev.length > 0 && prev.every((id) => selected.includes(id)) ? (drafts[sourceKeyOf(prev)] ?? "") : "";
+    const additions = carried.trim() === "" ? selectedElements : selectedElements.filter((el) => !prev.includes(el.id));
+    lastSelection.current = selected;
+    seeding.current = key;
+    setSeedBusy(true);
+    setSeedError(null);
+    void (async () => {
+      let seed = carried.trim();
+      try {
+        const h = await getHost();
+        const blocks = await Promise.all(
+          additions.map(async (el) => ({
+            title: titleOf(el),
+            body: splitRenderedElement(await h.renderElement(workspaceId, pageId, SECTIONS_KEY, el.id)).body,
+          })),
+        );
+        seed = [seed, assembleDraft(blocks)].filter((s) => s !== "").join("\n\n");
+      } catch (e) {
+        setSeedError(e instanceof Error ? e.message : String(e));
+      }
+      // Typing during the fetch wins — a stored entry is never overwritten by a seed.
+      setDrafts((d) => (d[key] !== undefined ? d : { ...d, [key]: seed }));
+      setSeedBusy(false);
+      if (seeding.current === key) seeding.current = null;
+    })();
+  }, [restored, workbenchActive, selectionKey, selected, selectedElements, drafts, workspaceId, pageId]);
+
+  const onResetToSource = useCallback(() => {
+    if (selected.length === 0 || seedBusy) return;
+    if (draft.trim() !== "" && !resetArm) {
+      setResetArm(true);
+      return;
     }
-  }, [selectedElements, loadBusy, draft, loadArm, workspaceId, pageId]);
+    setResetArm(false);
+    // Dropping the entry re-arms the seeding effect; pointing lastSelection at the current
+    // selection means it carries nothing forward and re-reads every section.
+    lastSelection.current = selected;
+    seeding.current = null;
+    setDrafts((d) => {
+      const next = { ...d };
+      delete next[selectionKey];
+      return next;
+    });
+    draftRef.current?.focus();
+  }, [selected, seedBusy, draft, resetArm, selectionKey]);
 
   const criticGate =
     health === null ? "Probing the critic…" : criticReady ? null : (health.reason ?? "the critic is not available");
@@ -718,12 +775,12 @@ export function RestateStudio({
               <div className="restate-selection-actions">
                 <button
                   type="button"
-                  className={`tf-btn ${loadArm ? "tf-btn-primary" : "tf-btn-secondary"}`}
-                  disabled={loadBusy || mutating}
-                  title="Copy the selected sections' current markdown into the editor as ## blocks"
-                  onClick={() => void onLoadIntoEditor()}
+                  className={`tf-btn ${resetArm ? "tf-btn-primary" : "tf-btn-secondary"}`}
+                  disabled={seedBusy || mutating}
+                  title="Re-read the selected sections' current markdown into the editor, discarding your edits"
+                  onClick={onResetToSource}
                 >
-                  {loadArm ? "Replace current draft?" : loadBusy ? "Loading…" : "Load into editor"}
+                  {resetArm ? "Discard your edits?" : seedBusy ? "Loading…" : "Reset to source"}
                 </button>
                 <button
                   type="button"
@@ -735,9 +792,9 @@ export function RestateStudio({
                   Accept selected as-is
                 </button>
               </div>
-              {loadError !== null && (
+              {seedError !== null && (
                 <p className="restate-load-error" role="alert">
-                  Couldn&apos;t load the sections into the editor: {loadError}
+                  Couldn&apos;t load the sections into the editor: {seedError}
                 </p>
               )}
               <textarea
@@ -746,7 +803,7 @@ export function RestateStudio({
                 value={draft}
                 spellCheck
                 onChange={(e) => setDraft(e.target.value)}
-                placeholder="Restate the selected sections in your own words…"
+                placeholder={seedBusy ? "Loading the selected sections…" : "Restate the selected sections in your own words…"}
               />
               <p className="muted restate-hint">
                 Start lines with <code>## Heading</code> to write multiple sections (each heading becomes a section
@@ -855,8 +912,9 @@ export function RestateStudio({
   }
 
   return (
-    <div ref={studioRef} className="restate-studio">
-      <section ref={specColRef} className="restate-spec" aria-label="Spec sections">
+    <>
+      {/* Spans BOTH columns, so the spec and the workbench start at the same y. */}
+      <div className="restate-bar">
         <p className="restate-progress">
           {total === 0 && elementsLoading
             ? "Loading sections…"
@@ -867,40 +925,46 @@ export function RestateStudio({
             Couldn&apos;t refresh sections: {elementsError}. Showing the last good read; your selection is kept.
           </p>
         )}
-        {elements.map((el) => (
-          <SectionCard
-            key={el.id}
-            workspaceId={workspaceId}
-            pageId={pageId}
-            el={el}
-            selectable={workbenchActive && el.status === "ai-draft"}
-            selected={selected.includes(el.id)}
-            onToggle={() => toggle(el.id)}
-            action={
-              !workbenchActive
-                ? null
-                : el.status === "ai-draft"
-                  ? { label: "Accept as-is", busy: mutating, onRun: () => onAcceptAsIs([el.id]) }
-                  : el.status === "human-verified"
-                    ? { label: "Unaccept", busy: mutating, onRun: () => onUnaccept(el.id) }
-                    : null
-            }
-          />
-        ))}
-        {total === 0 && !elementsLoading && elementsError === null && <p className="muted">No sections drafted yet.</p>}
-      </section>
-      <div
-        className="restate-divider"
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize studio columns"
-        title="Drag to resize · double-click to reset"
-        onPointerDown={onDividerPointerDown}
-        onDoubleClick={onDividerReset}
-      />
-      <aside className="restate-workbench" aria-label="Restatement workbench">
-        {workbench}
-      </aside>
-    </div>
+      </div>
+      <div ref={studioRef} className="restate-studio">
+        <section ref={specColRef} className="restate-spec" aria-label="Spec sections">
+          {elements.map((el) => (
+            <SectionCard
+              key={el.id}
+              workspaceId={workspaceId}
+              pageId={pageId}
+              el={el}
+              selectable={workbenchActive && el.status === "ai-draft"}
+              selected={selected.includes(el.id)}
+              onToggle={() => toggle(el.id)}
+              action={
+                !workbenchActive
+                  ? null
+                  : el.status === "ai-draft"
+                    ? { label: "Accept as-is", busy: mutating, onRun: () => onAcceptAsIs([el.id]) }
+                    : el.status === "human-verified"
+                      ? { label: "Unaccept", busy: mutating, onRun: () => onUnaccept(el.id) }
+                      : null
+              }
+            />
+          ))}
+          {total === 0 && !elementsLoading && elementsError === null && (
+            <p className="muted">No sections drafted yet.</p>
+          )}
+        </section>
+        <div
+          className="restate-divider"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize studio columns"
+          title="Drag to resize · double-click to reset"
+          onPointerDown={onDividerPointerDown}
+          onDoubleClick={onDividerReset}
+        />
+        <aside className="restate-workbench" aria-label="Restatement workbench">
+          {workbench}
+        </aside>
+      </div>
+    </>
   );
 }

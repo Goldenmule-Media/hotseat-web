@@ -5,6 +5,7 @@ import {
   clearRestateDraft,
   createSseDecoder,
   loadRestateDraft,
+  pruneDrafts,
   pruneSelection,
   restateStorageKey,
   resumableSession,
@@ -261,39 +262,60 @@ describe("restate draft persistence", () => {
     expect(restateStorageKey("ws-1", "spec-restatement:abc")).toBe("wiki.restate.ws-1.spec-restatement:abc");
   });
 
-  it("round-trips {selectedIds, draft, sessionId, sourceKey} through save/load", () => {
+  it("round-trips {selectedIds, drafts, sessionId, sourceKey} through save/load", () => {
     const store = memoryStore();
-    const state = { selectedIds: ["a", "b"], draft: "## X\n\nbody", sessionId: "sess-9", sourceKey: sourceKeyOf(["b", "a"]) };
+    const state = {
+      selectedIds: ["a", "b"],
+      drafts: { [sourceKeyOf(["a", "b"])]: "## X\n\nbody", [sourceKeyOf(["a"])]: "solo" },
+      sessionId: "sess-9",
+      sourceKey: sourceKeyOf(["b", "a"]),
+    };
     saveRestateDraft(store, "ws", "p", state);
     expect(loadRestateDraft(store, "ws", "p")).toEqual(state);
     // Another page's key is untouched.
     expect(loadRestateDraft(store, "ws", "other")).toBeNull();
   });
 
+  it("keeps a deliberately-emptied draft as an entry (absent ≠ empty — absent re-seeds)", () => {
+    const store = memoryStore();
+    saveRestateDraft(store, "ws", "p", { selectedIds: ["a"], drafts: { a: "" } });
+    expect(loadRestateDraft(store, "ws", "p")).toEqual({ selectedIds: ["a"], drafts: { a: "" } });
+  });
+
   it("omits the session pair when it was never set, and clears cleanly", () => {
     const store = memoryStore();
-    saveRestateDraft(store, "ws", "p", { selectedIds: ["a"], draft: "d" });
-    expect(loadRestateDraft(store, "ws", "p")).toEqual({ selectedIds: ["a"], draft: "d" });
+    saveRestateDraft(store, "ws", "p", { selectedIds: ["a"], drafts: { a: "d" } });
+    expect(loadRestateDraft(store, "ws", "p")).toEqual({ selectedIds: ["a"], drafts: { a: "d" } });
     clearRestateDraft(store, "ws", "p");
     expect(loadRestateDraft(store, "ws", "p")).toBeNull();
   });
 
+  it("files a legacy flat `draft` under its stored selection's key", () => {
+    const store = memoryStore();
+    store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ selectedIds: ["b", "a"], draft: "old text" }));
+    expect(loadRestateDraft(store, "ws", "p")).toEqual({
+      selectedIds: ["b", "a"],
+      drafts: { [sourceKeyOf(["a", "b"])]: "old text" },
+    });
+  });
+
   it("drops a sessionId stored WITHOUT its sourceKey (it can't be validated against the selection)", () => {
     const store = memoryStore();
-    store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ selectedIds: ["a"], draft: "d", sessionId: "legacy" }));
-    expect(loadRestateDraft(store, "ws", "p")).toEqual({ selectedIds: ["a"], draft: "d" });
+    const stored = { selectedIds: ["a"], drafts: { a: "d" } };
+    store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ ...stored, sessionId: "legacy" }));
+    expect(loadRestateDraft(store, "ws", "p")).toEqual(stored);
     // …and a sourceKey without a sessionId is equally meaningless.
-    store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ selectedIds: ["a"], draft: "d", sourceKey: "a" }));
-    expect(loadRestateDraft(store, "ws", "p")).toEqual({ selectedIds: ["a"], draft: "d" });
+    store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ ...stored, sourceKey: "a" }));
+    expect(loadRestateDraft(store, "ws", "p")).toEqual(stored);
   });
 
   it("returns null for corrupt or empty stored payloads (an orphan sessionId alone counts as empty)", () => {
     const store = memoryStore();
     store.setItem(restateStorageKey("ws", "p"), "not-json");
     expect(loadRestateDraft(store, "ws", "p")).toBeNull();
-    store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ selectedIds: [], draft: "" }));
+    store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ selectedIds: [], drafts: {} }));
     expect(loadRestateDraft(store, "ws", "p")).toBeNull();
-    store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ selectedIds: [], draft: "", sessionId: "legacy" }));
+    store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ selectedIds: [], drafts: {}, sessionId: "legacy" }));
     expect(loadRestateDraft(store, "ws", "p")).toBeNull();
   });
 });
@@ -332,5 +354,27 @@ describe("pruneSelection", () => {
 
   it("returns [] against an empty section list", () => {
     expect(pruneSelection(["a"], [])).toEqual([]);
+  });
+});
+
+describe("pruneDrafts", () => {
+  const elements = [{ id: "a", status: "ai-draft" }, { id: "b", status: "human-verified" }];
+
+  it("keeps a stash while every section it was written for still exists", () => {
+    const drafts = {
+      [sourceKeyOf(["a"])]: "solo",
+      [sourceKeyOf(["a", "b"])]: "pair", // b is verified, not gone — the stash stands
+      [sourceKeyOf(["a", "gone"])]: "stale",
+      [sourceKeyOf(["b"])]: "", // an emptied box is still an entry
+    };
+    expect(pruneDrafts(drafts, elements)).toEqual({
+      [sourceKeyOf(["a"])]: "solo",
+      [sourceKeyOf(["a", "b"])]: "pair",
+      [sourceKeyOf(["b"])]: "",
+    });
+  });
+
+  it("drops everything against an empty section list", () => {
+    expect(pruneDrafts({ a: "x" }, [])).toEqual({});
   });
 });

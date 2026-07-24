@@ -189,6 +189,13 @@ function stringList(raw: unknown): string[] {
   return Array.isArray(raw) ? raw.filter((s): s is string => typeof s === "string") : [];
 }
 
+function stringRecord(raw: unknown): Record<string, string> {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) if (typeof v === "string") out[k] = v;
+  return out;
+}
+
 /** Narrow one decoded SSE payload to a typed critique event; null for anything else. */
 export function asCritiqueEvent(raw: unknown): CritiqueEvent | null {
   if (raw === null || typeof raw !== "object") return null;
@@ -229,7 +236,10 @@ export function resumableSession(
 
 export interface RestateDraft {
   readonly selectedIds: readonly string[];
-  readonly draft: string;
+  /** Editor text per SELECTION, keyed by {@link sourceKeyOf}: every distinct set of
+   *  sections keeps its own draft, so re-selecting one restores what was typed there.
+   *  An empty string is a real entry (a deliberately cleared box) — not "unseeded". */
+  readonly drafts: Readonly<Record<string, string>>;
   /** Present only as a PAIR with {@link RestateDraft.sourceKey}. */
   readonly sessionId?: string;
   /** The {@link sourceKeyOf} of the sections `sessionId` was opened with. */
@@ -262,14 +272,19 @@ export function loadRestateDraft(store: KeyValueStore, workspaceId: string, page
     const p = JSON.parse(raw) as Record<string, unknown> | null;
     if (p === null || typeof p !== "object") return null;
     const selectedIds = stringList(p.selectedIds);
-    const draft = typeof p.draft === "string" ? p.draft : "";
+    const drafts = stringRecord(p.drafts);
+    // Payloads written before per-selection drafts held one flat `draft` — it belonged to
+    // the stored selection, so file it under that selection's key.
+    if (typeof p.draft === "string" && p.draft !== "" && selectedIds.length > 0 && Object.keys(drafts).length === 0) {
+      drafts[sourceKeyOf(selectedIds)] = p.draft;
+    }
     const sessionId = typeof p.sessionId === "string" ? p.sessionId : undefined;
     const sourceKey = typeof p.sourceKey === "string" ? p.sourceKey : undefined;
     // A session without its source key (or vice versa) cannot be validated against the
     // current selection — drop the pair rather than resume against unknown sources.
     const session = sessionId !== undefined && sourceKey !== undefined ? { sessionId, sourceKey } : null;
-    if (selectedIds.length === 0 && draft === "" && session === null) return null;
-    return { selectedIds, draft, ...(session ?? {}) };
+    if (selectedIds.length === 0 && Object.keys(drafts).length === 0 && session === null) return null;
+    return { selectedIds, drafts, ...(session ?? {}) };
   } catch {
     return null;
   }
@@ -291,6 +306,23 @@ export function pruneSelection(
 ): string[] {
   const selectable = new Set(elements.filter((e) => e.status === "ai-draft").map((e) => e.id));
   return ids.filter((id) => selectable.has(id));
+}
+
+/**
+ * Per-selection drafts filtered against the CURRENT section list: a stash survives while
+ * EVERY section it was written for still exists. Verified sections keep theirs (unaccept
+ * puts the draft back within reach); only replaced/deleted sections drop one.
+ */
+export function pruneDrafts(
+  drafts: Readonly<Record<string, string>>,
+  elements: readonly { readonly id: string }[],
+): Record<string, string> {
+  const live = new Set(elements.map((e) => e.id));
+  const out: Record<string, string> = {};
+  for (const [key, text] of Object.entries(drafts)) {
+    if (key.split("\n").every((id) => live.has(id))) out[key] = text;
+  }
+  return out;
 }
 
 // ── /api/restate fetch wrappers (same-origin; bearer attached; 401 → sign-out) ──

@@ -1568,6 +1568,9 @@ code {
     display: flex;
     flex-direction: column;
   }
+  .restate-bar {
+    flex: none; /* pinned with the header — only the columns scroll */
+  }
   .page-restate .restate-studio {
     flex: 1;
     min-height: 0;
@@ -1596,6 +1599,17 @@ code {
   .restate-workbench {
     padding-left: 0;
   }
+}
+/* The progress/refresh-error bar sits ABOVE the columns and spans both, so the spec and
+   the workbench always start at the same y (a per-column banner would offset one). */
+.restate-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 16px;
+  padding-bottom: 10px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
 }
 .restate-progress {
   margin: 0;
