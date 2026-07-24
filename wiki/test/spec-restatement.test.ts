@@ -3,7 +3,7 @@
  * an AI drafts ordered spec sections, a human proves understanding by RESTATING them
  * (atomic replace, born human-verified), a holistic AI review records notes, and a human
  * approve gate closes the loop. Exercises the element-status write-gate (`mutableIn`),
- * the requiredIn authored-ness gate, produces-emitted page transitions, positioning of
+ * the empty-draft submit precondition, produces-emitted page transitions, positioning of
  * restated runs, attention/describeMutations surfacing, and deterministic render.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -45,10 +45,9 @@ describe("spec-restatement model", () => {
     return (await ws.page(page, token !== undefined ? { consistentWith: token } : undefined)).state();
   }
 
-  /** A page with overview + drafted sections, submitted for restatement. */
+  /** A page with drafted sections, submitted for restatement. */
   async function restatableSpec(title: string, sections: [string, string][]): Promise<{ page: PageId; ids: string[] }> {
     const page = (await ws.createPage("spec-restatement", { title, parentId: null })).value;
-    await ws.mutate(page, "setOverview", { summary: `${title} overview.` });
     const ids: string[] = [];
     for (const [t, md] of sections) {
       ids.push(((await ws.mutate(page, "draftSection", { title: t, markdown: md })).value as { sectionId: string }).sectionId);
@@ -59,7 +58,6 @@ describe("spec-restatement model", () => {
 
   it("drives the full lifecycle: draft → restate → holistic review → fix loop → approve", async () => {
     const p = (await ws.createPage("spec-restatement", { title: "Search", parentId: null })).value;
-    await ws.mutate(p, "setOverview", { summary: "How search works end to end." });
     const s1 = ((await ws.mutate(p, "draftSection", { title: "Indexing", markdown: "AI: indexing." })).value as { sectionId: string }).sectionId;
     const s2 = ((await ws.mutate(p, "draftSection", { title: "Querying", markdown: "AI: querying." })).value as { sectionId: string }).sectionId;
     const s3 = ((await ws.mutate(p, "draftSection", { title: "Ranking", markdown: "AI: ranking." })).value as { sectionId: string }).sectionId;
@@ -128,11 +126,12 @@ describe("spec-restatement model", () => {
     expect((await stateOf(p, ok.token)).status).toBe("approved");
   });
 
-  it("refuses submitForRestatement until the overview is authored (engine requiredIn gate)", async () => {
-    const p = (await ws.createPage("spec-restatement", { title: "No overview", parentId: null })).value;
+  it("refuses submitForRestatement while no sections are drafted (empty-draft precondition)", async () => {
+    const p = (await ws.createPage("spec-restatement", { title: "Empty draft", parentId: null })).value;
+    const attempt = ws.mutate(p, "submitForRestatement", {});
+    await expect(attempt).rejects.toThrow(PreconditionUnmetError);
+    await expect(attempt).rejects.toThrow(/draft at least one section/);
     await ws.mutate(p, "draftSection", { title: "Only section", markdown: "Body." });
-    await expect(ws.mutate(p, "submitForRestatement", {})).rejects.toThrow(/overview\.summary/);
-    await ws.mutate(p, "setOverview", { summary: "Now authored." });
     await ws.mutate(p, "submitForRestatement", {});
     expect((await stateOf(p)).status).toBe("restating");
   });
@@ -191,7 +190,6 @@ describe("spec-restatement model", () => {
 
   it("renders deterministic Markdown at a mid-lifecycle state (byte-exact)", async () => {
     const p = (await ws.createPage("spec-restatement", { title: "Render demo", parentId: null })).value;
-    await ws.mutate(p, "setOverview", { summary: "What the system does." });
     const a = ((await ws.mutate(p, "draftSection", { title: "Alpha", markdown: "AI alpha." })).value as { sectionId: string }).sectionId;
     await ws.mutate(p, "draftSection", { title: "Beta", markdown: "Beta body.\n\nWith a second paragraph." });
     await ws.mutate(p, "submitForRestatement", {});
@@ -202,8 +200,7 @@ describe("spec-restatement model", () => {
       [
         "# Spec: Render demo",
         "**Status:** restating",
-        "## Overview\nWhat the system does.",
-        "## Sections\n### 1. Alpha restated\nAlpha in **my** words.\n\n### 2. Beta\nBeta body.\n\nWith a second paragraph.",
+        "## Sections\n### Alpha restated\nAlpha in **my** words.\n\n### Beta\nBeta body.\n\nWith a second paragraph.",
         "## Review\n_Not reviewed._",
         "## Open notes\n_None._",
       ].join("\n\n") + "\n";

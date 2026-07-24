@@ -18,6 +18,7 @@ const Fixture = definePageType({
   statusTransitions: [t("open", "close", "closed")],
   sections: {
     findings: { name: "Findings", required: true, fields: { items: { kind: "list", element: "finding" } } },
+    remarks: { name: "Remarks", required: true, fields: { items: { kind: "list", element: "finding" } } },
     tasks: { name: "Tasks", required: true, fields: { items: { kind: "list", element: "task" } } },
     steps: { name: "Steps", required: true, fields: { items: { kind: "list", element: "step" } } },
   },
@@ -44,6 +45,12 @@ const Fixture = definePageType({
       args: zodSchema(z.object({ findingId: z.string() })),
       target: { section: "findings", field: "items", element: { idArg: "findingId" } },
       transition: { level: "element", event: "resolve" },
+    },
+    addRemark: {
+      args: zodSchema(z.object({ title: z.string(), detail: z.string().optional() })),
+      result: zodSchema(z.object({ remarkId: z.string() })),
+      target: { section: "remarks", field: "items" },
+      set: { title: arg("title"), detail: arg("detail") },
     },
     addTask: {
       args: zodSchema(z.object({ text: z.string() })),
@@ -73,6 +80,13 @@ const Fixture = definePageType({
         groupBy: "status",
         groups: [{ when: "open", heading: "Open findings" }],
         as: "sections",
+        element: { heading: "{title}", body: [{ label: "Detail", field: "detail" }] },
+      },
+      {
+        section: "remarks",
+        field: "items",
+        as: "sections",
+        numbered: false,
         element: { heading: "{title}", body: [{ label: "Detail", field: "detail" }] },
       },
       { section: "tasks", field: "items", as: "checklist", item: "{text}", checkedWhen: "done" },
@@ -108,6 +122,18 @@ describe("IPageView.renderElement", () => {
     const view = await ws.page(id);
     const fragment = await view.renderElement("findings", bravo.findingId);
     expect(fragment).toBe("### 2. Bravo\n**Detail:** second detail");
+    expect(await ws.toMarkdown(id)).toContain(fragment);
+  });
+
+  it("renders an as:'sections' element UNNUMBERED under numbered: false, matching the full render", async () => {
+    const id = await makePage();
+    await ws.mutate(id, "addRemark", { title: "Alpha", detail: "first detail" });
+    const bravo = (await ws.mutate(id, "addRemark", { title: "Bravo", detail: "second detail" })).value as {
+      remarkId: string;
+    };
+    const view = await ws.page(id);
+    const fragment = await view.renderElement("remarks", bravo.remarkId);
+    expect(fragment).toBe("### Bravo\n**Detail:** second detail");
     expect(await ws.toMarkdown(id)).toContain(fragment);
   });
 

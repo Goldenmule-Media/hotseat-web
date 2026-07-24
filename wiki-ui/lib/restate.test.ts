@@ -71,9 +71,9 @@ describe("splitDraft", () => {
 // ── splitRenderedElement / severityFromHeading ─────────────────────────────────
 
 describe("splitRenderedElement", () => {
-  it("separates the leading rendered heading from the body", () => {
-    expect(splitRenderedElement("### 2. Storage model\n\nThe body.\n\nMore.")).toEqual({
-      heading: "2. Storage model",
+  it("separates the leading rendered heading from the body (unnumbered `### Title`)", () => {
+    expect(splitRenderedElement("### Storage model\n\nThe body.\n\nMore.")).toEqual({
+      heading: "Storage model",
       body: "The body.\n\nMore.",
     });
   });
@@ -86,19 +86,26 @@ describe("splitRenderedElement", () => {
   });
 
   it("handles a heading-only render (empty body)", () => {
-    expect(splitRenderedElement("### 1. Only a title")).toEqual({ heading: "1. Only a title", body: "" });
+    expect(splitRenderedElement("### Only a title")).toEqual({ heading: "Only a title", body: "" });
+  });
+
+  it("passes a numbered heading through verbatim (other page types still render ordinals)", () => {
+    expect(splitRenderedElement("### 2. Storage model\n\nBody.")).toEqual({
+      heading: "2. Storage model",
+      body: "Body.",
+    });
   });
 });
 
 describe("severityFromHeading", () => {
   it("extracts the trailing (severity) from a note heading", () => {
-    expect(severityFromHeading("1. Race in the tail (major)")).toBe("major");
+    expect(severityFromHeading("Race in the tail (major)")).toBe("major");
     expect(severityFromHeading("Terminology drift (minor)")).toBe("minor");
     expect(severityFromHeading("Broken invariant (critical)")).toBe("critical");
   });
 
   it("returns null for headings without a severity suffix (or no heading)", () => {
-    expect(severityFromHeading("2. Storage model")).toBeNull();
+    expect(severityFromHeading("Storage model")).toBeNull();
     expect(severityFromHeading("Odd title (urgent)")).toBeNull();
     expect(severityFromHeading(null)).toBeNull();
   });
@@ -107,34 +114,28 @@ describe("severityFromHeading", () => {
 // ── sliceH2Section ─────────────────────────────────────────────────────────────
 
 describe("sliceH2Section", () => {
-  const page = "# Spec: T\n\n## Overview\n\nThe summary line.\n\n## Sections\n\n### 1. A\n\nBody.\n\n## Review\n\n_Not reviewed._";
+  const page = "# Spec: T\n\n## Sections\n\n### Overview\n\nThe summary line.\n\n### A\n\nBody.\n\n## Review\n\n_Not reviewed._";
 
   it("returns the body of the named H2 section, stopping at the next H2", () => {
-    expect(sliceH2Section(page, "Overview")).toBe("The summary line.");
     expect(sliceH2Section(page, "Review")).toBe("_Not reviewed._");
   });
 
   it("keeps deeper headings inside the section body", () => {
-    expect(sliceH2Section(page, "Sections")).toBe("### 1. A\n\nBody.");
+    expect(sliceH2Section(page, "Sections")).toBe("### Overview\n\nThe summary line.\n\n### A\n\nBody.");
   });
 
   it("returns null for an absent section and ignores fenced ## lines", () => {
     expect(sliceH2Section(page, "Missing")).toBeNull();
-    expect(sliceH2Section("```\n## Overview\n```\ntext", "Overview")).toBeNull();
+    expect(sliceH2Section("```\n## Review\n```\ntext", "Review")).toBeNull();
   });
 
   // Section bodies preserve authored H2s and render BEFORE the real "## Review" heading.
   const shadowed =
-    "# Spec: T\n\n## Overview\n\nSummary.\n\n## Sections\n\n### 1. A\n\nBody.\n\n## Review\n\nA literal heading INSIDE a section body.\n\n## Review\n\nThe real recorded summary.";
+    "# Spec: T\n\n## Sections\n\n### A\n\nBody.\n\n## Review\n\nA literal heading INSIDE a section body.\n\n## Review\n\nThe real recorded summary.";
 
   it('occurrence "last" skips a literal "## Review" authored inside a section body', () => {
     expect(sliceH2Section(shadowed, "Review")).toBe("A literal heading INSIDE a section body.");
     expect(sliceH2Section(shadowed, "Review", "last")).toBe("The real recorded summary.");
-  });
-
-  it('occurrence "first" is right for Overview — the real one renders before any section body', () => {
-    const dup = "## Overview\n\nThe real one.\n\n## Sections\n\n## Overview\n\nAuthored inside a section.";
-    expect(sliceH2Section(dup, "Overview", "first")).toBe("The real one.");
   });
 
   it('accepted residual: a literal "## Review" AFTER the real one still shadows last-match', () => {

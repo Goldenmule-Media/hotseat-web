@@ -241,10 +241,11 @@ function renderListField(
 }
 
 /**
- * Render one list element as a numbered H3 subsection (the `as: "sections"` mode): a heading
+ * Render one list element as an H3 subsection (the `as: "sections"` mode): a heading
  * template filled from the element's fields, then each non-empty declared body part. The
  * ordinal is supplied by the caller from the element's position in its rendered group, so it
- * matches what an `$ordinal` element-ref resolves to.
+ * matches what an `$ordinal` element-ref resolves to; `numbered: false` omits it from the
+ * heading (the index — and `$ordinal` resolution — is unaffected).
  */
 function renderElementSection(el: IItem, ordinal: number, sr: SectionRender, label: LabelResolver): string {
   const spec = sr.element;
@@ -254,7 +255,7 @@ function renderElementSection(el: IItem, ordinal: number, sr: SectionRender, lab
     const rendered = renderElementBodyPart(el, part, label);
     if (rendered.length > 0) parts.push(rendered);
   }
-  return section(heading(3, `${ordinal}. ${headingText}`), parts.join("\n\n"));
+  return section(heading(3, sr.numbered === false ? headingText : `${ordinal}. ${headingText}`), parts.join("\n\n"));
 }
 
 /** One body part of an `as: "sections"` element: its field body, optionally prefixed
@@ -430,7 +431,8 @@ function renderDerivedList(items: readonly DerivedItem[]): string {
 
 /**
  * Render ONE list element exactly as {@link renderPage} presents it inside its section:
- * for an `as: "sections"` config the `### {ordinal}. {heading}` subsection plus the
+ * for an `as: "sections"` config the `### {ordinal}. {heading}` subsection (heading only
+ * under `numbered: false`) plus the
  * declared body parts (ordinal from the same per-group index the full render uses); for
  * bullets/numbered/checklist the single rendered item line. An element filtered out of
  * every rendered group still renders — via the group whose `when` matches its status,

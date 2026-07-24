@@ -64,7 +64,7 @@ export function splitDraft(draft: string, fallbackTitle: string): DraftSection[]
 // ── rendered-element splitting ──────────────────────────────────────────────────
 
 export interface RenderedElement {
-  /** The element's rendered heading text (e.g. "2. Title" / "Title (major)"); null when
+  /** The element's rendered heading text (e.g. "Title" / "Title (major)"); null when
    *  the render did not start with a heading. */
   heading: string | null;
   /** The rendered body with the heading line removed. */
@@ -92,10 +92,9 @@ export function severityFromHeading(heading: string | null): NoteSeverity | null
 
 /**
  * The body of one top-level `## {heading}` section of a full page render (fence-aware),
- * or null when absent — used for the left column's Overview / Review summaries. Section
- * BODIES preserve authored H2s verbatim, so a duplicate heading can appear: `occurrence`
- * picks which match wins. The page renders overview → sections → review, so the real
- * Overview is the FIRST match and the real Review is the LAST.
+ * or null when absent — used for the workbench's Review summary. Section BODIES preserve
+ * authored H2s verbatim, so a duplicate heading can appear: `occurrence` picks which
+ * match wins. The page renders sections → review, so the real Review is the LAST match.
  */
 export function sliceH2Section(md: string, heading: string, occurrence: "first" | "last" = "first"): string | null {
   let inFence = false;

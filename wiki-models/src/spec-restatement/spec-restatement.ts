@@ -8,7 +8,7 @@
  * downgrade a verified section back to `ai-draft` before touching its content.
  */
 import type { DeepReadonly, IField, IItem, PageState, Precondition, SectionOp } from "wiki/authoring";
-import { arg, definePageType, InvariantViolationError, parseBlocks, t, z, zodSchema } from "wiki/authoring";
+import { definePageType, InvariantViolationError, parseBlocks, t, z, zodSchema } from "wiki/authoring";
 
 const empty = z.object({});
 
@@ -59,13 +59,19 @@ const noOpenNotes: Precondition = (page) => {
   return open.length === 0 ? true : { unmet: `resolve the open review notes first: ${open.map(titleOf).join(", ")}` };
 };
 
+const hasDraftedSections: Precondition = (page) =>
+  listOf(page, "sections", "items").length > 0
+    ? true
+    : { unmet: "draft at least one section before submitting for restatement" };
+
 export const SpecRestatement = definePageType({
   type: "spec-restatement",
   label: "Spec restatement",
   description:
     "A spec drafted by an AI and proven understood by a human who RESTATES each section in their own words. " +
-    "Workflow: drafting → restating → reviewing → approved. As the drafting agent: author the overview via " +
-    "`setOverview`, draft the ordered sections via `draftSection` (each is born `ai-draft`), and call " +
+    "Workflow: drafting → restating → reviewing → approved. As the drafting agent: draft an \"Overview\" as the " +
+    "FIRST section via `draftSection` (a normal spec-section titled \"Overview\" — it gets restated and " +
+    "verified like every other section), then the ordered body sections (each is born `ai-draft`), and call " +
     "`submitForRestatement` when the draft is complete. NEVER mark a section human-verified yourself — " +
     "verification happens only through a human's `restateSections` in the studio, which atomically replaces " +
     "AI sections with the human's restatement (born `human-verified`). Once every section is verified, " +
@@ -85,12 +91,6 @@ export const SpecRestatement = definePageType({
     t("approved", "reopen", "restating", { agency: "human" }),
   ],
   sections: {
-    overview: {
-      name: "Overview",
-      required: true,
-      mutableIn: ["drafting", "restating", "reviewing"],
-      fields: { summary: { kind: "prose", required: true, requiredIn: ["restating", "reviewing", "approved"] } },
-    },
     sections: {
       name: "Sections",
       required: true,
@@ -137,12 +137,6 @@ export const SpecRestatement = definePageType({
   },
   sectionSet: { mode: "closed" },
   commands: {
-    setOverview: {
-      description: "Author or revise the overview summary — what this spec covers, as one prose passage.",
-      args: zodSchema(z.object({ summary: z.string() })),
-      target: { section: "overview", field: "summary" },
-      set: { summary: arg("summary") },
-    },
     draftSection: {
       description:
         "Draft one spec section (born ai-draft, awaiting human restatement). `markdown` is the section body " +
@@ -303,6 +297,7 @@ export const SpecRestatement = definePageType({
       description: "Declare the AI draft complete and hand the spec to the human for restatement.",
       args: zodSchema(empty),
       transition: { level: "page", event: "submitForRestatement" },
+      preconditions: [hasDraftedSections],
     },
     approve: {
       description: "Human sign-off: accept the reviewed spec. Refused while any review note is still open.",
@@ -325,7 +320,6 @@ export const SpecRestatement = definePageType({
     title: "Spec: {title}",
     graphSections: false,
     sections: [
-      { section: "overview", heading: "Overview", field: "summary", as: "block", placeholder: "_None._" },
       {
         section: "sections",
         heading: "Sections",
@@ -333,6 +327,7 @@ export const SpecRestatement = definePageType({
         // ALL sections render in stored order regardless of status — the deterministic
         // Markdown is a clean spec; provenance styling is browser-side.
         as: "sections",
+        numbered: false,
         placeholder: "_No sections drafted._",
         element: { heading: "{title}", body: [{ field: "body" }] },
       },
@@ -341,6 +336,7 @@ export const SpecRestatement = definePageType({
         section: "review",
         field: "notes",
         as: "sections",
+        numbered: false,
         groupBy: "status",
         groups: [{ when: "open", heading: "Open notes" }],
         element: { heading: "{title} ({severity})", body: [{ field: "body" }] },

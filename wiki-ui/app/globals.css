@@ -1604,11 +1604,6 @@ code {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-.restate-overview {
-  border-left: 3px solid var(--border);
-  padding-left: 12px;
-  color: var(--muted);
-}
 /* One spec section: the left accent + badge carry provenance (amber = AI draft awaiting
    restatement, green = human-verified); selection is the accent outline. */
 .restate-section {

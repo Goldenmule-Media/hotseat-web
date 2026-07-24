@@ -1048,6 +1048,10 @@ export interface SectionRender {
     readonly heading: string;
     readonly body?: readonly { readonly label?: string; readonly field: string }[];
   };
+  /** For `as: "sections"`: prefix each element heading with its render-time ordinal
+   *  (`### {ordinal}. {heading}`; default true). `false` emits `### {heading}` — the
+   *  ordinal index is still computed, so `$ordinal` refs resolve unchanged. */
+  readonly numbered?: boolean;
 }
 
 export interface RenderConfig {

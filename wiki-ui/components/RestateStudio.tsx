@@ -393,10 +393,6 @@ export function RestateStudio({
   const openNotes = notes.elements.filter((n) => n.status === "open");
   const resolvedNotes = notes.elements.filter((n) => n.status !== "open");
 
-  const overview = useMemo(() => {
-    const body = specMarkdown === null ? null : sliceH2Section(specMarkdown, "Overview");
-    return body === null || body === "" || body === "_None._" ? null : body;
-  }, [specMarkdown]);
   const reviewSummary = useMemo(() => {
     // "last": section BODIES render before the real "## Review" heading and keep authored
     // H2s verbatim, so a section containing a literal "## Review" would shadow first-match.
@@ -772,13 +768,6 @@ export function RestateStudio({
           <p className="restate-load-error" role="alert">
             Couldn&apos;t refresh sections: {elementsError}. Showing the last good read; your selection is kept.
           </p>
-        )}
-        {overview !== null && (
-          /* eslint-disable-next-line react/no-danger */
-          <div
-            className="markdown restate-overview"
-            dangerouslySetInnerHTML={{ __html: renderMarkdown(overview, workspaceId) }}
-          />
         )}
         {elements.map((el) => (
           <SectionCard
