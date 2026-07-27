@@ -430,6 +430,52 @@ describe("spec-restatement model", () => {
     await expect(attempt).rejects.toThrow(/Ordering Consistency/);
   });
 
+  it("enters `restated` by itself in the commit that verifies the last section", async () => {
+    const { page, ids } = await restatableSpec("Derived", [["Alpha", "A."], ["Beta", "B."]]);
+    const all = (await sectionsOf(page)).map((e) => e.id);
+    expect((await stateOf(page)).status).toBe("restating");
+
+    // Every section but one: still restating — the status tracks the content exactly.
+    const partial = await ws.mutate(page, "acceptSections", { sectionIds: all.filter((id) => id !== ids[1]) });
+    expect((await stateOf(page, partial.token)).status).toBe("restating");
+
+    const before = (await ws.history()).length;
+    const last = await ws.mutate(page, "acceptSections", { sectionIds: [ids[1]!] });
+    expect((await stateOf(page, last.token)).status).toBe("restated");
+    // ONE commit: the derived status is never briefly out of date with the sections.
+    expect((await ws.history({ consistentWith: last.token })).length).toBe(before + 1);
+  });
+
+  it("falls back to `restating` the moment a section stops being verified", async () => {
+    const { page, ids } = await restatableSpec("Fallback", [["Alpha", "A."]]);
+    await acceptAllDrafts(page);
+    expect((await stateOf(page)).status).toBe("restated");
+
+    const un = await ws.mutate(page, "unacceptSections", { sectionIds: [ids[0]!] });
+    expect((await stateOf(page, un.token)).status).toBe("restating");
+
+    const re = await ws.mutate(page, "acceptSections", { sectionIds: [ids[0]!] });
+    expect((await stateOf(page, re.token)).status).toBe("restated");
+
+    // A newly drafted section is born ai-draft: the spec is no longer fully restated.
+    const drafted = await ws.mutate(page, "draftSection", { title: "Late", markdown: "AI: late addition." });
+    expect((await stateOf(page, drafted.token)).status).toBe("restating");
+  });
+
+  it("stays `restated` while an accepted section is edited — the words stay the human's", async () => {
+    const { page, ids } = await restatableSpec("Edit accepted", [["Alpha", "A."]]);
+    await acceptAllDrafts(page);
+    expect((await stateOf(page)).status).toBe("restated");
+
+    const edited = await ws.mutate(page, "restateSections", {
+      removeIds: [ids[0]!],
+      sections: [{ title: "Alpha", markdown: "Alpha, said better." }],
+    });
+    const state = await stateOf(page, edited.token);
+    expect(state.status).toBe("restated");
+    expect(els(state, "sections", "items").every((e) => e.status === "human-verified")).toBe(true);
+  });
+
   it("refuses recordHolisticReview while any section is ai-draft, naming the offending titles", async () => {
     const { page } = await restatableSpec("Unverified", [["Alpha", "A."], ["Beta", "B."]]);
     const attempt = ws.mutate(page, "recordHolisticReview", { summary: "Too soon.", notes: [] });

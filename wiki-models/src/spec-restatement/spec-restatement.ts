@@ -133,6 +133,13 @@ function sectionFields(
   };
 }
 
+/** The whole spec is in the human's words: ≥1 section and not one still ai-draft. This is
+ *  what the `restated` status MEANS — the engine derives it from this, both ways. */
+function everySectionVerified(page: DeepReadonly<PageState>): boolean {
+  const sections = listOf(page, "sections", "items");
+  return sections.length > 0 && sections.every((s) => s.status === "human-verified");
+}
+
 const allSectionsVerified: Precondition = (page) => {
   const sections = listOf(page, "sections", "items");
   if (sections.length === 0) return { unmet: "needs ≥1 spec section in sections.items" };
@@ -143,10 +150,12 @@ const allSectionsVerified: Precondition = (page) => {
   return true;
 };
 
-const inRestating: Precondition = (page) =>
-  page.status === "restating"
+const inRestated: Precondition = (page) =>
+  page.status === "restated"
     ? true
-    : { unmet: `requestHolisticReview fires from "restating" (page is "${page.status}"); while reviewing use rerunHolisticReview` };
+    : {
+        unmet: `requestHolisticReview fires from "restated" (page is "${page.status}") — a page enters it by itself once every section is human-verified; while reviewing use rerunHolisticReview`,
+      };
 
 const inReviewing: Precondition = (page) =>
   page.status === "reviewing" ? true : { unmet: `rerunHolisticReview runs while "reviewing" (page is "${page.status}")` };
@@ -159,9 +168,9 @@ const noOpenNotes: Precondition = (page) => {
 const activeRestatement =
   (command: string): Precondition =>
   (page) =>
-    page.status === "restating" || page.status === "reviewing"
+    page.status === "restating" || page.status === "restated" || page.status === "reviewing"
       ? true
-      : { unmet: `${command} runs while "restating" or "reviewing" (page is "${page.status}")` };
+      : { unmet: `${command} runs while "restating", "restated" or "reviewing" (page is "${page.status}")` };
 
 /** Resolve `sectionIds` to elements, throwing loudly on a missing id or a wrong status —
  *  produces-emitted transition ops silently no-op on an illegal edge, so acceptance
@@ -447,14 +456,24 @@ export const SpecRestatement = definePageType({
     "a list, and every `(see X)` cross-reference names a section that exists on the page.\n\n" +
     "NEVER mark a section human-verified yourself — verification happens only through a human's " +
     "`restateSections` in the studio, which atomically replaces AI sections with the human's restatement " +
-    "(born `human-verified`). Once every section is verified, `recordHolisticReview` files the AI's holistic " +
-    "notes and moves the page to reviewing; use `reviseSection`/`resolveNote`/`rerunHolisticReview` in the " +
-    "fix loop, and stop at the human `approve` gate.",
+    "(born `human-verified`). The page moves ITSELF to `restated` in the commit that verifies the last " +
+    "section, and back to `restating` the moment one returns to ai-draft: that status is the sections, not a " +
+    "decision. From `restated`, `recordHolisticReview` files the AI's holistic notes and moves the page to " +
+    "reviewing; use `reviseSection`/`resolveNote`/`rerunHolisticReview` in the fix loop, and stop at the " +
+    "human `approve` gate.",
   version: 1,
   initialStatus: "drafting",
   statusTransitions: [
     t("drafting", "submitForRestatement", "restating", { agency: "agent" }),
-    t("restating", "requestHolisticReview", "reviewing", {
+    t("restating", "completeRestatement", "restated", {
+      agency: "agent",
+      description:
+        "Fires ITSELF the moment the last section becomes human-verified; the command exists only to catch up a page that was already complete before the rule was.",
+    }),
+    t("restated", "reopenRestatement", "restating", {
+      description: "Fires itself when a section goes back to ai-draft — the status follows the content.",
+    }),
+    t("restated", "requestHolisticReview", "reviewing", {
       agency: "human",
       description:
         "Fired only via the recordHolisticReview command, which records the review summary and notes in the same commit.",
@@ -463,20 +482,33 @@ export const SpecRestatement = definePageType({
     t("reviewing", "reopenRestating", "restating"),
     t("approved", "reopen", "restating", { agency: "human" }),
   ],
+  /**
+   * `restated` is not a decision anyone makes — it IS "every section is in the human's
+   * words", so the engine derives it from the sections both ways. Verifying the last
+   * section lands the page there in that same commit; unaccepting one, or drafting a new
+   * section, takes it straight back to `restating`.
+   */
+  autoTransitions: [
+    { event: "completeRestatement", when: everySectionVerified },
+    { event: "reopenRestatement", when: (page) => !everySectionVerified(page) },
+  ],
   sections: {
     sections: {
       name: "Sections",
       required: true,
-      // reviewing included so the note-fix loop (restate/revise) works in one state.
-      mutableIn: ["drafting", "restating", "reviewing"],
+      // reviewing included so the note-fix loop (restate/revise) works in one state;
+      // restated so an accepted section can still be edited once the spec is complete.
+      mutableIn: ["drafting", "restating", "restated", "reviewing"],
       // Seeded with the required-slot rubric, so a new spec is born knowing what it owes.
       fields: { items: { kind: "list", element: "spec-section", ordered: true, seed: slotSeeds } },
     },
     review: {
       name: "Review",
       required: true,
-      // restating REQUIRED: recordHolisticReview's content ops evaluate in the FROM status.
-      mutableIn: ["restating", "reviewing"],
+      // restated REQUIRED: recordHolisticReview's content ops evaluate in the FROM status.
+      // restating kept so the edge stays VISIBLE-but-blocked there, naming the sections
+      // still to restate instead of vanishing from describeMutations.
+      mutableIn: ["restating", "restated", "reviewing"],
       fields: {
         summary: { kind: "prose", requiredIn: ["approved"] },
         notes: { kind: "list", element: "review-note" },
@@ -939,7 +971,9 @@ export const SpecRestatement = definePageType({
         "requestHolisticReview transition to reviewing, all in ONE commit. Requires every section human-verified.",
       args: zodSchema(z.object({ summary: z.string(), notes: z.array(noteInput) })),
       target: { section: "review" },
-      preconditions: [inRestating, allSectionsVerified],
+      // Content first: an unrestated spec's real problem is the ai-draft sections, not the
+      // status it hasn't reached because of them.
+      preconditions: [allSectionsVerified, inRestated],
       produces: (_page, args, ctx) => {
         const a = args as { summary: string; notes: { title: string; markdown: string; severity: string }[] };
         const ops: SectionOp[] = [{ op: "setField", section: "review", field: "summary", value: { kind: "prose", value: a.summary } }];
@@ -1006,6 +1040,15 @@ export const SpecRestatement = definePageType({
       args: zodSchema(empty),
       transition: { level: "page", event: "submitForRestatement" },
       preconditions: [slotsCovered, slotShape, citationsResolve],
+    },
+    completeRestatement: {
+      description:
+        "Move a fully-restated spec to `restated`. Rarely needed by hand: the engine fires this edge itself in " +
+        "the commit that verifies the last section, and the opposite one when a section goes back to ai-draft. " +
+        "It exists for a page that was ALREADY complete before the derived status did — one call catches it up.",
+      args: zodSchema(empty),
+      transition: { level: "page", event: "completeRestatement" },
+      preconditions: [allSectionsVerified],
     },
     approve: {
       description:
