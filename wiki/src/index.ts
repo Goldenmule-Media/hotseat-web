@@ -127,6 +127,7 @@ export type {
   IRenderCtx,
   FieldDecl,
   SeedElement,
+  AutoTransition,
   SectionDecl,
   ElementDecl,
   SectionSetContract,

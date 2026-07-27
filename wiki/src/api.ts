@@ -1137,6 +1137,29 @@ export interface DerivedItem {
  */
 export type DerivedList = (page: DeepReadonly<PageState>, ctx: IRenderCtx) => readonly DerivedItem[];
 
+/**
+ * A status the model derives from CONTENT rather than from anyone deciding it: after every
+ * page command, the engine evaluates `when` on the post-state and, if it holds and the FSM
+ * declares `event` from the post-state status, appends that page transition to the SAME
+ * commit — repeating until nothing more fires (a small cap guards a cyclic table).
+ *
+ * The alternative is every command that touches the content remembering to advance the
+ * status, which is a lie waiting to happen: forget one and the status stops matching what
+ * the page says. Declare BOTH directions ("all verified → done", "not all verified → back")
+ * and the status is a pure function of content, maintained in one place.
+ *
+ * `when` is pure and deterministic, like a precondition — it runs on a dry-run state during
+ * decide. An event with no legal edge from the post-state status is simply not fired, so a
+ * pair of opposed rules is safe: only one can ever apply. Page commands only — page creation
+ * and structural commands (archive, reparent) never fire these.
+ */
+export interface AutoTransition {
+  readonly event: string;
+  readonly when: (page: DeepReadonly<PageState>) => boolean;
+  /** Why this status is derived — surfaced in docs/diagrams, opaque to the engine. */
+  readonly description?: string;
+}
+
 export interface IPageTypeDef<Status extends string = string> {
   readonly type: string;
   /**
@@ -1159,6 +1182,8 @@ export interface IPageTypeDef<Status extends string = string> {
   readonly initialStatus: Status;
   /** Lifecycle FSM ONLY. */
   readonly statusTransitions: readonly ITransition<Status, string>[];
+  /** Edges that fire THEMSELVES — see {@link AutoTransition}. */
+  readonly autoTransitions?: readonly AutoTransition[];
   readonly sections: Readonly<Record<string, SectionDecl>>;
   readonly elements?: Readonly<Record<string, ElementDecl>>;
   readonly sectionSet?: SectionSetContract;

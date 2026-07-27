@@ -445,13 +445,16 @@ export class CommandBus {
       // preconditions.
       this.runPreconditions(declared, view, ctx.related);
 
+      // A derived status rides in the same commit, so it is never briefly out of date.
+      const withAuto = this.withAutoTransitions(node.type, view, ops);
+
       // well-formedness dry run.
-      this.dryRunAndValidate(state, node.type, view, ops);
+      this.dryRunAndValidate(state, node.type, view, withAuto);
 
       const result = this.commandResult(declared, parsed, ops);
-      if (ops.length === 0) return { events: [], result };
+      if (withAuto.length === 0) return { events: [], result };
       return {
-        events: [{ type: SECTION_OPS_EVENT, pageId: req.pageId, payload: { ops } }],
+        events: [{ type: SECTION_OPS_EVENT, pageId: req.pageId, payload: { ops: withAuto } }],
         result,
       };
     }
@@ -464,11 +467,12 @@ export class CommandBus {
     this.assertElementMutable(node.type, view, ops, req.command);
     this.assertEditPreconditions(view, ops);
     this.assertOpTargetsExist(view, ops);
-    this.dryRunAndValidate(state, node.type, view, ops);
+    const withAuto = this.withAutoTransitions(node.type, view, ops);
+    this.dryRunAndValidate(state, node.type, view, withAuto);
     const result = this.generatedResult(gen, ops);
-    if (ops.length === 0) return { events: [], result };
+    if (withAuto.length === 0) return { events: [], result };
     return {
-      events: [{ type: SECTION_OPS_EVENT, pageId: req.pageId, payload: { ops } }],
+      events: [{ type: SECTION_OPS_EVENT, pageId: req.pageId, payload: { ops: withAuto } }],
       result,
     };
   }
@@ -900,14 +904,8 @@ export class CommandBus {
   }
 
   /** Dry-run the ops against a clone and validate the resulting sections (§7). */
-  private dryRunAndValidate(
-    state: IWorkspaceState,
-    type: string,
-    view: PageState,
-    ops: readonly SectionOp[],
-  ): void {
-    if (ops.length === 0) return;
-    const def = this.registry.page(type);
+  /** A dry-run copy of `view` with `ops` folded in — the post-state a command would leave. */
+  private postState(type: string, view: PageState, ops: readonly SectionOp[]): PageState {
     const clone: PageState = {
       id: view.id,
       type: view.type,
@@ -920,10 +918,43 @@ export class CommandBus {
     };
     applyOps(clone, ops, {
       now: clone.updatedAt,
-      def,
+      def: this.registry.page(type),
       pageNext: (status, ev) => this.registry.pageGuard(type).next(status, ev),
       elementNext: (elType, status, ev) => this.registry.elementGuard(type, elType)?.next(status, ev),
     });
+    return clone;
+  }
+
+  /**
+   * Append the page transitions the model derives from content ({@link AutoTransition}):
+   * evaluate each `when` on the post-state, fire the first whose edge is legal from the
+   * post-state status, and repeat on the new post-state until nothing more fires. Ten
+   * rounds is the backstop for a cyclic table — far above any real lifecycle.
+   */
+  private withAutoTransitions(type: string, view: PageState, ops: readonly SectionOp[]): readonly SectionOp[] {
+    const autos = this.registry.page(type).autoTransitions;
+    if (autos === undefined || autos.length === 0) return ops;
+    const guard = this.registry.pageGuard(type);
+    let out = ops;
+    for (let round = 0; round < 10; round++) {
+      const post = this.postState(type, view, out);
+      const fired = autos.find(
+        (a) => guard.can(post.status, a.event) && a.when(post as DeepReadonly<PageState>),
+      );
+      if (fired === undefined) return out;
+      out = [...out, { op: "transition", level: "page", event: fired.event }];
+    }
+    return out;
+  }
+
+  private dryRunAndValidate(
+    state: IWorkspaceState,
+    type: string,
+    view: PageState,
+    ops: readonly SectionOp[],
+  ): void {
+    if (ops.length === 0) return;
+    const clone = this.postState(type, view, ops);
     // Validate against a state whose page node reflects the dry-run sections AND status —
     // the post-fold status drives the `requiredIn` authored-ness gate (a transition INTO a
     // gated status must validate against the status being entered, not the one left).

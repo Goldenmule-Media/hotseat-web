@@ -207,6 +207,15 @@ export class Registry {
       }
     }
 
+    // (2b) An auto-transition naming an event no edge declares can never fire — the model
+    // reads as if the status maintains itself while it silently never moves.
+    const events = new Set(def.statusTransitions.map((tr) => tr.event));
+    (def.autoTransitions ?? []).forEach((a, i) => {
+      if (!events.has(a.event)) {
+        issues.push({ path: ["autoTransitions", i], message: `event "${a.event}" is on no status transition — it can never fire` });
+      }
+    });
+
     // (3) Seed elements must be materializable: only a REQUIRED section materializes at
     // create, ids are derived from the seed key so duplicates would collide, and every
     // seeded field/status has to exist on the declared element type.
