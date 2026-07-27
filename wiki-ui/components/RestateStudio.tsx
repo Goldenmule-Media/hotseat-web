@@ -4,7 +4,8 @@
  * The Restatement Studio (feature: spec-restatement studio) — the browser UI for
  * `spec-restatement` pages. Two columns: the LEFT renders the spec per section
  * (renderElement → HTML) styled by provenance (ai-draft vs human-verified), where you
- * pick ONE AI-drafted section at a time; the RIGHT is the workbench driven by page
+ * pick ONE section at a time — an AI draft to restate, or an accepted one to edit again,
+ * since the human's words are the verification either way; the RIGHT is the workbench driven by page
  * status — restate that section in your own markdown (Edit/Preview tabs over one draft,
  * the editor filling the viewport's leftover height), optionally stream an AI critique
  * (/api/restate/critique), Accept to atomically REPLACE it via `restateSections` (born
@@ -16,8 +17,8 @@
  * (seeded from the section's current markdown on first select, then persisted per
  * workspace+page in localStorage) and critique verdicts — so a critique keeps running while
  * you move on to another section, its card badges "Critique ready" when it lands, and
- * selecting that section re-opens its panel. Per-section state is dropped when the section
- * stops being restatable underneath you (verified, replaced, deleted).
+ * selecting that section re-opens its panel. Per-section state is dropped only when the
+ * section itself goes (replaced or deleted underneath you).
  *
  * ONE claude session serves the whole page (persisted alongside the drafts): every section
  * and every re-critique resumes it, so the critic accumulates the spec. That session is a
@@ -45,7 +46,7 @@ import { renderMarkdown } from "../lib/markdown";
 import {
   assembleDraft,
   clearRestateDraft,
-  isRestatable,
+  isEditable,
   loadRestateDraft,
   fetchRestateHealth,
   pruneBySection,
@@ -433,13 +434,13 @@ function SectionCard({
               type="button"
               className="restate-select"
               aria-pressed={selected}
-              aria-label={`Restate "${titleOf(el)}"`}
+              aria-label={`${verified ? "Edit" : "Restate"} "${titleOf(el)}"`}
               onClick={(e) => {
                 e.stopPropagation();
                 onToggle();
               }}
             >
-              {selected ? "Restating" : "Restate"}
+              {verified ? (selected ? "Editing" : "Edit") : selected ? "Restating" : "Restate"}
             </button>
           )}
           {structure !== null && (
@@ -770,15 +771,15 @@ export function RestateStudio({
   // Skipped while the element read is errored — stale elements must not drop live work.
   useEffect(() => {
     if (!restored || elementsLoading || elementsError !== null) return;
-    if (selectedId !== null && !isRestatable(selectedId, elements)) setSelectedId(null);
+    if (selectedId !== null && !isEditable(selectedId, elements)) setSelectedId(null);
     const keptDrafts = pruneBySection(drafts, elements);
     if (Object.keys(keptDrafts).length !== Object.keys(drafts).length) setDrafts(keptDrafts);
-    // A critique belongs to a restatement in progress: once the section is verified (or
-    // gone) its panel is unreachable, so drop it — and end a run still pointed at it.
-    const restatable = elements.filter((e) => e.status === "ai-draft");
-    const keptCritiques = pruneBySection(critiques, restatable);
+    // A critique belongs to its section for as long as the section is reachable — which is
+    // every status now that an accepted one reopens in the editor. Only a replaced or
+    // deleted section drops its critique, and a run still pointed at one ends.
+    const keptCritiques = pruneBySection(critiques, elements);
     if (Object.keys(keptCritiques).length !== Object.keys(critiques).length) setCritiques(keptCritiques);
-    if (critiqueRun !== null && !restatable.some((e) => e.id === critiqueRun.id)) endCritique();
+    if (critiqueRun !== null && !elements.some((e) => e.id === critiqueRun.id)) endCritique();
     // Card modes are pure UI state — drop them when the card goes (a join, someone else's edit).
     if (splitting !== null && !elements.some((e) => e.id === splitting)) setSplitting(null);
     if (deleting !== null && !elements.some((e) => e.id === deleting)) setDeleting(null);
@@ -892,6 +893,9 @@ export function RestateStudio({
   );
 
   const selectedEl = useMemo(() => elements.find((e) => e.id === selectedId), [elements, selectedId]);
+  /** An already-accepted selection: the editor reworks verified words rather than restating
+   *  AI ones. Same commit either way (`restateSections`) — the words stay the human's. */
+  const editingVerified = selectedEl?.status === "human-verified";
   const critique = selectedId === null ? undefined : critiques[selectedId];
   const critiqueVerdict = critique?.verdict ?? null;
   const critiqueError = critique?.error ?? null;
@@ -1445,13 +1449,16 @@ export function RestateStudio({
           }`}
         >
           <div className="restate-block-head-row">
-            <h2 className="restate-block-head">Restate</h2>
+            <h2 className="restate-block-head">{editingVerified ? "Edit" : "Restate"}</h2>
             {selectedEl !== undefined && composing === null && editorTabs}
           </div>
           {composing !== null ? (
             <p className="muted">Finish or cancel the new section above to get back to restating.</p>
           ) : selectedEl === undefined ? (
-            <p className="muted">Select an AI-draft section on the left to restate it in your own words.</p>
+            <p className="muted">
+              Select a section on the left: an AI draft to restate in your own words, or one you&apos;ve accepted to
+              edit.
+            </p>
           ) : (
             <>
               <div className="restate-selection-actions">
@@ -1464,15 +1471,18 @@ export function RestateStudio({
                 >
                   {resetArm ? "Discard your edits?" : seedBusy ? "Loading…" : "Reset to source"}
                 </button>
-                <button
-                  type="button"
-                  className="tf-btn tf-btn-secondary"
-                  disabled={mutating}
-                  title="Verify this section exactly as written — no restatement"
-                  onClick={() => onAcceptAsIs(selectedEl.id)}
-                >
-                  Accept as-is
-                </button>
+                {/* Nothing to accept on a section that is already verified. */}
+                {!editingVerified && (
+                  <button
+                    type="button"
+                    className="tf-btn tf-btn-secondary"
+                    disabled={mutating}
+                    title="Verify this section exactly as written — no restatement"
+                    onClick={() => onAcceptAsIs(selectedEl.id)}
+                  >
+                    Accept as-is
+                  </button>
+                )}
               </div>
               {seedError !== null && (
                 <p className="restate-load-error" role="alert">
@@ -1495,7 +1505,13 @@ export function RestateStudio({
                   value={draft}
                   spellCheck
                   onChange={(e) => setDraft(e.target.value)}
-                  placeholder={seedBusy ? "Loading the section…" : "Restate this section in your own words…"}
+                  placeholder={
+                    seedBusy
+                      ? "Loading the section…"
+                      : editingVerified
+                        ? "Edit this section…"
+                        : "Restate this section in your own words…"
+                  }
                 />
               )}
               <p className="muted restate-hint">
@@ -1524,7 +1540,7 @@ export function RestateStudio({
                   disabled={draft.trim() === "" || mutating}
                   onClick={() => void onAccept()}
                 >
-                  {mutating ? "Committing…" : "Accept restatement"}
+                  {mutating ? "Committing…" : editingVerified ? "Save edits" : "Accept restatement"}
                 </button>
               </div>
               {criticGate !== null && health !== null && (
@@ -1662,7 +1678,7 @@ export function RestateStudio({
                 workspaceId={workspaceId}
                 pageId={pageId}
                 el={el}
-                selectable={workbenchActive && el.status === "ai-draft"}
+                selectable={workbenchActive}
                 selected={selectedId === el.id}
                 onToggle={() => toggle(el.id)}
                 critique={critiqueTag(critiques[el.id], critiqueRun?.id === el.id)}

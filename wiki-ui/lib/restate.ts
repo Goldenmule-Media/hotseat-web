@@ -291,13 +291,14 @@ export function clearRestateDraft(store: KeyValueStore, workspaceId: string, pag
   }
 }
 
-/** Whether an id can still be restated: it exists AND is still ai-draft. A restored or
- *  held selection that fails this is dropped (the section was verified or replaced). */
-export function isRestatable(
+/** Whether an id can still be opened in the editor: it exists. Status does not enter into
+ *  it — an accepted section is edited through the same commit that restates a draft one, so
+ *  only a section that was replaced or deleted drops a held or restored selection. */
+export function isEditable(
   id: string | null,
-  elements: readonly { readonly id: string; readonly status?: string }[],
+  elements: readonly { readonly id: string }[],
 ): boolean {
-  return id !== null && elements.some((e) => e.id === id && e.status === "ai-draft");
+  return id !== null && elements.some((e) => e.id === id);
 }
 
 /**

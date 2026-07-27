@@ -3,7 +3,7 @@ import {
   asCritiqueVerdict,
   assembleDraft,
   clearRestateDraft,
-  isRestatable,
+  isEditable,
   loadRestateDraft,
   pruneBySection,
   restateStorageKey,
@@ -342,20 +342,20 @@ describe("restate draft persistence", () => {
   });
 });
 
-describe("isRestatable", () => {
+describe("isEditable", () => {
   const elements = [
     { id: "a", status: "ai-draft" },
     { id: "b", status: "human-verified" },
     { id: "d" },
   ];
 
-  it("holds only for a section that still exists AND is still ai-draft", () => {
-    expect(isRestatable("a", elements)).toBe(true);
-    expect(isRestatable("b", elements)).toBe(false); // verified underneath you
-    expect(isRestatable("d", elements)).toBe(false); // no status at all
-    expect(isRestatable("gone", elements)).toBe(false);
-    expect(isRestatable(null, elements)).toBe(false);
-    expect(isRestatable("a", [])).toBe(false);
+  it("holds for any section that still exists, whatever its status", () => {
+    expect(isEditable("a", elements)).toBe(true);
+    expect(isEditable("b", elements)).toBe(true); // accepted sections stay editable
+    expect(isEditable("d", elements)).toBe(true);
+    expect(isEditable("gone", elements)).toBe(false);
+    expect(isEditable(null, elements)).toBe(false);
+    expect(isEditable("a", [])).toBe(false);
   });
 });
 
