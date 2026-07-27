@@ -126,6 +126,7 @@ export type {
   IRelatedReader,
   IRenderCtx,
   FieldDecl,
+  SeedElement,
   SectionDecl,
   ElementDecl,
   SectionSetContract,

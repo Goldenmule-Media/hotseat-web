@@ -136,6 +136,12 @@ export class Registry {
           }
         }
       }
+      // A gate exemption for a field that does not exist silently exempts nothing.
+      for (const fk of el.structuralFields ?? []) {
+        if (el.fields[fk] === undefined) {
+          issues.push({ path: ["elements", tag, "structuralFields"], message: `references undeclared field "${fk}"` });
+        }
+      }
     }
 
     // ── static reachability guards ───────────────────────────────────────────
@@ -200,6 +206,40 @@ export class Registry {
         }
       }
     }
+
+    // (3) Seed elements must be materializable: only a REQUIRED section materializes at
+    // create, ids are derived from the seed key so duplicates would collide, and every
+    // seeded field/status has to exist on the declared element type.
+    const lintSeeds = (key: string, sd: SectionDecl): void => {
+      for (const [fk, fd] of Object.entries(sd.fields)) {
+        if (fd.kind !== "list" || fd.seed === undefined || fd.seed.length === 0) continue;
+        const path = ["sections", key, "fields", fk, "seed"];
+        if (sd.required !== true) {
+          issues.push({ path, message: `seed elements only materialize on a required section — "${key}" is not required` });
+        }
+        const seen = new Set<string>();
+        const el = def.elements?.[fd.element];
+        for (const s of fd.seed) {
+          if (s.key.length === 0) issues.push({ path, message: `a seed element needs a non-empty key (it derives the element id)` });
+          if (seen.has(s.key)) issues.push({ path, message: `duplicate seed key "${s.key}" — seed keys derive element ids and must be unique` });
+          seen.add(s.key);
+          if (el === undefined) continue;
+          for (const sfk of Object.keys(s.fields)) {
+            if (el.fields[sfk] === undefined) {
+              issues.push({ path, message: `seed "${s.key}" sets field "${sfk}", undeclared on element type "${fd.element}"` });
+            }
+          }
+          if (s.status !== undefined && el.status !== undefined) {
+            const known = new Set<string>([el.status.initial, ...el.status.transitions.flatMap((t) => [t.fromState, t.toState])]);
+            if (!known.has(s.status)) {
+              issues.push({ path, message: `seed "${s.key}" is born in status "${s.status}", not a state of element type "${fd.element}"` });
+            }
+          }
+        }
+      }
+      for (const [nk, nested] of Object.entries(sd.sections ?? {})) lintSeeds(nk, nested);
+    };
+    for (const [key, sd] of Object.entries(def.sections)) lintSeeds(key, sd);
 
     // sectionSet contract keys resolve.
     const sectionKeys = new Set(Object.keys(def.sections));

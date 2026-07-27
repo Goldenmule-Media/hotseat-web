@@ -303,7 +303,7 @@ function applyStructural(
           parentId: null,
           fields: {},
         };
-        materializeSectionFields(section, req.decl);
+        materializeSectionFields(section, req.decl, id);
         sections.push(section);
       });
 

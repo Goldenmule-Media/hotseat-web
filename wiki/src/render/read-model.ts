@@ -241,11 +241,12 @@ function renderListField(
 }
 
 /**
- * Render one list element as an H3 subsection (the `as: "sections"` mode): a heading
- * template filled from the element's fields, then each non-empty declared body part. The
- * ordinal is supplied by the caller from the element's position in its rendered group, so it
- * matches what an `$ordinal` element-ref resolves to; `numbered: false` omits it from the
- * heading (the index — and `$ordinal` resolution — is unaffected).
+ * Render one list element as a subsection (the `as: "sections"` mode): a heading template
+ * filled from the element's fields, then each non-empty declared body part. The ordinal is
+ * supplied by the caller from the element's position in its rendered group, so it matches
+ * what an `$ordinal` element-ref resolves to; `numbered: false` omits it from the heading
+ * (the index — and `$ordinal` resolution — is unaffected). The level is H3 unless
+ * `depthField` names an element field carrying a nesting depth (see {@link elementDepth}).
  */
 function renderElementSection(el: IItem, ordinal: number, sr: SectionRender, label: LabelResolver): string {
   const spec = sr.element;
@@ -255,7 +256,19 @@ function renderElementSection(el: IItem, ordinal: number, sr: SectionRender, lab
     const rendered = renderElementBodyPart(el, part, label);
     if (rendered.length > 0) parts.push(rendered);
   }
-  return section(heading(3, sr.numbered === false ? headingText : `${ordinal}. ${headingText}`), parts.join("\n\n"));
+  const level = Math.min(6, 3 + elementDepth(el, sr.depthField)) as 1 | 2 | 3 | 4 | 5 | 6;
+  return section(heading(level, sr.numbered === false ? headingText : `${ordinal}. ${headingText}`), parts.join("\n\n"));
+}
+
+/** A `depthField` element's 0-based nesting depth. Anything not a non-negative integer —
+ *  absent field, wrong kind, a string that doesn't parse — reads as 0, so a malformed
+ *  value degrades to a flat render instead of failing it. */
+function elementDepth(el: IItem, depthField: string | undefined): number {
+  if (depthField === undefined) return 0;
+  const f = el.fields[depthField];
+  if (f === undefined || f.kind !== "scalar") return 0;
+  const n = typeof f.value === "number" ? f.value : Number(f.value);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
 
 /** One body part of an `as: "sections"` element: its field body, optionally prefixed
@@ -432,7 +445,7 @@ function renderDerivedList(items: readonly DerivedItem[]): string {
 /**
  * Render ONE list element exactly as {@link renderPage} presents it inside its section:
  * for an `as: "sections"` config the `### {ordinal}. {heading}` subsection (heading only
- * under `numbered: false`) plus the
+ * under `numbered: false`; deeper under `depthField`) plus the
  * declared body parts (ordinal from the same per-group index the full render uses); for
  * bullets/numbered/checklist the single rendered item line. An element filtered out of
  * every rendered group still renders — via the group whose `when` matches its status,

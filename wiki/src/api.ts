@@ -910,6 +910,23 @@ export interface SectionOpsAppliedPayload {
  *    Section fields only (rejected at registration on element fields); must not name
  *    the initial status (pages are born empty — an unsatisfiable gate).
  */
+/**
+ * One model-declared element materialized into a `list` field at page creation — the list
+ * analogue of a required section materializing empty, for a page type whose list IS a
+ * fixed rubric (a spec's required slots) rather than a free collection. The element id is
+ * DERIVED, `seed:<pageId>:<section>:<field>:<key>`, so the reducer stays id-free and a
+ * replay reproduces it exactly; `key` is the stable model-declared handle, never the
+ * array position, so reordering the seed list never re-identifies an element.
+ * Seeded elements are ordinary elements afterwards: movable, editable, and removable
+ * under whatever gates the model declares.
+ */
+export interface SeedElement {
+  readonly key: string;
+  readonly fields: Readonly<Record<string, IField>>;
+  readonly status?: string;
+  readonly meta?: Readonly<Record<string, unknown>>;
+}
+
 export type FieldDecl =
   | { readonly kind: "scalar"; required?: boolean; requiredIn?: readonly string[]; schema?: ISchema }
   | { readonly kind: "prose"; required?: boolean; requiredIn?: readonly string[] }
@@ -917,7 +934,16 @@ export type FieldDecl =
   | { readonly kind: "attachment-ref"; required?: boolean; requiredIn?: readonly string[] }
   | { readonly kind: "ref"; required?: boolean; requiredIn?: readonly string[]; targetKinds?: RefTarget["kind"][] }
   | { readonly kind: "blocks"; required?: boolean; requiredIn?: readonly string[] }
-  | { readonly kind: "list"; element: string; ordered?: boolean; required?: boolean; requiredIn?: readonly string[] }
+  | {
+      readonly kind: "list";
+      element: string;
+      ordered?: boolean;
+      required?: boolean;
+      requiredIn?: readonly string[];
+      /** Model-declared elements materialized at page creation — the list analogue of a
+       *  required SECTION materializing empty. See {@link SeedElement}. */
+      seed?: readonly SeedElement[];
+    }
   /**
    * An ENGINE-ASSIGNED, IMMUTABLE sequence number. At `createPage` the engine mints the
    * next value — `max(existing) + 1`, scoped to pages of the SAME TYPE in the workspace,
@@ -958,6 +984,16 @@ export interface ElementDecl {
    * (enforced at registration).
    */
   readonly mutableIn?: readonly string[];
+  /**
+   * Fields exempt from {@link mutableIn} — those carrying an element's POSITION rather
+   * than its content (e.g. an outline nesting depth). The write-gate exists to stop
+   * content changing behind a status that attests to it; the same reasoning is why the
+   * gate never covers `moveElement`. Reordering or re-nesting an element does not
+   * restate it, so a structural field stays writable in every status. Must name declared
+   * fields of this element type (enforced at registration). Absent = every field is
+   * content.
+   */
+  readonly structuralFields?: readonly string[];
   readonly meta?: ISchema;
   readonly reduceMeta?: (meta: unknown, op: SectionOp) => unknown;
   /**
@@ -1052,6 +1088,15 @@ export interface SectionRender {
    *  (`### {ordinal}. {heading}`; default true). `false` emits `### {heading}` — the
    *  ordinal index is still computed, so `$ordinal` refs resolve unchanged. */
   readonly numbered?: boolean;
+  /**
+   * For `as: "sections"`: the element field holding a 0-based nesting DEPTH, so a flat
+   * ordered list renders as a heading hierarchy — depth 0 at the base level (H3, as
+   * without this knob), depth 1 one level deeper, and so on, clamped at H6. The list
+   * stays flat and every element remains individually addressable; the tree is a
+   * projection of the depth run, exactly as Markdown's own heading levels are. A missing,
+   * non-numeric, or negative value reads as 0.
+   */
+  readonly depthField?: string;
 }
 
 export interface RenderConfig {

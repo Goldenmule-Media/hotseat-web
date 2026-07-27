@@ -256,7 +256,7 @@ export function applyOps(page: PageState, ops: readonly SectionOp[], ctx: ApplyO
         );
         // Materialize declared fields for this key, if a decl exists.
         const decl = declOfSection(def, op.key);
-        if (decl !== undefined) materializeSectionFields(inserted, decl);
+        if (decl !== undefined) materializeSectionFields(inserted, decl, page.id);
         break;
       }
       case "removeSection": {
@@ -350,11 +350,25 @@ function normalizeFields(fields: Record<string, IField>): Record<string, IField>
   return out;
 }
 
-/** Materialize empty fields for a section from its declaration. */
-export function materializeSectionFields(sec: ISection, decl: SectionDecl): void {
+/**
+ * Materialize empty fields for a section from its declaration. A `list` field declaring
+ * `seed` materializes those elements instead of empty, with ids DERIVED from the owning
+ * page, the section/field keys, and each seed's stable `key` — never minted, so the
+ * reducer stays id-free and a replay reproduces them byte-identically.
+ */
+export function materializeSectionFields(sec: ISection, decl: SectionDecl, pageId?: string): void {
   for (const [fieldKey, fd] of Object.entries(decl.fields)) {
     if (sec.fields[fieldKey] !== undefined) continue;
-    sec.fields[fieldKey] = emptyFieldFor(fd);
+    const empty = emptyFieldFor(fd);
+    if (fd.kind === "list" && fd.seed !== undefined && fd.seed.length > 0 && empty.kind === "list") {
+      empty.elements = fd.seed.map((s) => ({
+        id: `seed:${pageId ?? sec.id}:${sec.key}:${fieldKey}:${s.key}`,
+        ...(s.status !== undefined ? { status: s.status } : {}),
+        fields: normalizeFields({ ...s.fields } as Record<string, IField>),
+        ...(s.meta !== undefined ? { meta: { ...s.meta } } : {}),
+      }));
+    }
+    sec.fields[fieldKey] = empty;
   }
 }
 

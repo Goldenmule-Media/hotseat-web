@@ -563,6 +563,8 @@ export class CommandBus {
           if (lf === undefined) break;
           const decl = this.registry.element(type, lf.f.elementType);
           if (decl?.mutableIn === undefined) break;
+          // A structural field carries position, not content — ungated, like moveElement.
+          if (decl.structuralFields?.includes(op.elementField) === true) break;
           if (!evolving.has(key(op.section, lf.field, op.id)) && !lf.f.elements.some((e) => e.id === op.id)) break;
           const st = statusOf(op.section, lf.field, lf.f, op.id) ?? "";
           if (!decl.mutableIn.includes(st)) {
