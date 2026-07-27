@@ -236,18 +236,42 @@ function SplitPicker({
       <p className="muted restate-split-hint">Pick where to cut — everything below the line becomes a new section.</p>
       {chunks.map((chunk, i) => (
         <div key={i}>
-          {i > 0 && (
-            <div className="restate-cut">
-              <button
-                type="button"
-                className={`restate-cut-btn ${at === i ? "is-armed" : ""}`}
-                disabled={busy}
-                onClick={() => setAt(at === i ? null : i)}
-              >
-                {at === i ? "Cut here" : "Split here"}
-              </button>
-            </div>
-          )}
+          {i > 0 &&
+            (at === i ? (
+              /* The cut IS the form: you name the section being born right where it starts. */
+              <div className="restate-cut is-armed">
+                <input
+                  type="text"
+                  autoFocus
+                  value={newTitle}
+                  aria-label="Title for the new section"
+                  placeholder="Title for the new section"
+                  disabled={busy}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter" || proposed === null || newTitle.trim() === "" || busy) return;
+                    onSplit({ ...proposed, newTitle: newTitle.trim() });
+                  }}
+                />
+                <button
+                  type="button"
+                  className="tf-btn tf-btn-primary restate-cut-go"
+                  disabled={busy || proposed === null || newTitle.trim() === ""}
+                  onClick={() => proposed !== null && onSplit({ ...proposed, newTitle: newTitle.trim() })}
+                >
+                  Split here
+                </button>
+                <button type="button" className="restate-cut-btn" disabled={busy} onClick={() => setAt(null)}>
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <div className="restate-cut">
+                <button type="button" className="restate-cut-btn" disabled={busy} onClick={() => setAt(i)}>
+                  Split here
+                </button>
+              </div>
+            ))}
           {/* eslint-disable-next-line react/no-danger */}
           <div
             className={`markdown restate-section-body restate-chunk${at !== null && i >= at ? " is-below" : ""}`}
@@ -256,23 +280,6 @@ function SplitPicker({
         </div>
       ))}
       <div className="restate-split-confirm">
-        {proposed !== null && (
-          <input
-            type="text"
-            value={newTitle}
-            aria-label="Title for the new section"
-            placeholder="Title for the new section"
-            onChange={(e) => setNewTitle(e.target.value)}
-          />
-        )}
-        <button
-          type="button"
-          className="tf-btn tf-btn-primary"
-          disabled={busy || proposed === null || newTitle.trim() === ""}
-          onClick={() => proposed !== null && onSplit({ ...proposed, newTitle: newTitle.trim() })}
-        >
-          Split
-        </button>
         <button type="button" className="restate-cancel" onClick={onCancel}>
           Cancel
         </button>
