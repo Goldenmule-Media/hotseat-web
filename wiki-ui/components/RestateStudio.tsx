@@ -906,7 +906,9 @@ export function RestateStudio({
   const verified = elements.filter((e) => e.status === "human-verified").length;
   const total = elements.length;
   const allVerified = total > 0 && verified === total;
-  const workbenchActive = status === "restating" || status === "reviewing";
+  // `restated` is the derived "every section is in your words" status — the studio stays
+  // fully live there: sections can still be edited, and the review is run from it.
+  const workbenchActive = status === "restating" || status === "restated" || status === "reviewing";
 
   // ── outline projections: the hierarchy the flat list encodes ──────────────────
   const hidden = useMemo(() => hiddenByCollapse(elements, collapsed), [elements, collapsed]);
@@ -1354,27 +1356,6 @@ export function RestateStudio({
           </section>
         )}
 
-        {status === "restating" && allVerified && (
-          <section className="restate-block restate-review-cta">
-            <h2 className="restate-block-head">All sections verified</h2>
-            <p className="muted">
-              Run the holistic AI review: the whole spec goes to the local claude CLI, and its summary + notes are
-              recorded in one commit that moves the page to <code>reviewing</code>.
-            </p>
-            <div className="restate-actions">
-              <button
-                type="button"
-                className="tf-btn tf-btn-primary"
-                disabled={!criticReady || reviewRun.running || mutating || specMarkdown === null}
-                title={criticGate ?? undefined}
-                onClick={() => void onRunReview()}
-              >
-                Run holistic review
-              </button>
-            </div>
-          </section>
-        )}
-
         {reviewRun.running && (
           <p className="restate-review-status" role="status">
             Reviewing… {reviewElapsed}s — the page is untouched until the review returns (this can take minutes).{" "}
@@ -1636,6 +1617,41 @@ export function RestateStudio({
           <p className="restate-load-error" role="alert">
             Couldn&apos;t refresh sections: {elementsError}. Showing the last good read; your selection is kept.
           </p>
+        )}
+        {/* A page that was already fully restated before the status derived itself: one
+            command catches it up, and the review CTA below takes over. */}
+        {status === "restating" && allVerified && (
+          <span className="restate-bar-cta">
+            <span className="restate-bar-note">All sections verified</span>
+            <button
+              type="button"
+              className="tf-btn tf-btn-primary restate-bar-run"
+              disabled={mutating}
+              title="This spec is fully restated but predates the derived status — move it to `restated`"
+              onClick={() => void runMutation("completeRestatement", {})}
+            >
+              Mark restated
+            </button>
+          </span>
+        )}
+        {/* The spec is fully restated: the one thing left to do rides in the bar, next to
+            the other whole-spec control, rather than as a panel over the editor. */}
+        {status === "restated" && (
+          <span className="restate-bar-cta">
+            <span className="restate-bar-note">All sections verified</span>
+            <button
+              type="button"
+              className="tf-btn tf-btn-primary restate-bar-run"
+              disabled={!criticReady || reviewRun.running || mutating || specMarkdown === null}
+              title={
+                criticGate ??
+                "Send the whole spec to the local claude CLI; its summary + notes are recorded in one commit that moves the page to reviewing"
+              }
+              onClick={() => void onRunReview()}
+            >
+              Run holistic review
+            </button>
+          </span>
         )}
         {workbenchActive && total > 0 && (
           <button

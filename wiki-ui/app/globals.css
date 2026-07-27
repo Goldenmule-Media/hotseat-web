@@ -1632,6 +1632,27 @@ code {
   color: var(--text);
   background: var(--accent-dim);
 }
+/* The whole-spec call to action, at the bar's scale: shown only in `restated`, where the
+   one thing left is the holistic review. It takes the right edge; Collapse all follows it. */
+.restate-bar-cta {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.restate-bar-cta ~ .restate-bar-btn {
+  margin-left: 0;
+}
+.restate-bar-note {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--green);
+}
+.restate-bar-run {
+  font-size: 12px;
+  padding: 2px 10px;
+}
 .restate-progress {
   margin: 0;
   font-size: 13px;
