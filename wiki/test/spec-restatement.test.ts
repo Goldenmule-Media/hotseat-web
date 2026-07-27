@@ -1,10 +1,13 @@
 /**
  * Integration test for the real `spec-restatement` bundle (wiki-models/spec-restatement):
- * an AI drafts ordered spec sections, a human proves understanding by RESTATING them
- * (atomic replace, born human-verified), a holistic AI review records notes, and a human
- * approve gate closes the loop. Exercises the element-status write-gate (`mutableIn`),
- * the empty-draft submit precondition, produces-emitted page transitions, positioning of
- * restated runs, attention/describeMutations surfacing, and deterministic render.
+ * a page is born carrying the REQUIRED SLOT rubric (seeded empty), an AI authors the slots
+ * and any further sections, a human proves understanding by RESTATING them (atomic replace,
+ * born human-verified), a holistic AI review records notes, and a human approve gate closes
+ * the loop. Exercises the seeded rubric and its Tier-1 gates (coverage, shape, citation
+ * integrity), outline depth and subsection structure, the element-status write-gate
+ * (`mutableIn`) and its structural-field exemption, produces-emitted page transitions,
+ * positioning of restated runs, attention/describeMutations surfacing, and deterministic
+ * render.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -12,6 +15,31 @@ import { specRestatementPageTypes } from "wiki-models/spec-restatement";
 import type { DeepReadonly, IItem, IWorkspaceHandle, PageId, PageState } from "../src/api";
 import { InvariantViolationError, MutationNotAllowedError, PreconditionUnmetError } from "../src/core/errors";
 import { createTestWiki, type ITestWiki } from "../src/testing";
+
+/** The required slots, in the order they are seeded. */
+const SLOTS = [
+  "motivation",
+  "overview",
+  "data-model",
+  "algorithm",
+  "invariants",
+  "failure-semantics",
+  "data-dependencies",
+  "migration",
+  "staged-plan",
+] as const;
+
+const SLOT_TITLES = [
+  "Motivation",
+  "Overview",
+  "Data model & types",
+  "Algorithm",
+  "Invariants & limits",
+  "Failure & concurrency semantics",
+  "Data dependencies",
+  "Migration & existing data",
+  "Staged plan",
+];
 
 function els(state: DeepReadonly<PageState>, sectionKey: string, fieldKey: string): readonly DeepReadonly<IItem>[] {
   const f = state.sections.find((s) => s.key === sectionKey)?.fields[fieldKey];
@@ -23,9 +51,24 @@ function titleOf(el: DeepReadonly<IItem>): string {
   return f !== undefined && f.kind === "prose" ? f.value : "";
 }
 
+function scalarOf(el: DeepReadonly<IItem>, field: string): string {
+  const f = el.fields[field];
+  return f !== undefined && f.kind === "scalar" ? String(f.value) : "";
+}
+
+const slotOf = (el: DeepReadonly<IItem>): string => scalarOf(el, "slot");
+const depthOf = (el: DeepReadonly<IItem>): number => Number(scalarOf(el, "depth") || 0);
+
 function proseOf(state: DeepReadonly<PageState>, sectionKey: string, fieldKey: string): string {
   const f = state.sections.find((s) => s.key === sectionKey)?.fields[fieldKey];
   return f !== undefined && f.kind === "prose" ? f.value : "";
+}
+
+/** Body markdown that satisfies each slot's SHAPE gate (types are code, invariants a list). */
+function slotBody(slot: string): string {
+  if (slot === "data-model") return "The shape:\n\n```ts\ntype Thing = { id: string };\n```";
+  if (slot === "invariants") return "- A thing's id never changes.\n- At most 100 things.";
+  return `Body for ${slot}.`;
 }
 
 describe("spec-restatement model", () => {
@@ -45,9 +88,31 @@ describe("spec-restatement model", () => {
     return (await ws.page(page, token !== undefined ? { consistentWith: token } : undefined)).state();
   }
 
-  /** A page with drafted sections, submitted for restatement. */
+  /** Every section on the page, in order. */
+  async function sectionsOf(page: PageId, token?: string): Promise<readonly DeepReadonly<IItem>[]> {
+    return els(await stateOf(page, token), "sections", "items");
+  }
+
+  /** Only the sections the spec added beyond the rubric — what most structural tests assert on. */
+  async function extraOf(page: PageId, token?: string): Promise<readonly DeepReadonly<IItem>[]> {
+    return (await sectionsOf(page, token)).filter((e) => slotOf(e) === "");
+  }
+
+  /** Author every required slot, so the rubric gates pass. */
+  async function fillRubric(page: PageId): Promise<void> {
+    for (const slot of SLOTS) await ws.mutate(page, "writeSlot", { slot, markdown: slotBody(slot) });
+  }
+
+  /** Human-verify every section still in ai-draft (the holistic-review precondition). */
+  async function acceptAllDrafts(page: PageId): Promise<void> {
+    const ids = (await sectionsOf(page)).filter((e) => e.status === "ai-draft").map((e) => e.id);
+    if (ids.length > 0) await ws.mutate(page, "acceptSections", { sectionIds: ids });
+  }
+
+  /** A page with the rubric authored plus `sections` drafted, submitted for restatement. */
   async function restatableSpec(title: string, sections: [string, string][]): Promise<{ page: PageId; ids: string[] }> {
     const page = (await ws.createPage("spec-restatement", { title, parentId: null })).value;
+    await fillRubric(page);
     const ids: string[] = [];
     for (const [t, md] of sections) {
       ids.push(((await ws.mutate(page, "draftSection", { title: t, markdown: md })).value as { sectionId: string }).sectionId);
@@ -56,8 +121,232 @@ describe("spec-restatement model", () => {
     return { page, ids };
   }
 
+  // ── the seeded rubric ─────────────────────────────────────────────────────────
+
+  it("seeds every required slot, empty and ai-draft, on a brand-new page", async () => {
+    const p = (await ws.createPage("spec-restatement", { title: "Fresh", parentId: null })).value;
+    const items = await sectionsOf(p);
+    expect(items.map(titleOf)).toEqual(SLOT_TITLES);
+    expect(items.map(slotOf)).toEqual([...SLOTS]);
+    expect(items.every((e) => e.status === "ai-draft")).toBe(true);
+    expect(items.every((e) => depthOf(e) === 0)).toBe(true);
+    // Empty: present in the outline, contributing no body to the render.
+    const body = items[0]!.fields["body"];
+    expect(body !== undefined && body.kind === "blocks" ? body.blocks : null).toEqual([]);
+    // Seeded ids are derived, so the same page replays to the same ids.
+    expect(items[0]!.id).toContain("motivation");
+  });
+
+  it("refuses submitForRestatement while any required slot is empty, naming them", async () => {
+    const p = (await ws.createPage("spec-restatement", { title: "Blank rubric", parentId: null })).value;
+    const attempt = ws.mutate(p, "submitForRestatement", {});
+    await expect(attempt).rejects.toThrow(PreconditionUnmetError);
+    await expect(attempt).rejects.toThrow(/still empty: Motivation, Overview/);
+
+    await fillRubric(p);
+    await ws.mutate(p, "submitForRestatement", {});
+    expect((await stateOf(p)).status).toBe("restating");
+  });
+
+  it("refuses submit when the data-model slot carries no types and the invariants slot is not a list", async () => {
+    const p = (await ws.createPage("spec-restatement", { title: "Shapeless", parentId: null })).value;
+    for (const slot of SLOTS) await ws.mutate(p, "writeSlot", { slot, markdown: `Prose about ${slot}.` });
+    const attempt = ws.mutate(p, "submitForRestatement", {});
+    await expect(attempt).rejects.toThrow(PreconditionUnmetError);
+    await expect(attempt).rejects.toThrow(/must define the data as types — add a fenced code block/);
+    await expect(attempt).rejects.toThrow(/must be a list of atomic rules/);
+
+    await ws.mutate(p, "writeSlot", { slot: "data-model", markdown: slotBody("data-model") });
+    await ws.mutate(p, "writeSlot", { slot: "invariants", markdown: slotBody("invariants") });
+    await ws.mutate(p, "submitForRestatement", {});
+    expect((await stateOf(p)).status).toBe("restating");
+  });
+
+  it("refuses submit on a `(see X)` naming no section on the page — the drift the rubric exists to catch", async () => {
+    const p = (await ws.createPage("spec-restatement", { title: "Dangling", parentId: null })).value;
+    await fillRubric(p);
+    await ws.mutate(p, "writeSlot", {
+      slot: "algorithm",
+      markdown: "The store checks the condition at write time (see Enforcement).",
+    });
+    const attempt = ws.mutate(p, "submitForRestatement", {});
+    await expect(attempt).rejects.toThrow(PreconditionUnmetError);
+    await expect(attempt).rejects.toThrow(/name no section on this page.*Enforcement/s);
+
+    // Naming a section that DOES exist resolves it — including a multi-target citation.
+    await ws.mutate(p, "writeSlot", {
+      slot: "algorithm",
+      markdown: "The store checks the condition at write time (see Invariants & limits and Overview).",
+    });
+    await ws.mutate(p, "submitForRestatement", {});
+    expect((await stateOf(p)).status).toBe("restating");
+  });
+
+  it("writeSlot on a verified slot downgrades it to ai-draft in the same commit", async () => {
+    const { page } = await restatableSpec("Reslot", []);
+    await ws.mutate(page, "acceptSections", {
+      sectionIds: [(await sectionsOf(page)).find((e) => slotOf(e) === "overview")!.id],
+    });
+    const w = await ws.mutate(page, "writeSlot", { slot: "overview", markdown: "Rewritten by the agent." });
+    const overview = (await sectionsOf(page, w.token)).find((e) => slotOf(e) === "overview")!;
+    expect(overview.status).toBe("ai-draft");
+    expect(await ws.toMarkdown(page)).toContain("Rewritten by the agent.");
+  });
+
+  it("re-creates a missing slot section, so a page predating the rubric is not dead-ended", async () => {
+    const p = (await ws.createPage("spec-restatement", { title: "Legacy", parentId: null })).value;
+    // Simulate the pre-rubric shape: strip the slot tag off every seeded section.
+    for (const el of await sectionsOf(p)) {
+      await ws.mutate(p, "setSectionsItemsSlot", { id: el.id, value: { kind: "scalar", value: "" } });
+    }
+    expect((await sectionsOf(p)).every((e) => slotOf(e) === "")).toBe(true);
+    await expect(ws.mutate(p, "submitForRestatement", {})).rejects.toThrow(/required slots deleted/);
+
+    for (const slot of SLOTS) await ws.mutate(p, "writeSlot", { slot, markdown: slotBody(slot) });
+    const items = await sectionsOf(p);
+    expect(items.filter((e) => slotOf(e) !== "")).toHaveLength(SLOTS.length);
+    await ws.mutate(p, "submitForRestatement", {});
+    expect((await stateOf(p)).status).toBe("restating");
+  });
+
+  it("protects slot sections from removal, join-away, and indent", async () => {
+    const { page } = await restatableSpec("Protected", []);
+    const overview = (await sectionsOf(page)).find((e) => slotOf(e) === "overview")!;
+    const motivation = (await sectionsOf(page)).find((e) => slotOf(e) === "motivation")!;
+    await expect(ws.mutate(page, "removeSection", { sectionId: overview.id })).rejects.toThrow(
+      /required slot\(s\): Overview/,
+    );
+    await expect(ws.mutate(page, "joinSections", { sectionId: motivation.id, absorbId: overview.id })).rejects.toThrow(
+      /fills the required "Overview" slot/,
+    );
+    await expect(ws.mutate(page, "indentSection", { sectionId: overview.id })).rejects.toThrow(
+      /stays a top-level section/,
+    );
+  });
+
+  it("carries a slot tag onto its restatement, and refuses a restatement that would drop one", async () => {
+    const { page } = await restatableSpec("Slot restate", []);
+    const motivation = (await sectionsOf(page)).find((e) => slotOf(e) === "motivation")!;
+    const overview = (await sectionsOf(page)).find((e) => slotOf(e) === "overview")!;
+    const r = await ws.mutate(page, "restateSections", {
+      removeIds: [motivation.id],
+      sections: [{ title: "Why we are doing this", markdown: "In my words." }],
+    });
+    const after = (await sectionsOf(page, r.token))[0]!;
+    expect(titleOf(after)).toBe("Why we are doing this");
+    expect(slotOf(after)).toBe("motivation");
+    expect(after.status).toBe("human-verified");
+
+    // Two slot sections collapsed into one would leave an obligation homeless.
+    await expect(
+      ws.mutate(page, "restateSections", {
+        removeIds: [after.id, overview.id],
+        sections: [{ title: "Both at once", markdown: "Merged." }],
+      }),
+    ).rejects.toThrow(/would drop required slot\(s\): Overview/);
+  });
+
+  // ── subsections (outline depth) ───────────────────────────────────────────────
+
+  it("drafts a subsection under a parent and renders it one heading level deeper", async () => {
+    const p = (await ws.createPage("spec-restatement", { title: "Nested", parentId: null })).value;
+    await fillRubric(p);
+    const parent = ((await ws.mutate(p, "draftSection", { title: "Synchronization", markdown: "How data arrives." }))
+      .value as { sectionId: string }).sectionId;
+    await ws.mutate(p, "draftSection", {
+      title: "When an auth operation commits",
+      markdown: "Record the reference.",
+      afterId: parent,
+      depth: 1,
+    });
+    const extra = await extraOf(p);
+    expect(extra.map(titleOf)).toEqual(["Synchronization", "When an auth operation commits"]);
+    expect(extra.map(depthOf)).toEqual([0, 1]);
+    const md = await ws.toMarkdown(p);
+    expect(md).toContain("### Synchronization\nHow data arrives.");
+    expect(md).toContain("#### When an auth operation commits\nRecord the reference.");
+  });
+
+  it("refuses a depth that skips a heading level", async () => {
+    const p = (await ws.createPage("spec-restatement", { title: "Skipper", parentId: null })).value;
+    await ws.mutate(p, "draftSection", { title: "Top", markdown: "T." });
+    await expect(ws.mutate(p, "draftSection", { title: "Way under", markdown: "W.", depth: 2 })).rejects.toThrow(
+      /skips a level.*deepest legal depth here is 1/,
+    );
+  });
+
+  it("indent/outdent move a section and its whole subtree, leaving verified sections verified", async () => {
+    const { page } = await restatableSpec("Indent", [["Parent", "P."], ["Child", "C."], ["Grandchild", "G."]]);
+    const [parent, child, grand] = (await extraOf(page)).map((e) => e.id);
+    await ws.mutate(page, "indentSection", { sectionId: child! });
+    await ws.mutate(page, "indentSection", { sectionId: grand! });
+    await ws.mutate(page, "indentSection", { sectionId: grand! });
+    expect((await extraOf(page)).map(depthOf)).toEqual([0, 1, 2]);
+
+    // Verified sections survive re-nesting: depth is structure, not content.
+    await ws.mutate(page, "acceptSections", { sectionIds: [child!, grand!] });
+    const out = await ws.mutate(page, "outdentSection", { sectionId: child! });
+    const after = await extraOf(page, out.token);
+    expect(after.map(depthOf)).toEqual([0, 0, 1]); // the subtree shifted as one
+    expect(after.slice(1).map((e) => e.status)).toEqual(["human-verified", "human-verified"]);
+
+    await expect(ws.mutate(page, "outdentSection", { sectionId: parent! })).rejects.toThrow(
+      /already a top-level section/,
+    );
+  });
+
+  it("moveSection carries subsections with it and clamps depth to what the destination allows", async () => {
+    const { page } = await restatableSpec("Move subtree", [["Alpha", "A."], ["Beta", "B."], ["Beta child", "BC."]]);
+    const ids = (await extraOf(page)).map((e) => e.id);
+    await ws.mutate(page, "indentSection", { sectionId: ids[2]! });
+    expect((await extraOf(page)).map(depthOf)).toEqual([0, 0, 1]);
+
+    // Move Beta (with its child) to the very top of the page.
+    const mv = await ws.mutate(page, "moveSection", { sectionId: ids[1]!, toIndex: 0 });
+    const all = await sectionsOf(page, mv.token);
+    expect(all.slice(0, 2).map(titleOf)).toEqual(["Beta", "Beta child"]);
+    expect(all.slice(0, 2).map(depthOf)).toEqual([0, 1]); // relative structure preserved
+    expect((await extraOf(page, mv.token)).map(titleOf)).toEqual(["Beta", "Beta child", "Alpha"]);
+  });
+
+  it("removeSection deletes the whole subtree", async () => {
+    const { page } = await restatableSpec("Delete subtree", [["Keep", "K."], ["Doomed", "D."], ["Doomed child", "DC."]]);
+    const ids = (await extraOf(page)).map((e) => e.id);
+    await ws.mutate(page, "indentSection", { sectionId: ids[2]! });
+    const rm = await ws.mutate(page, "removeSection", { sectionId: ids[1]! });
+    expect((await extraOf(page, rm.token)).map(titleOf)).toEqual(["Keep"]);
+    expect(await ws.toMarkdown(page)).not.toContain("DC.");
+  });
+
+  it("splitSection can make the bottom half a SUBSECTION of the top", async () => {
+    const { page, ids } = await restatableSpec("Split deeper", [["Long", "Top part.\n\nBottom part."]]);
+    const sp = await ws.mutate(page, "splitSection", {
+      sectionId: ids[0]!,
+      topMarkdown: "Top part.",
+      bottomMarkdown: "Bottom part.",
+      newTitle: "The detail",
+      asSubsection: true,
+    });
+    const extra = await extraOf(page, sp.token);
+    expect(extra.map(titleOf)).toEqual(["Long", "The detail"]);
+    expect(extra.map(depthOf)).toEqual([0, 1]);
+    expect(await ws.toMarkdown(page)).toContain("#### The detail\nBottom part.");
+  });
+
+  it("refuses to join away a section that has subsections of its own", async () => {
+    const { page } = await restatableSpec("Join guard", [["Alpha", "A."], ["Beta", "B."], ["Beta child", "BC."]]);
+    const ids = (await extraOf(page)).map((e) => e.id);
+    await ws.mutate(page, "indentSection", { sectionId: ids[2]! });
+    await expect(ws.mutate(page, "joinSections", { sectionId: ids[0]!, absorbId: ids[1]! })).rejects.toThrow(
+      /has subsections of its own/,
+    );
+  });
+
+  // ── lifecycle ─────────────────────────────────────────────────────────────────
+
   it("drives the full lifecycle: draft → restate → holistic review → fix loop → approve", async () => {
     const p = (await ws.createPage("spec-restatement", { title: "Search", parentId: null })).value;
+    await fillRubric(p);
     const s1 = ((await ws.mutate(p, "draftSection", { title: "Indexing", markdown: "AI: indexing." })).value as { sectionId: string }).sectionId;
     const s2 = ((await ws.mutate(p, "draftSection", { title: "Querying", markdown: "AI: querying." })).value as { sectionId: string }).sectionId;
     const s3 = ((await ws.mutate(p, "draftSection", { title: "Ranking", markdown: "AI: ranking." })).value as { sectionId: string }).sectionId;
@@ -70,7 +359,7 @@ describe("spec-restatement model", () => {
       removeIds: [s1, s2],
       sections: [{ title: "Indexing and querying", markdown: "In my words: one merged pass." }],
     });
-    const items1 = els(await stateOf(p, r1.token), "sections", "items");
+    const items1 = await extraOf(p, r1.token);
     expect(items1.map(titleOf)).toEqual(["Indexing and querying", "Ranking"]);
     expect(items1[0]!.status).toBe("human-verified");
     expect(items1.map((e) => e.id)).not.toContain(s1);
@@ -78,6 +367,7 @@ describe("spec-restatement model", () => {
     expect(items1[1]!.id).toBe(s3);
 
     await ws.mutate(p, "restateSections", { removeIds: [s3], sections: [{ title: "Ranking", markdown: "Ranking, restated." }] });
+    await acceptAllDrafts(p);
 
     // Holistic review: summary + open notes + the page transition land in ONE commit.
     const before = (await ws.history()).length;
@@ -98,7 +388,7 @@ describe("spec-restatement model", () => {
 
     // Fix loop while reviewing: resolve one note, restate the affected section again.
     await ws.mutate(p, "resolveNote", { noteId: n1! });
-    const rankId = els(await stateOf(p), "sections", "items").find((e) => titleOf(e) === "Ranking")!.id;
+    const rankId = (await sectionsOf(p)).find((e) => titleOf(e) === "Ranking")!.id;
     await ws.mutate(p, "restateSections", {
       removeIds: [rankId],
       sections: [{ title: "Ranking", markdown: "Ranking, with staleness handling." }],
@@ -126,14 +416,18 @@ describe("spec-restatement model", () => {
     expect((await stateOf(p, ok.token)).status).toBe("approved");
   });
 
-  it("refuses submitForRestatement while no sections are drafted (empty-draft precondition)", async () => {
-    const p = (await ws.createPage("spec-restatement", { title: "Empty draft", parentId: null })).value;
-    const attempt = ws.mutate(p, "submitForRestatement", {});
+  it("re-checks the rubric at approve, because review merges and renames sections", async () => {
+    const { page } = await restatableSpec("Late drift", []);
+    await acceptAllDrafts(page);
+    await ws.mutate(page, "recordHolisticReview", { summary: "Clean.", notes: [] });
+    // A revision during review introduces a citation to a section that does not exist.
+    await ws.mutate(page, "reviseSection", {
+      sectionId: (await sectionsOf(page)).find((e) => slotOf(e) === "algorithm")!.id,
+      markdown: "Now defers to the ordering rules (see Ordering Consistency).",
+    });
+    const attempt = ws.mutate(page, "approve", {});
     await expect(attempt).rejects.toThrow(PreconditionUnmetError);
-    await expect(attempt).rejects.toThrow(/draft at least one section/);
-    await ws.mutate(p, "draftSection", { title: "Only section", markdown: "Body." });
-    await ws.mutate(p, "submitForRestatement", {});
-    expect((await stateOf(p)).status).toBe("restating");
+    await expect(attempt).rejects.toThrow(/Ordering Consistency/);
   });
 
   it("refuses recordHolisticReview while any section is ai-draft, naming the offending titles", async () => {
@@ -146,6 +440,7 @@ describe("spec-restatement model", () => {
   it("refuses approve while review notes are open, naming their titles", async () => {
     const { page, ids } = await restatableSpec("Open notes", [["Gamma", "G."]]);
     await ws.mutate(page, "restateSections", { removeIds: [ids[0]!], sections: [{ title: "Gamma", markdown: "Restated." }] });
+    await acceptAllDrafts(page);
     await ws.mutate(page, "recordHolisticReview", {
       summary: "One gap.",
       notes: [{ title: "Gap in gamma", markdown: "Cover the cold path.", severity: "major" }],
@@ -164,7 +459,7 @@ describe("spec-restatement model", () => {
     await expect(attempt).rejects.toThrow(InvariantViolationError);
     await expect(attempt).rejects.toThrow(/ghost-1/);
     // Nothing landed: the original section is untouched.
-    expect(els(await stateOf(page), "sections", "items").map((e) => e.id)).toEqual([ids[0]!]);
+    expect((await extraOf(page)).map((e) => e.id)).toEqual([ids[0]!]);
   });
 
   it("acceptSections flips multiple ai-draft sections to human-verified in one commit, content untouched", async () => {
@@ -172,7 +467,7 @@ describe("spec-restatement model", () => {
     const before = (await ws.history()).length;
     const acc = await ws.mutate(page, "acceptSections", { sectionIds: [ids[0]!, ids[1]!] });
     expect((await ws.history({ consistentWith: acc.token })).length).toBe(before + 1);
-    const items = els(await stateOf(page, acc.token), "sections", "items");
+    const items = await extraOf(page, acc.token);
     expect(items.map((e) => e.status)).toEqual(["human-verified", "human-verified", "ai-draft"]);
     expect(items.map(titleOf)).toEqual(["One", "Two", "Three"]);
     expect(await ws.toMarkdown(page)).toContain("1.");
@@ -182,7 +477,7 @@ describe("spec-restatement model", () => {
     const { page, ids } = await restatableSpec("Unaccept", [["Kept", "Body kept."]]);
     await ws.mutate(page, "acceptSections", { sectionIds: [ids[0]!] });
     const un = await ws.mutate(page, "unacceptSections", { sectionIds: [ids[0]!] });
-    const item = els(await stateOf(page, un.token), "sections", "items")[0]!;
+    const item = (await extraOf(page, un.token))[0]!;
     expect(item.id).toBe(ids[0]!);
     expect(item.status).toBe("ai-draft");
     expect(titleOf(item)).toBe("Kept");
@@ -216,7 +511,7 @@ describe("spec-restatement model", () => {
 
     // approved: run one spec to the terminal gate, then try to unaccept.
     const { page, ids } = await restatableSpec("Sealed", [["Omega", "O."]]);
-    await ws.mutate(page, "acceptSections", { sectionIds: [ids[0]!] });
+    await acceptAllDrafts(page);
     await ws.mutate(page, "recordHolisticReview", { summary: "Clean.", notes: [] });
     await ws.mutate(page, "approve", {});
     const inApproved = ws.mutate(page, "unacceptSections", { sectionIds: [ids[0]!] });
@@ -227,10 +522,10 @@ describe("spec-restatement model", () => {
   it("reviseSection on a human-verified section downgrades it to ai-draft in the same commit", async () => {
     const { page, ids } = await restatableSpec("Revise", [["Epsilon", "E."]]);
     await ws.mutate(page, "restateSections", { removeIds: [ids[0]!], sections: [{ title: "Epsilon", markdown: "Restated." }] });
-    const verified = els(await stateOf(page), "sections", "items")[0]!;
+    const verified = (await extraOf(page))[0]!;
     expect(verified.status).toBe("human-verified");
     const rev = await ws.mutate(page, "reviseSection", { sectionId: verified.id, markdown: "Tightened by the agent." });
-    const after = els(await stateOf(page, rev.token), "sections", "items")[0]!;
+    const after = (await extraOf(page, rev.token))[0]!;
     expect(after.id).toBe(verified.id);
     expect(after.status).toBe("ai-draft");
     expect(await ws.toMarkdown(page)).toContain("Tightened by the agent.");
@@ -239,10 +534,12 @@ describe("spec-restatement model", () => {
   it("holds the element write-gate against generated structural commands on a verified section", async () => {
     const { page, ids } = await restatableSpec("Gate", [["Zeta", "Z."]]);
     await ws.mutate(page, "restateSections", { removeIds: [ids[0]!], sections: [{ title: "Zeta", markdown: "Restated." }] });
-    const verified = els(await stateOf(page), "sections", "items")[0]!;
+    const verified = (await extraOf(page))[0]!;
     await expect(
       ws.mutate(page, "setSectionsItemsBody", { id: verified.id, value: { kind: "blocks", blocks: [] } }),
     ).rejects.toThrow(MutationNotAllowedError);
+    // …but `depth` is declared structural, so it stays writable while verified.
+    await ws.mutate(page, "setSectionsItemsDepth", { id: verified.id, value: { kind: "scalar", value: 0 } });
   });
 
   // ── structural edits (the studio's left panel: add / move / join / split) ──────
@@ -250,15 +547,15 @@ describe("spec-restatement model", () => {
   it("addSection inserts a human-written section, born human-verified, before `beforeId`", async () => {
     const { page, ids } = await restatableSpec("Structure", [["Alpha", "A."], ["Beta", "B."]]);
     const add = await ws.mutate(page, "addSection", { title: "Between", markdown: "Mine.", beforeId: ids[1]! });
-    const items = els(await stateOf(page, add.token), "sections", "items");
+    const items = await extraOf(page, add.token);
     expect(items.map(titleOf)).toEqual(["Alpha", "Between", "Beta"]);
     expect(items[1]!.status).toBe("human-verified");
     expect((add.value as { sectionId: string }).sectionId).toBe(items[1]!.id);
-    // beforeId the FIRST section reaches the very top; no beforeId appends.
-    await ws.mutate(page, "addSection", { title: "Overview", markdown: "Mine, first.", beforeId: ids[0]! });
+    // beforeId the FIRST drafted section, and no beforeId appends.
+    await ws.mutate(page, "addSection", { title: "Preamble", markdown: "Mine, first.", beforeId: ids[0]! });
     const end = await ws.mutate(page, "addSection", { title: "Last", markdown: "Also mine." });
-    expect(els(await stateOf(page, end.token), "sections", "items").map(titleOf)).toEqual([
-      "Overview",
+    expect((await extraOf(page, end.token)).map(titleOf)).toEqual([
+      "Preamble",
       "Alpha",
       "Between",
       "Beta",
@@ -269,26 +566,15 @@ describe("spec-restatement model", () => {
   it("moveSection reorders without touching content or status", async () => {
     const { page, ids } = await restatableSpec("Reorder", [["Alpha", "A."], ["Beta", "B."], ["Gamma", "G."]]);
     await ws.mutate(page, "restateSections", { removeIds: [ids[1]!], sections: [{ title: "Beta", markdown: "Mine." }] });
-    const beta = els(await stateOf(page), "sections", "items").find((e) => titleOf(e) === "Beta")!;
+    const beta = (await extraOf(page)).find((e) => titleOf(e) === "Beta")!;
     const mv = await ws.mutate(page, "moveSection", { sectionId: beta.id, toIndex: 0 });
-    const items = els(await stateOf(page, mv.token), "sections", "items");
+    const items = await extraOf(page, mv.token);
     expect(items.map(titleOf)).toEqual(["Beta", "Alpha", "Gamma"]);
     // A verified section stays verified where it lands — moving is not a content change.
     expect(items[0]!.id).toBe(beta.id);
     expect(items[0]!.status).toBe("human-verified");
-    await expect(ws.mutate(page, "moveSection", { sectionId: beta.id, toIndex: 3 })).rejects.toThrow(
-      InvariantViolationError,
-    );
-  });
-
-  it("removeSection deletes a section, but never the last one", async () => {
-    const { page, ids } = await restatableSpec("Delete", [["Alpha", "A."], ["Beta", "B."]]);
-    const rm = await ws.mutate(page, "removeSection", { sectionId: ids[1]! });
-    const items = els(await stateOf(page, rm.token), "sections", "items");
-    expect(items.map(titleOf)).toEqual(["Alpha"]);
-    expect(await ws.toMarkdown(page)).not.toContain("B.");
-    await expect(ws.mutate(page, "removeSection", { sectionId: ids[0]! })).rejects.toThrow(InvariantViolationError);
-    await expect(ws.mutate(page, "removeSection", { sectionId: "spec-section:nope" })).rejects.toThrow(
+    const past = (await sectionsOf(page)).length + 1;
+    await expect(ws.mutate(page, "moveSection", { sectionId: beta.id, toIndex: past })).rejects.toThrow(
       InvariantViolationError,
     );
   });
@@ -296,7 +582,7 @@ describe("spec-restatement model", () => {
   it("joinSections merges the next section into this one, keeping THIS id", async () => {
     const { page, ids } = await restatableSpec("Join", [["Alpha", "A body."], ["Beta", "B body."], ["Gamma", "G."]]);
     const j = await ws.mutate(page, "joinSections", { sectionId: ids[0]!, absorbId: ids[1]! });
-    const items = els(await stateOf(page, j.token), "sections", "items");
+    const items = await extraOf(page, j.token);
     expect(items.map(titleOf)).toEqual(["Alpha", "Gamma"]);
     expect(items[0]!.id).toBe(ids[0]!); // the survivor's id is stable — drafts/critiques survive
     const md = await ws.toMarkdown(page);
@@ -315,14 +601,14 @@ describe("spec-restatement model", () => {
     ] as const) {
       await ws.mutate(page, "restateSections", { removeIds: [ids[i]!], sections: [{ title, markdown: `${title} mine.` }] });
     }
-    const verified = els(await stateOf(page), "sections", "items");
+    const verified = await extraOf(page);
     const both = await ws.mutate(page, "joinSections", { sectionId: verified[0]!.id, absorbId: verified[1]!.id });
-    const merged = els(await stateOf(page, both.token), "sections", "items")[0]!;
+    const merged = (await extraOf(page, both.token))[0]!;
     expect(merged.status).toBe("human-verified");
 
     // …but pulling unrestated AI text into it makes the whole section unrestated again.
     const mixed = await ws.mutate(page, "joinSections", { sectionId: merged.id, absorbId: ids[2]! });
-    const after = els(await stateOf(page, mixed.token), "sections", "items");
+    const after = await extraOf(page, mixed.token);
     expect(after).toHaveLength(1);
     expect(after[0]!.status).toBe("ai-draft");
     expect(await ws.toMarkdown(page)).toContain("G.");
@@ -336,10 +622,11 @@ describe("spec-restatement model", () => {
       bottomMarkdown: "Second half.",
       newTitle: "Alpha, part two",
     });
-    const items = els(await stateOf(page, sp.token), "sections", "items");
+    const items = await extraOf(page, sp.token);
     expect(items.map(titleOf)).toEqual(["Alpha", "Alpha, part two", "Beta"]);
     expect(items[0]!.id).toBe(ids[0]!); // the top half's id is stable
     expect(items.map((e) => e.status)).toEqual(["ai-draft", "ai-draft", "ai-draft"]);
+    expect(items.map(depthOf)).toEqual([0, 0, 0]); // a plain split is a sibling
     expect((sp.value as { newSectionId: string }).newSectionId).toBe(items[1]!.id);
     const md = await ws.toMarkdown(page);
     expect(md).toContain("### Alpha\nFirst half.");
@@ -352,14 +639,14 @@ describe("spec-restatement model", () => {
       removeIds: [ids[0]!],
       sections: [{ title: "Alpha", markdown: "Mine, one.\n\nMine, two." }],
     });
-    const verified = els(await stateOf(page), "sections", "items")[0]!;
+    const verified = (await extraOf(page))[0]!;
     const sp = await ws.mutate(page, "splitSection", {
       sectionId: verified.id,
       topMarkdown: "Mine, one.",
       bottomMarkdown: "Mine, two.",
       newTitle: "Alpha (cont.)",
     });
-    const items = els(await stateOf(page, sp.token), "sections", "items");
+    const items = await extraOf(page, sp.token);
     expect(items.map((e) => e.status)).toEqual(["human-verified", "human-verified"]);
     expect(items[0]!.id).toBe(verified.id);
   });
@@ -378,24 +665,34 @@ describe("spec-restatement model", () => {
     await expect(
       ws.mutate(p, "splitSection", { sectionId: a, topMarkdown: "x", bottomMarkdown: "y", newTitle: "Y" }),
     ).rejects.toThrow(PreconditionUnmetError);
-    // …but the drafting agent may still reorder what it drafted.
-    const mv = await ws.mutate(p, "moveSection", { sectionId: b, toIndex: 0 });
-    expect(els(await stateOf(p, mv.token), "sections", "items").map(titleOf)).toEqual(["Beta", "Alpha"]);
+    // …but the drafting agent may still restructure what it drafted.
+    const at = (await sectionsOf(p)).findIndex((e) => e.id === a);
+    const mv = await ws.mutate(p, "moveSection", { sectionId: b, toIndex: at });
+    expect((await extraOf(p, mv.token)).map(titleOf)).toEqual(["Beta", "Alpha"]);
+    await ws.mutate(p, "indentSection", { sectionId: a });
+    expect((await extraOf(p)).map(depthOf)).toEqual([0, 1]);
   });
 
   it("renders deterministic Markdown at a mid-lifecycle state (byte-exact)", async () => {
     const p = (await ws.createPage("spec-restatement", { title: "Render demo", parentId: null })).value;
+    for (const slot of SLOTS) await ws.mutate(p, "writeSlot", { slot, markdown: `${slot} body.` });
     const a = ((await ws.mutate(p, "draftSection", { title: "Alpha", markdown: "AI alpha." })).value as { sectionId: string }).sectionId;
-    await ws.mutate(p, "draftSection", { title: "Beta", markdown: "Beta body.\n\nWith a second paragraph." });
-    await ws.mutate(p, "submitForRestatement", {});
-    await ws.mutate(p, "restateSections", { removeIds: [a], sections: [{ title: "Alpha restated", markdown: "Alpha in **my** words." }] });
+    const beta = ((await ws.mutate(p, "draftSection", { title: "Beta", markdown: "Beta body." })).value as { sectionId: string }).sectionId;
+    await ws.mutate(p, "draftSection", { title: "Beta detail", markdown: "A nested note.", afterId: beta, depth: 1 });
+    await ws.mutate(p, "reviseSection", { sectionId: a, markdown: "Alpha in **my** words." });
 
     const md = await ws.toMarkdown(p);
     const expected =
       [
         "# Spec: Render demo",
-        "**Status:** restating",
-        "## Sections\n### Alpha restated\nAlpha in **my** words.\n\n### Beta\nBeta body.\n\nWith a second paragraph.",
+        "**Status:** drafting",
+        "## Sections\n" +
+          [
+            ...SLOT_TITLES.map((t, i) => `### ${t}\n${SLOTS[i]} body.`),
+            "### Alpha\nAlpha in **my** words.",
+            "### Beta\nBeta body.",
+            "#### Beta detail\nA nested note.",
+          ].join("\n\n"),
         "## Review\n_Not reviewed._",
         "## Open notes\n_None._",
       ].join("\n\n") + "\n";
@@ -405,9 +702,10 @@ describe("spec-restatement model", () => {
 
   it("surfaces ai-draft sections via attention and the blocked review edge via describeMutations", async () => {
     const { page, ids } = await restatableSpec("Discovery", [["Alpha", "A."], ["Beta", "B."]]);
+    const slotIds = (await sectionsOf(page)).filter((e) => slotOf(e) !== "").map((e) => e.id);
     const view = await ws.page(page);
     const items = await view.attentionItems();
-    expect(items.map((i) => i.elementId).sort()).toEqual([...ids].sort());
+    expect(items.map((i) => i.elementId).sort()).toEqual([...slotIds, ...ids].sort());
     expect(items.every((i) => i.elementType === "spec-section" && i.status === "ai-draft")).toBe(true);
 
     // recordHolisticReview is the command that fires the requestHolisticReview edge: it is
@@ -417,9 +715,10 @@ describe("spec-restatement model", () => {
     expect(rec.available).toBe(false);
     expect(rec.unmet).toMatch(/Alpha, Beta/);
 
-    // Restating one section drops it from attention; the other stays.
+    // Restating one section drops it from attention; the others stay.
     const r = await ws.mutate(page, "restateSections", { removeIds: [ids[0]!], sections: [{ title: "Alpha", markdown: "Mine." }] });
     const left = await (await ws.page(page, { consistentWith: r.token })).attentionItems();
-    expect(left.map((i) => i.elementId)).toEqual([ids[1]!]);
+    expect(left.map((i) => i.elementId)).not.toContain(ids[0]!);
+    expect(left.map((i) => i.elementId)).toContain(ids[1]!);
   });
 });

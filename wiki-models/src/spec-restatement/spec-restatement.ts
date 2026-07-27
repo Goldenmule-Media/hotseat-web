@@ -7,15 +7,97 @@
  * (`ai-draft` ↔ `human-verified`), enforced by the element write-gate: an AI edit must
  * downgrade a verified section back to `ai-draft` before touching its content.
  */
-import type { DeepReadonly, IBlock, IField, IItem, PageState, Precondition, SectionOp } from "wiki/authoring";
+import type { DeepReadonly, IBlock, IField, IItem, PageState, Precondition, SeedElement, SectionOp } from "wiki/authoring";
 import { definePageType, InvariantViolationError, parseBlocks, t, z, zodSchema } from "wiki/authoring";
 
 const empty = z.object({});
 
+/**
+ * The REQUIRED SLOTS every spec must address, seeded empty at page creation and gated at
+ * `submitForRestatement`. Derived from auditing a real 700-line spec's whole revision
+ * history against a conventional tech-spec template: each slot here is either a template
+ * obligation that survived contact with reality, or a section the real spec had to grow
+ * late and expensively. A spec adds any further sections it wants — the rubric is a
+ * floor, not a shape.
+ *
+ * The titles are DEFAULTS, not the contract; the gate reads the `slot` tag, so a spec may
+ * retitle a slot to whatever its domain calls that obligation.
+ */
+const SLOTS = [
+  {
+    key: "motivation",
+    title: "Motivation",
+    prompt: "What is wrong TODAY. The current situation and its cost — not the desired end state, which is the Overview's job.",
+  },
+  {
+    key: "overview",
+    title: "Overview",
+    prompt: "The shape of the proposal in prose: what is being built and the one or two ideas it rests on.",
+  },
+  {
+    key: "data-model",
+    title: "Data model & types",
+    prompt:
+      "The data the system manages, as TYPES — at least one fenced code block. Give every field's full domain, including reserved and sentinel values.",
+  },
+  {
+    key: "algorithm",
+    title: "Algorithm",
+    prompt: "The normative decision or transformation, as numbered pseudocode — the one place a reader can go to know what the system actually does.",
+  },
+  {
+    key: "invariants",
+    title: "Invariants & limits",
+    prompt:
+      "Every rule the rest of the spec relies on, as a LIST of atomic, citable statements — bounds, caps, and the properties that must always hold. State each once; elsewhere cite it.",
+  },
+  {
+    key: "failure-semantics",
+    title: "Failure & concurrency semantics",
+    prompt:
+      "What happens under conflict, retry, partial data, and a missing dependency. Which way the system fails, and whether a locally-accepted result is provisional.",
+  },
+  {
+    key: "data-dependencies",
+    title: "Data dependencies",
+    prompt:
+      "For every input the system reads: how does it REACH the place that reads it, and what is the behaviour in the window before it arrives?",
+  },
+  {
+    key: "migration",
+    title: "Migration & existing data",
+    prompt: "What happens to data that already exists and never knew about this change. If nothing exists yet, say so and why.",
+  },
+  {
+    key: "staged-plan",
+    title: "Staged plan",
+    prompt:
+      "The stages this ships in. Per stage: what ships, what it explicitly does NOT do yet, and the exit test that proves it landed.",
+  },
+] as const;
+
+type SlotKey = (typeof SLOTS)[number]["key"];
+
+const SLOT_KEYS = SLOTS.map((s) => s.key);
+const slotArg = z.enum(SLOT_KEYS as [SlotKey, ...SlotKey[]]);
+const slotTitle = new Map<string, string>(SLOTS.map((s) => [s.key, s.title]));
+
+/** The rubric seeds: one empty `ai-draft` section per required slot, in rubric order. */
+const slotSeeds: SeedElement[] = SLOTS.map((s) => ({
+  key: s.key,
+  status: "ai-draft",
+  fields: {
+    title: { kind: "prose", value: s.title },
+    body: { kind: "blocks", blocks: [] },
+    slot: { kind: "scalar", value: s.key },
+    depth: { kind: "scalar", value: 0 },
+  },
+}));
+
 const SEVERITIES = ["minor", "major", "critical"] as const;
 const severityArg = z.enum(SEVERITIES);
 
-const sectionInput = z.object({ title: z.string(), markdown: z.string() });
+const sectionInput = z.object({ title: z.string(), markdown: z.string(), depth: z.number().int().min(0).optional() });
 const noteInput = z.object({ title: z.string(), markdown: z.string(), severity: severityArg });
 
 function listOf(page: DeepReadonly<PageState>, sectionKey: string, fieldKey: string): readonly DeepReadonly<IItem>[] {
@@ -28,11 +110,26 @@ function titleOf(el: DeepReadonly<IItem>): string {
   return f !== undefined && f.kind === "prose" && f.value.length > 0 ? f.value : el.id;
 }
 
-/** A spec-section / review-note's creation-time fields (body reified via parseBlocks). */
+/** A review-note's creation-time fields (body reified via parseBlocks). */
 function bodyFields(title: string, markdown: string, newId: () => string): Record<string, IField> {
   return {
     title: { kind: "prose", value: title },
     body: { kind: "blocks", blocks: parseBlocks(markdown, newId) },
+  };
+}
+
+/** A spec-section's creation-time fields — body plus its outline position and slot tag. */
+function sectionFields(
+  title: string,
+  markdown: string,
+  newId: () => string,
+  depth: number,
+  slot: string,
+): Record<string, IField> {
+  return {
+    ...bodyFields(title, markdown, newId),
+    slot: { kind: "scalar", value: slot },
+    depth: { kind: "scalar", value: depth },
   };
 }
 
@@ -91,6 +188,212 @@ function blocksOf(el: DeepReadonly<IItem>): readonly DeepReadonly<IBlock>[] {
   return f !== undefined && f.kind === "blocks" ? f.blocks : [];
 }
 
+function scalarOf(el: DeepReadonly<IItem>, field: string): string {
+  const f = el.fields[field];
+  return f !== undefined && f.kind === "scalar" ? String(f.value) : "";
+}
+
+/** A section's 0-based nesting depth: `##` body sections are 0, a `###` under one is 1. */
+function depthOf(el: DeepReadonly<IItem>): number {
+  const n = Number(scalarOf(el, "depth"));
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
+/** The slot this section fills, or "" for a spec's own added section. */
+function slotOf(el: DeepReadonly<IItem>): string {
+  return scalarOf(el, "slot");
+}
+
+/**
+ * The half-open index range of `sectionId`'s SUBTREE — itself plus the run of deeper
+ * sections that follows it. Structure ops move and delete whole subtrees, because a `###`
+ * that leaves its `####`s behind silently reparents them under the previous section.
+ */
+function subtreeRange(elements: readonly DeepReadonly<IItem>[], index: number): { start: number; end: number } {
+  const base = depthOf(elements[index]!);
+  let end = index + 1;
+  while (end < elements.length && depthOf(elements[end]!) > base) end++;
+  return { start: index, end };
+}
+
+const setDepth = (id: string, value: number): SectionOp => ({
+  op: "setElementField",
+  section: "sections",
+  field: "items",
+  id,
+  elementField: "depth",
+  value: { kind: "scalar", value },
+});
+
+/**
+ * The deepest legal depth for a section landing at `index` (the element before it is its
+ * potential parent) — one deeper than its predecessor, or 0 at the top. Enforcing this on
+ * every write is the "no skipped heading levels" rule: a `####` may not follow a `##`.
+ */
+function maxDepthAt(elements: readonly DeepReadonly<IItem>[], index: number): number {
+  const prev = index > 0 ? elements[index - 1] : undefined;
+  return prev === undefined ? 0 : depthOf(prev) + 1;
+}
+
+function requireLegalDepth(elements: readonly DeepReadonly<IItem>[], index: number, depth: number): void {
+  const max = maxDepthAt(elements, index);
+  if (depth > max) {
+    throw new InvariantViolationError(
+      `depth ${depth} skips a level at this position — the deepest legal depth here is ${max}`,
+    );
+  }
+}
+
+/**
+ * `moveElement` ops that relocate a whole subtree so its first member lands at `toIndex`
+ * of the list WITHOUT the subtree (the engine's "index once lifted out"). Members move one
+ * at a time, each landing immediately after the previous, so the run stays contiguous;
+ * indices are computed against the simulated array because each op shifts the next one's.
+ */
+function moveSubtreeOps(ids: readonly string[], subtree: readonly string[], toIndex: number): SectionOp[] {
+  const rest = ids.filter((id) => !subtree.includes(id));
+  const at = Math.max(0, Math.min(toIndex, rest.length));
+  const cur = [...ids];
+  const ops: SectionOp[] = [];
+  subtree.forEach((id, k) => {
+    cur.splice(cur.indexOf(id), 1);
+    const insert = k === 0 ? (at === 0 ? 0 : cur.indexOf(rest[at - 1]!) + 1) : cur.indexOf(subtree[k - 1]!) + 1;
+    cur.splice(insert, 0, id);
+    ops.push({ op: "moveElement", section: "sections", field: "items", id, toIndex: insert });
+  });
+  return ops;
+}
+
+/** Section titles, lowercased, for citation resolution. */
+function titleIndex(sections: readonly DeepReadonly<IItem>[]): Set<string> {
+  return new Set(sections.map((s) => titleOf(s).trim().toLowerCase()).filter((t) => t.length > 0));
+}
+
+/** Flatten a block tree to its plain text — enough to find `(see X)` citations. */
+function blockText(blocks: readonly DeepReadonly<IBlock>[]): string {
+  const out: string[] = [];
+  const walkInlines = (inlines: readonly DeepReadonly<{ kind: string; value?: string }>[]): void => {
+    for (const i of inlines) if (typeof i.value === "string") out.push(i.value);
+  };
+  const walk = (bs: readonly DeepReadonly<IBlock>[]): void => {
+    for (const b of bs) {
+      switch (b.kind) {
+        case "paragraph":
+        case "heading":
+          walkInlines(b.inlines);
+          break;
+        case "quote":
+          walk(b.blocks);
+          break;
+        case "list":
+          for (const item of b.items) walk(item);
+          break;
+        case "table":
+          for (const cell of b.header) walkInlines(cell);
+          for (const row of b.rows) for (const cell of row) walkInlines(cell);
+          break;
+        default:
+          break;
+      }
+    }
+  };
+  walk(blocks);
+  return out.join(" ");
+}
+
+/** Does this section's body carry a fenced code block anywhere in its tree? */
+function hasCodeBlock(blocks: readonly DeepReadonly<IBlock>[]): boolean {
+  return blocks.some(
+    (b) =>
+      b.kind === "code" ||
+      (b.kind === "quote" && hasCodeBlock(b.blocks)) ||
+      (b.kind === "list" && b.items.some((item) => hasCodeBlock(item))),
+  );
+}
+
+function hasListBlock(blocks: readonly DeepReadonly<IBlock>[]): boolean {
+  return blocks.some((b) => b.kind === "list" || (b.kind === "quote" && hasListBlock(b.blocks)));
+}
+
+/** The sections filling `slot` — the slot's own section plus its subtree. */
+function slotSubtree(elements: readonly DeepReadonly<IItem>[], slot: string): readonly DeepReadonly<IItem>[] {
+  const at = elements.findIndex((e) => slotOf(e) === slot);
+  if (at === -1) return [];
+  const { start, end } = subtreeRange(elements, at);
+  return elements.slice(start, end);
+}
+
+function authored(el: DeepReadonly<IItem>): boolean {
+  return blocksOf(el).length > 0;
+}
+
+/**
+ * TIER-1 GATE — rubric coverage. Every required slot must still be present and carry real
+ * content (its own body, or a subsection's). A slot is a floor: the spec may retitle it,
+ * add subsections under it, and add sections of its own, but it cannot ship silent.
+ */
+const slotsCovered: Precondition = (page) => {
+  const elements = listOf(page, "sections", "items");
+  const missing: string[] = [];
+  const blank: string[] = [];
+  for (const s of SLOTS) {
+    const run = slotSubtree(elements, s.key);
+    if (run.length === 0) missing.push(s.title);
+    else if (!run.some(authored)) blank.push(titleOf(run[0]!));
+  }
+  const complaints: string[] = [];
+  if (missing.length > 0) complaints.push(`required slots deleted: ${missing.join(", ")}`);
+  if (blank.length > 0) complaints.push(`required slots still empty: ${blank.join(", ")}`);
+  return complaints.length === 0 ? true : { unmet: complaints.join("; ") };
+};
+
+/**
+ * TIER-1 GATE — shape. The obligations a rubric can check mechanically rather than trust:
+ * the types slot must actually contain types, and the invariants slot must be a LIST, so
+ * each rule is atomic and citable instead of buried in prose (which is how the same rule
+ * gets restated two different ways in two places).
+ */
+const slotShape: Precondition = (page) => {
+  const elements = listOf(page, "sections", "items");
+  const complaints: string[] = [];
+  const dataModel = slotSubtree(elements, "data-model");
+  if (dataModel.length > 0 && !dataModel.some((s) => hasCodeBlock(blocksOf(s)))) {
+    complaints.push(`"${titleOf(dataModel[0]!)}" must define the data as types — add a fenced code block`);
+  }
+  const invariants = slotSubtree(elements, "invariants");
+  if (invariants.length > 0 && !invariants.some((s) => hasListBlock(blocksOf(s)))) {
+    complaints.push(`"${titleOf(invariants[0]!)}" must be a list of atomic rules, so the rest of the spec can cite them`);
+  }
+  return complaints.length === 0 ? true : { unmet: complaints.join("; ") };
+};
+
+/** `(see Foo)` / `(see Foo and Bar)` cross-references inside a body. */
+const CITATION = /\(see ([^)]+)\)/gi;
+
+/**
+ * TIER-1 GATE — citation integrity. Every `(see X)` must name a section that exists on
+ * this page. Sections get renamed and merged constantly during drafting, and a citation to
+ * a section that no longer exists is invisible in Markdown — the spec this rubric was
+ * derived from shipped with exactly one such dangling reference.
+ */
+const citationsResolve: Precondition = (page) => {
+  const elements = listOf(page, "sections", "items");
+  const titles = titleIndex(elements);
+  const dangling = new Map<string, string>();
+  for (const el of elements) {
+    const text = blockText(blocksOf(el));
+    for (const m of text.matchAll(CITATION)) {
+      for (const raw of m[1]!.split(/\band\b|,/)) {
+        const name = raw.trim().replace(/[.\s]+$/, "").toLowerCase();
+        if (name.length > 0 && !titles.has(name)) dangling.set(`${titleOf(el)} → "${raw.trim()}"`, name);
+      }
+    }
+  }
+  return dangling.size === 0
+    ? true
+    : { unmet: `these cross-references name no section on this page: ${[...dangling.keys()].join("; ")}` };
+};
+
 /** Locate a section, throwing loudly when the id is not on this page. */
 function sectionAt(page: DeepReadonly<PageState>, sectionId: string): { index: number; el: DeepReadonly<IItem> } {
   const elements = listOf(page, "sections", "items");
@@ -128,24 +431,25 @@ function rewriteBody(sectionId: string, blocks: readonly DeepReadonly<IBlock>[],
   ];
 }
 
-const hasDraftedSections: Precondition = (page) =>
-  listOf(page, "sections", "items").length > 0
-    ? true
-    : { unmet: "draft at least one section before submitting for restatement" };
-
 export const SpecRestatement = definePageType({
   type: "spec-restatement",
   label: "Spec restatement",
   description:
     "A spec drafted by an AI and proven understood by a human who RESTATES each section in their own words. " +
-    "Workflow: drafting → restating → reviewing → approved. As the drafting agent: draft an \"Overview\" as the " +
-    "FIRST section via `draftSection` (a normal spec-section titled \"Overview\" — it gets restated and " +
-    "verified like every other section), then the ordered body sections (each is born `ai-draft`), and call " +
-    "`submitForRestatement` when the draft is complete. NEVER mark a section human-verified yourself — " +
-    "verification happens only through a human's `restateSections` in the studio, which atomically replaces " +
-    "AI sections with the human's restatement (born `human-verified`). Once every section is verified, " +
-    "`recordHolisticReview` files the AI's holistic notes and moves the page to reviewing; use " +
-    "`reviseSection`/`resolveNote`/`rerunHolisticReview` in the fix loop, and stop at the human `approve` gate.",
+    "Workflow: drafting → restating → reviewing → approved.\n\n" +
+    "Every new spec is born with the REQUIRED SLOTS below already present and empty, in this order. Author " +
+    "each with `writeSlot`:\n" +
+    SLOTS.map((s) => `  • ${s.key} — ${s.title}: ${s.prompt}`).join("\n") +
+    "\n\nAdd whatever else the spec needs with `draftSection` — the rubric is a floor, not a shape. `depth` " +
+    "makes a section a SUBSECTION of the one above it (0 = top level, 1 = one deeper, never skipping a " +
+    "level); subsections travel with their parent on move and delete. `submitForRestatement` is refused " +
+    "until every slot is authored, the data-model slot contains a fenced code block, the invariants slot is " +
+    "a list, and every `(see X)` cross-reference names a section that exists on the page.\n\n" +
+    "NEVER mark a section human-verified yourself — verification happens only through a human's " +
+    "`restateSections` in the studio, which atomically replaces AI sections with the human's restatement " +
+    "(born `human-verified`). Once every section is verified, `recordHolisticReview` files the AI's holistic " +
+    "notes and moves the page to reviewing; use `reviseSection`/`resolveNote`/`rerunHolisticReview` in the " +
+    "fix loop, and stop at the human `approve` gate.",
   version: 1,
   initialStatus: "drafting",
   statusTransitions: [
@@ -165,7 +469,8 @@ export const SpecRestatement = definePageType({
       required: true,
       // reviewing included so the note-fix loop (restate/revise) works in one state.
       mutableIn: ["drafting", "restating", "reviewing"],
-      fields: { items: { kind: "list", element: "spec-section", ordered: true } },
+      // Seeded with the required-slot rubric, so a new spec is born knowing what it owes.
+      fields: { items: { kind: "list", element: "spec-section", ordered: true, seed: slotSeeds } },
     },
     review: {
       name: "Review",
@@ -183,6 +488,10 @@ export const SpecRestatement = definePageType({
       fields: {
         title: { kind: "prose", required: true },
         body: { kind: "blocks", required: true },
+        /** The required slot this section fills, or "" for a section the spec added itself. */
+        slot: { kind: "scalar" },
+        /** 0-based outline depth: 0 renders `##`-level, 1 is a subsection of the one above. */
+        depth: { kind: "scalar" },
       },
       status: {
         initial: "ai-draft",
@@ -190,6 +499,8 @@ export const SpecRestatement = definePageType({
       },
       // Content edits only while ai-draft: an edit of a verified section must downgrade first.
       mutableIn: ["ai-draft"],
+      // Re-nesting a section does not restate it, so depth stays writable while verified.
+      structuralFields: ["depth"],
       awaitsHuman: (el) => el.status === "ai-draft",
     },
     "review-note": {
@@ -206,31 +517,124 @@ export const SpecRestatement = definePageType({
   },
   sectionSet: { mode: "closed" },
   commands: {
+    writeSlot: {
+      description:
+        "Author one of the REQUIRED SLOTS seeded on every spec (see the page description for the list and what " +
+        "each owes). `markdown` replaces that slot section's body. This is the drafting agent's main verb: a new " +
+        "spec is born with every slot present and empty, and `submitForRestatement` refuses while any is blank. " +
+        "A page predating the rubric carries no slot sections; writing one CREATES it at the end, so an older " +
+        "spec grows its rubric a slot at a time instead of dead-ending at the gate.",
+      args: zodSchema(z.object({ slot: slotArg, markdown: z.string().min(1), title: z.string().optional() })),
+      target: { section: "sections", field: "items" },
+      produces: (page, args, ctx) => {
+        const a = args as { slot: SlotKey; markdown: string; title?: string };
+        const el = listOf(page, "sections", "items").find((e) => slotOf(e) === a.slot);
+        if (el === undefined) {
+          return [
+            {
+              op: "addElement",
+              section: "sections",
+              field: "items",
+              id: ctx.newId(),
+              fields: sectionFields(a.title ?? slotTitle.get(a.slot) ?? a.slot, a.markdown, ctx.newId, 0, a.slot),
+            },
+          ];
+        }
+        const ops: SectionOp[] = [];
+        if (el.status === "human-verified") {
+          ops.push({ op: "transition", level: "element", section: "sections", field: "items", element: el.id, event: "reviseAsDraft" });
+        }
+        ops.push({
+          op: "setElementField",
+          section: "sections",
+          field: "items",
+          id: el.id,
+          elementField: "body",
+          value: { kind: "blocks", blocks: parseBlocks(a.markdown, ctx.newId) },
+        });
+        if (a.title !== undefined) {
+          ops.push({ op: "setElementField", section: "sections", field: "items", id: el.id, elementField: "title", value: { kind: "prose", value: a.title } });
+        }
+        return ops;
+      },
+    },
     draftSection: {
       description:
-        "Draft one spec section (born ai-draft, awaiting human restatement). `markdown` is the section body " +
-        "(full block Markdown). Appends unless `afterId` names an existing section to insert immediately after.",
-      args: zodSchema(z.object({ title: z.string(), markdown: z.string(), afterId: z.string().optional() })),
+        "Draft one spec section BEYOND the required slots — the spec's own material, or a subsection under a " +
+        "slot. Born ai-draft, awaiting human restatement. `markdown` is the section body (full block Markdown). " +
+        "`depth` is the outline level: 0 is a top-level section, 1 a subsection of the section above it (it may " +
+        "not skip a level). Appends unless `afterId` names an existing section to insert immediately after — " +
+        "which is how you put a subsection under its parent.",
+      args: zodSchema(
+        z.object({
+          title: z.string(),
+          markdown: z.string(),
+          afterId: z.string().optional(),
+          depth: z.number().int().min(0).optional(),
+        }),
+      ),
       result: zodSchema(z.object({ sectionId: z.string() })),
       target: { section: "sections", field: "items" },
       produces: (page, args, ctx) => {
-        const a = args as { title: string; markdown: string; afterId?: string };
-        let index: number | undefined;
+        const a = args as { title: string; markdown: string; afterId?: string; depth?: number };
+        const elements = listOf(page, "sections", "items");
+        let index = elements.length;
         if (a.afterId !== undefined) {
-          const at = listOf(page, "sections", "items").findIndex((e) => e.id === a.afterId);
+          const at = elements.findIndex((e) => e.id === a.afterId);
           if (at === -1) throw new InvariantViolationError(`afterId "${a.afterId}" is not a section on this page`);
-          index = at + 1;
+          // Land after the whole subtree, so "after X" never lands inside X's children.
+          index = subtreeRange(elements, at).end;
         }
+        const depth = a.depth ?? 0;
+        requireLegalDepth(elements, index, depth);
         return [
           {
             op: "addElement",
             section: "sections",
             field: "items",
             id: ctx.newId(),
-            fields: bodyFields(a.title, a.markdown, ctx.newId),
-            ...(index !== undefined ? { index } : {}),
+            fields: sectionFields(a.title, a.markdown, ctx.newId, depth, ""),
+            ...(index !== elements.length ? { index } : {}),
           },
         ];
+      },
+    },
+    indentSection: {
+      description:
+        "Make a section a SUBSECTION of the one above it — it and its own subsections all shift one level " +
+        "deeper. Pure structure: no content changes and a human-verified section stays verified. Refused when " +
+        "it would skip a heading level (nothing above to nest under) or on a required-slot section, which " +
+        "stays top-level.",
+      args: zodSchema(z.object({ sectionId: z.string() })),
+      target: { section: "sections", field: "items" },
+      produces: (page, args) => {
+        const a = args as { sectionId: string };
+        const elements = listOf(page, "sections", "items");
+        const { index, el } = sectionAt(page, a.sectionId);
+        if (slotOf(el).length > 0) {
+          throw new InvariantViolationError(
+            `"${titleOf(el)}" fills the required "${slotTitle.get(slotOf(el)) ?? slotOf(el)}" slot and stays a top-level section`,
+          );
+        }
+        requireLegalDepth(elements, index, depthOf(el) + 1);
+        const { start, end } = subtreeRange(elements, index);
+        return elements.slice(start, end).map((s) => setDepth(s.id, depthOf(s) + 1));
+      },
+    },
+    outdentSection: {
+      description:
+        "Promote a subsection one level toward the top — it and its own subsections all shift one level " +
+        "shallower. Sections that followed it at its old depth become its children. Pure structure: verified " +
+        "sections stay verified. Refused on a section already at the top level.",
+      args: zodSchema(z.object({ sectionId: z.string() })),
+      target: { section: "sections", field: "items" },
+      produces: (page, args) => {
+        const a = args as { sectionId: string };
+        const elements = listOf(page, "sections", "items");
+        const { index, el } = sectionAt(page, a.sectionId);
+        if (depthOf(el) === 0) throw new InvariantViolationError(`"${titleOf(el)}" is already a top-level section`);
+        const { start, end } = subtreeRange(elements, index);
+        return elements.slice(start, end).map((s) => setDepth(s.id, depthOf(s) - 1));
       },
     },
     restateSections: {
@@ -242,25 +646,50 @@ export const SpecRestatement = definePageType({
       args: zodSchema(z.object({ removeIds: z.array(z.string()).min(1), sections: z.array(sectionInput) })),
       target: { section: "sections", field: "items" },
       produces: (page, args, ctx) => {
-        const a = args as { removeIds: string[]; sections: { title: string; markdown: string }[] };
+        const a = args as { removeIds: string[]; sections: { title: string; markdown: string; depth?: number }[] };
         const elements = listOf(page, "sections", "items");
-        const present = new Set(elements.map((e) => e.id));
-        const missing = a.removeIds.filter((id) => !present.has(id));
+        const byId = new Map(elements.map((e) => [e.id, e]));
+        const missing = a.removeIds.filter((id) => !byId.has(id));
         if (missing.length > 0) {
           // Deliberate OCC conflict surfacing: after a rebase, a vanished section must FAIL.
           throw new InvariantViolationError(`removeIds not found in sections.items: ${missing.join(", ")}`);
         }
+        // A required slot may be reworded and re-nested, never dropped: its tag rides onto
+        // the replacement that takes its place in the run.
+        const slots = a.removeIds.map((id) => slotOf(byId.get(id)!)).filter((s) => s.length > 0);
+        if (slots.length > a.sections.length) {
+          throw new InvariantViolationError(
+            `this restatement would drop required slot(s): ${slots
+              .slice(a.sections.length)
+              .map((s) => slotTitle.get(s) ?? s)
+              .join(", ")} — restate slot sections one run at a time`,
+          );
+        }
         const removing = new Set(a.removeIds);
         const firstIdx = elements.findIndex((e) => removing.has(e.id));
         const insertAt = elements.slice(0, firstIdx).filter((e) => !removing.has(e.id)).length;
+        const kept = elements.filter((e) => !removing.has(e.id));
         const ops: SectionOp[] = a.removeIds.map((id) => ({ op: "removeElement", section: "sections", field: "items", id }));
+        // Depths default to the run's original first section, so a plain reword keeps its place.
+        const fallback = depthOf(byId.get(a.removeIds[0]!)!);
+        // Walk the resulting run, so each new section's legal ceiling is its real predecessor:
+        // the last kept section before the insert point, then each new section in turn.
+        const before = insertAt > 0 ? kept[insertAt - 1] : undefined;
+        let prevDepth = before === undefined ? -1 : depthOf(before);
         a.sections.forEach((s, i) => {
+          const depth = slots[i] !== undefined ? 0 : (s.depth ?? fallback);
+          if (depth > prevDepth + 1) {
+            throw new InvariantViolationError(
+              `"${s.title}" at depth ${depth} skips a level — the deepest legal depth there is ${prevDepth + 1}`,
+            );
+          }
+          prevDepth = depth;
           ops.push({
             op: "addElement",
             section: "sections",
             field: "items",
             id: ctx.newId(),
-            fields: bodyFields(s.title, s.markdown, ctx.newId),
+            fields: sectionFields(s.title, s.markdown, ctx.newId, depth, slots[i] ?? ""),
             status: "human-verified",
             index: insertAt + i,
           });
@@ -336,61 +765,91 @@ export const SpecRestatement = definePageType({
         "WROTE, born human-verified because their own words ARE the verification. Appends unless `beforeId` " +
         "names an existing section to insert immediately before (that anchors the position to an id, so a " +
         "concurrent insert elsewhere can't shift it).",
-      args: zodSchema(z.object({ title: z.string().min(1), markdown: z.string().min(1), beforeId: z.string().optional() })),
+      args: zodSchema(
+        z.object({
+          title: z.string().min(1),
+          markdown: z.string().min(1),
+          beforeId: z.string().optional(),
+          depth: z.number().int().min(0).optional(),
+        }),
+      ),
       result: zodSchema(z.object({ sectionId: z.string() })),
       target: { section: "sections", field: "items" },
       preconditions: [activeRestatement("addSection")],
       produces: (page, args, ctx) => {
-        const a = args as { title: string; markdown: string; beforeId?: string };
-        const index = a.beforeId === undefined ? undefined : sectionAt(page, a.beforeId).index;
+        const a = args as { title: string; markdown: string; beforeId?: string; depth?: number };
+        const elements = listOf(page, "sections", "items");
+        const index = a.beforeId === undefined ? elements.length : sectionAt(page, a.beforeId).index;
+        const depth = a.depth ?? 0;
+        requireLegalDepth(elements, index, depth);
         return [
           {
             op: "addElement",
             section: "sections",
             field: "items",
             id: ctx.newId(),
-            fields: bodyFields(a.title, a.markdown, ctx.newId),
+            fields: sectionFields(a.title, a.markdown, ctx.newId, depth, ""),
             status: "human-verified",
-            ...(index !== undefined ? { index } : {}),
+            ...(index !== elements.length ? { index } : {}),
           },
         ];
       },
     },
     moveSection: {
       description:
-        "Reorder: move a section to 0-based `toIndex` among sections.items (the index it lands on once " +
-        "lifted out). Pure structure — no content and no status change, so a human-verified section stays " +
-        "verified where it lands.",
+        "Reorder: move a section — WITH its subsections, which travel as one block — to 0-based `toIndex` " +
+        "among the sections remaining once the block is lifted out. Pure structure: no content and no status " +
+        "change, so human-verified sections stay verified where they land. The block's depth is clamped to " +
+        "what the destination allows (a subsection moved to the top of the spec becomes a top-level section), " +
+        "so a move can never leave a skipped heading level behind.",
       args: zodSchema(z.object({ sectionId: z.string(), toIndex: z.number().int().min(0) })),
       target: { section: "sections", field: "items" },
       produces: (page, args) => {
         const a = args as { sectionId: string; toIndex: number };
-        const { index } = sectionAt(page, a.sectionId);
-        const last = listOf(page, "sections", "items").length - 1;
-        if (a.toIndex > last) {
-          throw new InvariantViolationError(`toIndex ${a.toIndex} is past the last section (${last})`);
+        const elements = listOf(page, "sections", "items");
+        const { index, el } = sectionAt(page, a.sectionId);
+        const { start, end } = subtreeRange(elements, index);
+        const block = elements.slice(start, end);
+        const rest = elements.filter((e) => !block.includes(e));
+        if (a.toIndex > rest.length) {
+          throw new InvariantViolationError(`toIndex ${a.toIndex} is past the last position (${rest.length})`);
         }
-        if (a.toIndex === index) return [];
-        return [{ op: "moveElement", section: "sections", field: "items", id: a.sectionId, toIndex: a.toIndex }];
+        const before = a.toIndex > 0 ? rest[a.toIndex - 1] : undefined;
+        const ceiling = before === undefined ? 0 : depthOf(before) + 1;
+        const shift = Math.min(0, ceiling - depthOf(el));
+        const ops = moveSubtreeOps(
+          elements.map((e) => e.id),
+          block.map((e) => e.id),
+          a.toIndex,
+        );
+        if (shift !== 0) for (const s of block) ops.push(setDepth(s.id, depthOf(s) + shift));
+        return ops;
       },
     },
     removeSection: {
       description:
-        "Delete a section outright — the human's call that this content does not belong in the spec. Unlike " +
-        "join and split, which preserve one id, the id is GONE: a restatement in progress on it goes with it. " +
-        "Refuses to empty the spec (the last remaining section cannot be deleted).",
+        "Delete a section outright — the human's call that this content does not belong in the spec. Its " +
+        "subsections go with it, and unlike join and split, which preserve one id, the ids are GONE: a " +
+        "restatement in progress on any of them goes too. Refused on a required-slot section, and on any " +
+        "section whose subtree holds one — a slot is an obligation, not a suggestion.",
       args: zodSchema(z.object({ sectionId: z.string() })),
       target: { section: "sections", field: "items" },
       preconditions: [activeRestatement("removeSection")],
       produces: (page, args) => {
         const a = args as { sectionId: string };
-        sectionAt(page, a.sectionId); // throws loudly when the id is not on this page
-        if (listOf(page, "sections", "items").length === 1) {
+        const elements = listOf(page, "sections", "items");
+        const { index } = sectionAt(page, a.sectionId);
+        const { start, end } = subtreeRange(elements, index);
+        const block = elements.slice(start, end);
+        const slotted = block.filter((s) => slotOf(s).length > 0);
+        if (slotted.length > 0) {
           throw new InvariantViolationError(
-            "cannot delete the last section — a spec-restatement page needs at least one",
+            `this would delete required slot(s): ${slotted
+              .map((s) => slotTitle.get(slotOf(s)) ?? slotOf(s))
+              .join(", ")} — a required section can be reworded or emptied, never removed`,
           );
         }
-        return [{ op: "removeElement", section: "sections", field: "items", id: a.sectionId }];
+        return block.map((s): SectionOp => ({ op: "removeElement", section: "sections", field: "items", id: s.id }));
       },
     },
     joinSections: {
@@ -404,11 +863,22 @@ export const SpecRestatement = definePageType({
       preconditions: [activeRestatement("joinSections")],
       produces: (page, args) => {
         const a = args as { sectionId: string; absorbId: string };
+        const elements = listOf(page, "sections", "items");
         const { index, el } = sectionAt(page, a.sectionId);
-        const absorbed = listOf(page, "sections", "items")[index + 1];
+        const absorbed = elements[index + 1];
         if (absorbed === undefined || absorbed.id !== a.absorbId) {
           throw new InvariantViolationError(
             `absorbId "${a.absorbId}" is not the section immediately after "${a.sectionId}" — join merges adjacent sections`,
+          );
+        }
+        if (slotOf(absorbed).length > 0) {
+          throw new InvariantViolationError(
+            `"${titleOf(absorbed)}" fills the required "${slotTitle.get(slotOf(absorbed)) ?? slotOf(absorbed)}" slot — joining it away would drop that obligation`,
+          );
+        }
+        if (subtreeRange(elements, index + 1).end > index + 2) {
+          throw new InvariantViolationError(
+            `"${titleOf(absorbed)}" has subsections of its own — they would be orphaned; join or outdent them first`,
           );
         }
         const stays = el.status === "human-verified" && absorbed.status === "human-verified";
@@ -425,28 +895,38 @@ export const SpecRestatement = definePageType({
         "`topMarkdown`, and a new section titled `newTitle` holding `bottomMarkdown` is inserted immediately " +
         "after it, born with the SAME status (splitting your own verified words leaves both verified; " +
         "splitting an ai-draft leaves two ai-drafts). The surviving id means a restatement in progress on the " +
-        "top half outlives the split.",
+        "top half outlives the split. `asSubsection` makes the bottom half a SUBSECTION of the top rather " +
+        "than its sibling — the split that turns one long section into a parent and its first child.",
       args: zodSchema(
         z.object({
           sectionId: z.string(),
           topMarkdown: z.string().min(1),
           bottomMarkdown: z.string().min(1),
           newTitle: z.string().min(1),
+          asSubsection: z.boolean().optional(),
         }),
       ),
       result: zodSchema(z.object({ newSectionId: z.string() })),
       target: { section: "sections", field: "items" },
       preconditions: [activeRestatement("splitSection")],
       produces: (page, args, ctx) => {
-        const a = args as { sectionId: string; topMarkdown: string; bottomMarkdown: string; newTitle: string };
+        const a = args as {
+          sectionId: string;
+          topMarkdown: string;
+          bottomMarkdown: string;
+          newTitle: string;
+          asSubsection?: boolean;
+        };
         const { index, el } = sectionAt(page, a.sectionId);
+        const depth = depthOf(el) + (a.asSubsection === true ? 1 : 0);
         const ops = rewriteBody(a.sectionId, parseBlocks(a.topMarkdown, ctx.newId), el.status === "human-verified");
         ops.push({
           op: "addElement",
           section: "sections",
           field: "items",
           id: ctx.newId(),
-          fields: bodyFields(a.newTitle, a.bottomMarkdown, ctx.newId),
+          // The bottom half never inherits the slot: the top keeps the obligation.
+          fields: sectionFields(a.newTitle, a.bottomMarkdown, ctx.newId, depth, ""),
           ...(el.status !== undefined ? { status: el.status } : {}),
           index: index + 1,
         });
@@ -519,16 +999,22 @@ export const SpecRestatement = definePageType({
       },
     },
     submitForRestatement: {
-      description: "Declare the AI draft complete and hand the spec to the human for restatement.",
+      description:
+        "Declare the AI draft complete and hand the spec to the human for restatement. Refused until the " +
+        "rubric holds: every required slot authored, the data-model slot carrying actual types, the " +
+        "invariants slot a list, and every `(see X)` naming a section that exists.",
       args: zodSchema(empty),
       transition: { level: "page", event: "submitForRestatement" },
-      preconditions: [hasDraftedSections],
+      preconditions: [slotsCovered, slotShape, citationsResolve],
     },
     approve: {
-      description: "Human sign-off: accept the reviewed spec. Refused while any review note is still open.",
+      description:
+        "Human sign-off: accept the reviewed spec. Refused while any review note is still open, or if the " +
+        "restatement pass left the rubric unmet — sections get merged and renamed during review, so coverage " +
+        "and citations are checked again here.",
       args: zodSchema(empty),
       transition: { level: "page", event: "approve" },
-      preconditions: [noOpenNotes],
+      preconditions: [noOpenNotes, slotsCovered, slotShape, citationsResolve],
     },
     reopenRestating: {
       description: "Escape from reviewing back to restating (e.g. the review invalidated the restatement pass).",
@@ -553,6 +1039,8 @@ export const SpecRestatement = definePageType({
         // Markdown is a clean spec; provenance styling is browser-side.
         as: "sections",
         numbered: false,
+        // The flat ordered list renders as a heading hierarchy: depth 0 → `###`, 1 → `####`.
+        depthField: "depth",
         placeholder: "_No sections drafted._",
         element: { heading: "{title}", body: [{ field: "body" }] },
       },
