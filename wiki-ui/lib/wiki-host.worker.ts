@@ -466,10 +466,13 @@ function makeApi(conn: PortConn): WikiHostApi {
           if (field.kind !== "list") continue;
           return field.elements.map((el): SectionElementSummary => {
             const t = el.fields["title"];
+            const scalars: Record<string, string | number | boolean> = {};
+            for (const [k, f] of Object.entries(el.fields)) if (f.kind === "scalar") scalars[k] = f.value;
             return {
               id: el.id,
               ...(el.status !== undefined ? { status: el.status } : {}),
               ...(t !== undefined && t.kind === "prose" && t.value.length > 0 ? { title: t.value } : {}),
+              ...(Object.keys(scalars).length > 0 ? { scalars } : {}),
             };
           });
         }

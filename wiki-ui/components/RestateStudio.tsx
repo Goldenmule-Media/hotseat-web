@@ -65,6 +65,17 @@ import {
   type SectionSplit,
 } from "../lib/restate";
 import { clampSplit, DEFAULT_SPLIT, loadSplit, saveSplit } from "../lib/restate-split";
+import {
+  ancestorIds,
+  canIndent,
+  canOutdent,
+  depthOf,
+  hasChildren,
+  hiddenByCollapse,
+  siblingMoveTarget,
+  slotOf,
+  subtreeIds,
+} from "../lib/outline";
 import { pageHref } from "../lib/routes";
 
 const SECTIONS_KEY = "sections";
@@ -152,14 +163,17 @@ function GapStrip({
   onAdd,
   join,
   busy,
+  depth = 0,
 }: {
   onAdd: () => void;
   /** The pair this gap separates, top first; null at the ends of the list. */
   join: { topTitle: string; bottomTitle: string; onRun: () => void } | null;
   busy: boolean;
+  /** Indents the strip to line up with the card below it. */
+  depth?: number;
 }): React.JSX.Element {
   return (
-    <div className="restate-gap">
+    <div className="restate-gap" data-depth={depth}>
       <div className="restate-gap-actions">
         <button type="button" className="restate-gap-btn" disabled={busy} title="Write a new section here" onClick={onAdd}>
           + Add section
@@ -266,12 +280,17 @@ function SplitPicker({
   );
 }
 
-/** Reorder / split / delete / collapse for one card — structure, never selection. */
+/** Reorder / nest / split / delete / collapse for one card — structure, never selection. */
 interface CardStructure {
   readonly canUp: boolean;
   readonly canDown: boolean;
   readonly onUp: () => void;
   readonly onDown: () => void;
+  /** Nesting: ⇥ makes this a subsection of the one above, ⇤ promotes it back out. */
+  readonly canIndent: boolean;
+  readonly canOutdent: boolean;
+  readonly onIndent: () => void;
+  readonly onOutdent: () => void;
   readonly collapsed: boolean;
   readonly onToggleCollapse: () => void;
   readonly splitting: boolean;
@@ -299,6 +318,7 @@ function SectionCard({
   critique,
   action,
   structure,
+  outline,
 }: {
   workspaceId: WorkspaceId;
   pageId: PageId;
@@ -312,6 +332,17 @@ function SectionCard({
   action: { label: string; busy: boolean; onRun: () => void } | null;
   /** Structural controls; null outside the statuses that allow restructuring. */
   structure: CardStructure | null;
+  /** Where this card sits in the outline — its depth, and how it relates to the card the
+   *  pointer or the selection is on, which is what lights the hierarchy rails. */
+  outline: {
+    readonly depth: number;
+    readonly slot: string;
+    readonly childCount: number;
+    /** "self" | "ancestor" | "descendant" of the focused card, else null. */
+    readonly relation: "self" | "ancestor" | "descendant" | null;
+    readonly onFocus: () => void;
+    readonly onBlur: () => void;
+  };
 }): React.JSX.Element {
   const { markdown, loading, error } = useElementMarkdown(workspaceId, pageId, SECTIONS_KEY, el.id);
   // The head row carries the title, so the body drops the rendered heading.
@@ -329,6 +360,9 @@ function SectionCard({
     selected ? "is-selected" : "",
     selectable ? "is-selectable" : "",
     collapsed ? "is-collapsed" : "",
+    outline.depth > 0 ? "is-nested" : "",
+    outline.slot !== "" ? "is-slot" : "",
+    outline.relation !== null ? `is-${outline.relation}` : "",
   ]
     .filter((c) => c !== "")
     .join(" ");
@@ -336,6 +370,9 @@ function SectionCard({
     <div
       className={classes}
       data-el-id={el.id}
+      data-depth={outline.depth}
+      onMouseEnter={outline.onFocus}
+      onMouseLeave={outline.onBlur}
       onClick={(e) => {
         if (!selectable) return;
         // Links/controls inside the rendered body keep their own behaviour.
@@ -343,25 +380,51 @@ function SectionCard({
         onToggle();
       }}
     >
+      {/* One guide rail per ancestor level: the hierarchy drawn down the left margin. */}
+      {outline.depth > 0 && (
+        <span className="restate-rails" aria-hidden="true">
+          {Array.from({ length: outline.depth }, (_, i) => (
+            <span key={i} className="restate-rail" />
+          ))}
+        </span>
+      )}
       <div className="restate-section-head">
         {/* The title owns the head row, and the whole run of it up to the controls is the
             collapse toggle — the body below carries content only. */}
         {structure === null ? (
           <span className="restate-card-lead">
             <span className="restate-card-title">{titleOf(el)}</span>
+            {outline.childCount > 0 && (
+              <span className="restate-card-kids">
+                {outline.childCount} subsection{outline.childCount === 1 ? "" : "s"}
+              </span>
+            )}
           </span>
         ) : (
           <button
             type="button"
             className="restate-card-lead"
             aria-expanded={!collapsed}
-            title={collapsed ? "Expand this section" : "Collapse this section"}
+            title={
+              outline.childCount > 0
+                ? collapsed
+                  ? "Expand this section and its subsections"
+                  : "Collapse this section and its subsections"
+                : collapsed
+                  ? "Expand this section"
+                  : "Collapse this section"
+            }
             onClick={(e) => {
               e.stopPropagation();
               structure.onToggleCollapse();
             }}
           >
             <span className="restate-card-title">{titleOf(el)}</span>
+            {outline.childCount > 0 && (
+              <span className="restate-card-kids">
+                {outline.childCount} subsection{outline.childCount === 1 ? "" : "s"}
+              </span>
+            )}
           </button>
         )}
         <span className="restate-card-side">
@@ -409,6 +472,32 @@ function SectionCard({
               </button>
               <button
                 type="button"
+                className="restate-tool"
+                disabled={!structure.canOutdent || structure.busy}
+                aria-label={`Promote "${titleOf(el)}" one level`}
+                title="Promote out of its parent section"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  structure.onOutdent();
+                }}
+              >
+                ⇤
+              </button>
+              <button
+                type="button"
+                className="restate-tool"
+                disabled={!structure.canIndent || structure.busy}
+                aria-label={`Nest "${titleOf(el)}" under the section above`}
+                title="Make this a subsection of the section above"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  structure.onIndent();
+                }}
+              >
+                ⇥
+              </button>
+              <button
+                type="button"
                 className={`restate-tool ${structure.splitting ? "is-armed" : ""}`}
                 aria-pressed={structure.splitting}
                 aria-label={`Split "${titleOf(el)}"`}
@@ -426,7 +515,13 @@ function SectionCard({
                 aria-pressed={structure.deleting}
                 disabled={!structure.canDelete || structure.busy}
                 aria-label={`Delete "${titleOf(el)}"`}
-                title={structure.canDelete ? "Delete this section" : "The last section can't be deleted"}
+                title={
+                  structure.canDelete
+                    ? outline.childCount > 0
+                      ? "Delete this section and its subsections"
+                      : "Delete this section"
+                    : "A required section can be reworded or emptied, never removed"
+                }
                 onClick={(e) => {
                   e.stopPropagation();
                   structure.onToggleDelete();
@@ -460,7 +555,10 @@ function SectionCard({
       {structure?.deleting === true && (
         <div className="restate-confirm" role="alert">
           <span>
-            Delete &ldquo;{titleOf(el)}&rdquo;?{structure.loses !== null && ` This also discards ${structure.loses}.`}
+            Delete &ldquo;{titleOf(el)}&rdquo;?
+            {outline.childCount > 0 &&
+              ` Its ${outline.childCount} subsection${outline.childCount === 1 ? "" : "s"} go with it.`}
+            {structure.loses !== null && ` This also discards ${structure.loses}.`}
           </span>
           <button
             type="button"
@@ -805,6 +903,38 @@ export function RestateStudio({
   const total = elements.length;
   const allVerified = total > 0 && verified === total;
   const workbenchActive = status === "restating" || status === "reviewing";
+
+  // ── outline projections: the hierarchy the flat list encodes ──────────────────
+  const hidden = useMemo(() => hiddenByCollapse(elements, collapsed), [elements, collapsed]);
+  /** The card the pointer is over — what the hierarchy rails light up against. */
+  const [focusedId, setFocusedId] = useState<string | null>(null);
+  /** Ancestors and descendants of the focused (else selected) card, by id. */
+  const kin = useMemo(() => {
+    const anchor = focusedId ?? selectedId;
+    if (anchor === null) return null;
+    const at = elements.findIndex((e) => e.id === anchor);
+    if (at === -1) return null;
+    return {
+      self: anchor,
+      ancestors: new Set(ancestorIds(elements, at)),
+      descendants: new Set(subtreeIds(elements, at).slice(1)),
+    };
+  }, [elements, focusedId, selectedId]);
+  const relationOf = useCallback(
+    (id: string): "self" | "ancestor" | "descendant" | null => {
+      if (kin === null) return null;
+      if (kin.self === id) return "self";
+      if (kin.ancestors.has(id)) return "ancestor";
+      return kin.descendants.has(id) ? "descendant" : null;
+    },
+    [kin],
+  );
+
+  /** Rubric coverage: which required slots still carry no content. */
+  const coverage = useMemo(() => {
+    const slots = elements.filter((e) => slotOf(e) !== "");
+    return { total: slots.length, verified: slots.filter((e) => e.status === "human-verified").length };
+  }, [elements]);
   const criticReady = health !== null && health.available;
   const openNotes = notes.elements.filter((n) => n.status === "open");
   const resolvedNotes = notes.elements.filter((n) => n.status !== "open");
@@ -944,6 +1074,20 @@ export function RestateStudio({
   const onMove = useCallback(
     (id: string, toIndex: number) => {
       void runMutation("moveSection", { sectionId: id, toIndex });
+    },
+    [runMutation],
+  );
+
+  const onIndent = useCallback(
+    (id: string) => {
+      void runMutation("indentSection", { sectionId: id });
+    },
+    [runMutation],
+  );
+
+  const onOutdent = useCallback(
+    (id: string) => {
+      void runMutation("outdentSection", { sectionId: id });
     },
     [runMutation],
   );
@@ -1296,7 +1440,9 @@ export function RestateStudio({
         )}
 
         <section
-          className={`restate-block${selectedEl !== undefined && composing === null ? " restate-block-editor" : ""}`}
+          className={`restate-block${
+            selectedEl !== undefined && composing === null ? " restate-block-editor restate-block-selected" : ""
+          }`}
         >
           <div className="restate-block-head-row">
             <h2 className="restate-block-head">Restate</h2>
@@ -1308,9 +1454,6 @@ export function RestateStudio({
             <p className="muted">Select an AI-draft section on the left to restate it in your own words.</p>
           ) : (
             <>
-              <p className="restate-sources">
-                Restating <span className="restate-source">{titleOf(selectedEl)}</span>
-              </p>
               <div className="restate-selection-actions">
                 <button
                   type="button"
@@ -1466,6 +1609,12 @@ export function RestateStudio({
           {total === 0 && elementsLoading
             ? "Loading sections…"
             : `${verified} of ${total} section${total === 1 ? "" : "s"} verified`}
+          {coverage.total > 0 && (
+            <span className="restate-coverage" title="The required slots every spec must address">
+              {" · "}
+              {coverage.verified} of {coverage.total} required
+            </span>
+          )}
         </p>
         {elementsError !== null && (
           <p className="restate-load-error" role="alert">
@@ -1487,11 +1636,16 @@ export function RestateStudio({
       </div>
       <div ref={studioRef} className="restate-studio">
         <section ref={specColRef} className="restate-spec" aria-label="Spec sections">
-          {elements.map((el, i) => (
+          {elements.map((el, i) => {
+            if (hidden.has(el.id)) return null;
+            const depth = depthOf(el);
+            const kids = subtreeIds(elements, i).length - 1;
+            return (
             <Fragment key={el.id}>
               {workbenchActive && (
                 <GapStrip
                   onAdd={() => onCompose(el.id)}
+                  depth={depth}
                   join={
                     i === 0
                       ? null
@@ -1521,14 +1675,34 @@ export function RestateStudio({
                         ? { label: "Unaccept", busy: mutating, onRun: () => onUnaccept(el.id) }
                         : null
                 }
+                outline={{
+                  depth,
+                  slot: slotOf(el),
+                  childCount: kids,
+                  relation: relationOf(el.id),
+                  onFocus: () => setFocusedId(el.id),
+                  onBlur: () => setFocusedId((prev) => (prev === el.id ? null : prev)),
+                }}
                 structure={
                   !workbenchActive
                     ? null
                     : {
-                        canUp: i > 0,
-                        canDown: i < total - 1,
-                        onUp: () => onMove(el.id, i - 1),
-                        onDown: () => onMove(el.id, i + 1),
+                        // Reordering walks the OUTLINE: a section moves past its previous or
+                        // next sibling (subtree and all), never into someone else's children.
+                        canUp: siblingMoveTarget(elements, i, "up") !== null,
+                        canDown: siblingMoveTarget(elements, i, "down") !== null,
+                        onUp: () => {
+                          const to = siblingMoveTarget(elements, i, "up");
+                          if (to !== null) onMove(el.id, to);
+                        },
+                        onDown: () => {
+                          const to = siblingMoveTarget(elements, i, "down");
+                          if (to !== null) onMove(el.id, to);
+                        },
+                        canIndent: canIndent(elements, i),
+                        canOutdent: canOutdent(elements, i),
+                        onIndent: () => onIndent(el.id),
+                        onOutdent: () => onOutdent(el.id),
                         collapsed: collapsed.has(el.id),
                         onToggleCollapse: () => toggleCollapse(el.id),
                         splitting: splitting === el.id,
@@ -1537,7 +1711,9 @@ export function RestateStudio({
                           setSplitting((prev) => (prev === el.id ? null : el.id));
                         },
                         onSplit: (split) => void onSplit(el.id, split),
-                        canDelete: total > 1,
+                        // A required slot is an obligation: it may be reworded or emptied,
+                        // never removed, so the engine would refuse the command anyway.
+                        canDelete: slotOf(el) === "",
                         deleting: deleting === el.id,
                         onToggleDelete: () => {
                           setSplitting(null);
@@ -1550,7 +1726,8 @@ export function RestateStudio({
                 }
               />
             </Fragment>
-          ))}
+            );
+          })}
           {workbenchActive && total > 0 && (
             <GapStrip onAdd={() => onCompose(undefined)} join={null} busy={mutating} />
           )}

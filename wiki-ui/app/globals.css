@@ -6,6 +6,8 @@
   --muted: #8b97a6;
   --accent: #4c9aff;
   --accent-dim: #2a3a52;
+  /* Focus is the one neutral edge: every hue here already means something (selected/verified/draft/failed). */
+  --focus: #c9d3e0;
   --green: #2ea043;
   --amber: #d29922;
   --red: #e5534b;
@@ -1646,6 +1648,82 @@ code {
   padding: 10px 14px 12px;
   background: var(--panel);
 }
+
+/* ── the outline hierarchy ─────────────────────────────────────────────────────
+   The section list is FLAT; `depth` is what nests it. A card indents by its depth and
+   grows one guide rail per ancestor level, so the tree is drawn down the left margin
+   rather than inferred from heading sizes. Touching a card lights the rails it shares
+   with its ancestors and descendants — the "what belongs to what" answer, on hover. */
+.restate-section[data-depth="1"],
+.restate-gap[data-depth="1"] {
+  margin-left: 22px;
+}
+.restate-section[data-depth="2"],
+.restate-gap[data-depth="2"] {
+  margin-left: 44px;
+}
+.restate-section[data-depth="3"],
+.restate-gap[data-depth="3"] {
+  margin-left: 66px;
+}
+.restate-section[data-depth="4"],
+.restate-gap[data-depth="4"] {
+  margin-left: 88px;
+}
+.restate-section.is-nested {
+  position: relative;
+}
+.restate-rails {
+  position: absolute;
+  top: -8px;
+  bottom: -8px;
+  left: 0;
+  display: flex;
+  pointer-events: none;
+}
+.restate-rail {
+  width: 22px;
+  margin-left: -22px;
+  border-left: 1px solid var(--border);
+  opacity: 0.7;
+}
+/* The focused card and its kin: the rails connecting them light up together. */
+.restate-section.is-self > .restate-rails .restate-rail:last-child,
+.restate-section.is-descendant > .restate-rails .restate-rail {
+  border-left-color: var(--accent);
+  opacity: 1;
+}
+.restate-section.is-ancestor,
+.restate-section.is-descendant {
+  border-color: var(--accent);
+}
+.restate-section.is-ancestor {
+  border-left-color: var(--accent);
+}
+/* A required-slot section reads as part of the spec's spine, not an optional extra.
+   The badge hangs off the LEAD, not the title, which is an ellipsizing single line. */
+.restate-section.is-slot .restate-card-lead::after {
+  content: "required";
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  vertical-align: middle;
+}
+.restate-card-kids {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.restate-coverage {
+  color: var(--muted);
+}
 .restate-section-ai {
   border-left-color: var(--amber);
 }
@@ -1892,7 +1970,7 @@ button.restate-card-lead:hover {
 .restate-compose-title:focus,
 .restate-split-confirm input:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--focus);
 }
 /* One section is restated at a time — a toggle, not a checkbox. */
 .restate-select {
@@ -1981,6 +2059,11 @@ button.restate-card-lead:hover {
   padding: 16px 18px;
   background: var(--panel);
 }
+/* The editor is the other half of the selection — same outline as the selected card. */
+.restate-block-selected {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
 .restate-block-head {
   margin: 0;
   font-size: 13px;
@@ -2033,7 +2116,7 @@ button.restate-card-lead:hover {
 }
 .restate-draft:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--focus);
 }
 /* The draft rendered as it will land on the page; scrolls inside its own box. */
 .restate-preview {

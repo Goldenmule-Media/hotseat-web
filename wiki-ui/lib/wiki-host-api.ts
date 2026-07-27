@@ -120,12 +120,15 @@ export interface HandshakeResult {
 }
 
 /** One list element of a page section, summarized off the folded state in the worker —
- *  id + element FSM status + the `title` prose field when present. Powers per-element
- *  views (the restatement studio's section list) without markdown parsing. */
+ *  id + element FSM status + the `title` prose field when present, plus every scalar
+ *  field verbatim (the model's own leaf data: a spec section's outline `depth` and slot
+ *  tag, say). Powers per-element views (the restatement studio's section tree) without
+ *  markdown parsing. */
 export interface SectionElementSummary {
   readonly id: string;
   readonly status?: string;
   readonly title?: string;
+  readonly scalars?: Readonly<Record<string, string | number | boolean>>;
 }
 
 /**
