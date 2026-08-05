@@ -23,9 +23,11 @@ import { clearScrollTarget, scrollToTerms, useScrollTarget } from "../lib/search
 import { findNode } from "../lib/tree";
 import { isTerminalStatus } from "../lib/fsm-graph";
 import { RESTATE_PAGE_TYPE } from "../lib/restate";
+import { STUDY_PAGE_TYPE } from "../lib/study";
 import { preferredViewMode, rememberViewMode, type ViewMode } from "../lib/view-mode";
 import { FsmGraph } from "./FsmGraph";
 import { RestateStudio } from "./RestateStudio";
+import { StudyStudio } from "./StudyStudio";
 import { SchemaInspector } from "./SchemaInspector";
 
 export function PageView({
@@ -46,10 +48,12 @@ export function PageView({
   const node = findNode(ws.tree, pageId);
   const pageType = node?.type;
   const archived = node?.archived === true;
-  // Spec-restatement pages get the Restatement Studio as their DEFAULT view (no ?view
-  // param): the studio IS this type's reading surface; the raw markdown stays reachable
-  // behind an explicit ?view=content.
-  const hasStudio = pageType === RESTATE_PAGE_TYPE;
+  // Studio page types get their studio as the DEFAULT view (no ?view param): the studio
+  // IS the type's reading surface; the raw markdown stays reachable behind an explicit
+  // ?view=content. Each studio owns its ViewMode tag.
+  const studio: ViewMode | null =
+    pageType === RESTATE_PAGE_TYPE ? "restate" : pageType === STUDY_PAGE_TYPE ? "study" : null;
+  const hasStudio = studio !== null;
 
   // The active view is the URL's source of truth, so a refresh or shared link reopens the
   // same tab.
@@ -58,15 +62,13 @@ export function PageView({
   const mode: ViewMode =
     rawView === "model"
       ? "model"
-      : rawView === "restate"
-        ? hasStudio
-          ? "restate"
+      : rawView === "restate" || rawView === "study"
+        ? rawView === studio
+          ? studio
           : "content"
         : rawView === "content"
           ? "content"
-          : hasStudio
-            ? "restate"
-            : "content";
+          : (studio ?? "content");
 
   const selectView = useCallback(
     (next: ViewMode) => {
@@ -170,9 +172,10 @@ export function PageView({
   }
 
   const headerTitle = title ?? node?.title ?? null;
-  // The restate view opts out of the content column's reading max-width and pins the
-  // header while its two columns scroll independently (globals.css, `.page-restate`).
-  const restateActive = mode === "restate" && hasStudio;
+  // A studio view opts out of the content column's reading max-width and pins the
+  // header while its two columns scroll independently (globals.css, `.page-restate` —
+  // both studios share the layout).
+  const restateActive = mode === studio && hasStudio;
 
   return (
     <div className={restateActive ? "page page-restate" : "page"}>
@@ -207,15 +210,15 @@ export function PageView({
             )}
             {fsm !== null && (
               <div className="view-toggle" role="tablist" aria-label="Page view">
-                {hasStudio && (
+                {studio !== null && (
                   <button
                     type="button"
                     role="tab"
-                    aria-selected={mode === "restate"}
-                    className={`view-tab ${mode === "restate" ? "active" : ""}`}
-                    onClick={() => selectView("restate")}
+                    aria-selected={mode === studio}
+                    className={`view-tab ${mode === studio ? "active" : ""}`}
+                    onClick={() => selectView(studio)}
                   >
-                    Restate
+                    {studio === "restate" ? "Restate" : "Study"}
                   </button>
                 )}
                 <button
@@ -280,13 +283,22 @@ export function PageView({
           />
           {def !== null && <SchemaInspector def={def} currentStatus={currentStatus} />}
         </div>
-      ) : mode === "restate" && hasStudio ? (
+      ) : mode === "restate" && studio === "restate" ? (
         <RestateStudio
           key={`${workspaceId}/${pageId}`}
           workspaceId={workspaceId}
           pageId={pageId}
           status={currentStatus}
           specMarkdown={markdown}
+        />
+      ) : mode === "study" && studio === "study" ? (
+        <StudyStudio
+          key={`${workspaceId}/${pageId}`}
+          workspaceId={workspaceId}
+          pageId={pageId}
+          status={currentStatus}
+          pageTitle={headerTitle}
+          pageMarkdown={markdown}
         />
       ) : loading && markdown === null ? (
         <p className="muted">Loading page…</p>

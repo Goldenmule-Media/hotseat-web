@@ -22,6 +22,7 @@ export default defineConfig({
     bug: "src/bug/index.ts",
     security: "src/security/index.ts",
     "spec-restatement": "src/spec-restatement/index.ts",
+    study: "src/study/index.ts",
   },
   format: ["esm"],
   platform: "node",

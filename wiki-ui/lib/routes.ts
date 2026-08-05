@@ -23,5 +23,5 @@ export function pageHref(
   view?: ViewMode,
 ): string {
   const base = `/${encodeURIComponent(workspaceId)}/${encodeURIComponent(pageId)}`;
-  return view === "model" || view === "restate" ? `${base}?view=${view}` : base;
+  return view === "model" || view === "restate" || view === "study" ? `${base}?view=${view}` : base;
 }

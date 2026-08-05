@@ -1,6 +1,6 @@
 {
   "ws:mpzncs2z-0001-2wgv51": {
-    "version": 2342,
+    "version": 2387,
     "files": {
       "hotseat-wiki/architecture/index.md": "5213acdc1038077e77d636e752170d48a0efdbf3a8639b6e6d795f4fde277015",
       "hotseat-wiki/feature-specs/index.md": "f39d08db07e0ed57f225cb9f5c595b09681c1f99fbc6753333f70742a6cb5dad",
@@ -124,7 +124,7 @@
       "hotseat-wiki/.archived/implementation-plan--mqh3wv09-005d-iff8c0.md": "67a9285fb3de6ad5ec855b82c53e4b33cd4f1a81e95f7917221c5c465e3f4486",
       "hotseat-wiki/.archived/testing-plan--mqh3wv09-005e-kqcoc8.md": "9e1e52d4816693afe84c28bfaf4030a5e081edbc12f6aad5e3b3360c72594fe5",
       "hotseat-wiki/.archived/feature-spec--mqh3wv09-005f-lh3it.md": "7048e63def8bd61f06f8424e89b48953c617ff196c853063aa205d983f39c5a2",
-      "hotseat-wiki/tla-runner.md": "fe4067da33e9a994200a4fec1b40dc56c954901651ceb9f6a8f9e511d06e8c21"
+      "hotseat-wiki/quint-runner.md": "3cc85539f5672bb3d7009d38e2daee5403786c348053fad9f03368b15cc5c51d"
     },
     "pages": {
       "toc:mpznedyz-0003-pdtcmh": "hotseat-wiki/architecture/index.md",
@@ -249,7 +249,7 @@
       "implementation-plan:mqh3wv09-005d-iff8c0": "hotseat-wiki/.archived/implementation-plan--mqh3wv09-005d-iff8c0.md",
       "testing-plan:mqh3wv09-005e-kqcoc8": "hotseat-wiki/.archived/testing-plan--mqh3wv09-005e-kqcoc8.md",
       "feature-spec:mqh3wv09-005f-lh3it": "hotseat-wiki/.archived/feature-spec--mqh3wv09-005f-lh3it.md",
-      "spec-restatement:mrz9oypi-0001-lq7kub": "hotseat-wiki/tla-runner.md"
+      "spec-restatement:mrz9oypi-0001-lq7kub": "hotseat-wiki/quint-runner.md"
     }
   }
 }

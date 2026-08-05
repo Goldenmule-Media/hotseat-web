@@ -11,7 +11,8 @@
     "./document": "./src/document/index.ts",
     "./bug": "./src/bug/index.ts",
     "./security": "./src/security/index.ts",
-    "./spec-restatement": "./src/spec-restatement/index.ts"
+    "./spec-restatement": "./src/spec-restatement/index.ts",
+    "./study": "./src/study/index.ts"
   },
   "files": [
     "dist"

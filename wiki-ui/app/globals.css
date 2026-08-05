@@ -2387,3 +2387,166 @@ button.restate-card-lead:hover {
   gap: 10px;
   flex-wrap: wrap;
 }
+
+/* ── study studio (study-notes pages) ────────────────────────────────────── */
+/* Shares the restate studio's two-column layout and workbench blocks; everything here
+   is study-specific: term highlight marks, candidate chips, the glossary rail, and the
+   floating add-from-selection action. */
+.study-studio {
+  position: relative; /* anchors .study-float-mark */
+}
+/* Glossary-term occurrences inside rendered note bodies, colored by status. */
+.study-term {
+  background: transparent;
+  color: inherit;
+  border-bottom: 1.5px dashed var(--amber);
+  cursor: pointer;
+  border-radius: 2px;
+}
+.study-term:hover {
+  background: var(--accent-dim);
+}
+.study-term-marked {
+  border-bottom-color: var(--amber);
+}
+.study-term-defined {
+  border-bottom-style: solid;
+  border-bottom-color: var(--accent);
+}
+.study-term-checked {
+  border-bottom-style: solid;
+  border-bottom-color: var(--green);
+}
+/* The floating "add to glossary" action over a text selection. */
+.study-float-mark {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 6px));
+  z-index: 20;
+  background: var(--panel, var(--bg));
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+.study-float-mark:hover {
+  background: var(--accent-dim);
+}
+/* Candidate chips: a note's bold runs not yet in the glossary. */
+.study-candidates {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.study-candidates-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.study-chip {
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  padding: 1px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.study-chip:hover {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+.study-chip-demo {
+  cursor: default;
+  pointer-events: none;
+}
+/* The glossary rail. */
+.study-add-term {
+  display: flex;
+  gap: 8px;
+}
+.study-add-term input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.study-rail-head {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin: 14px 0 6px;
+}
+.study-term-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.study-term-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.study-term-row:hover {
+  background: var(--accent-dim);
+}
+.study-term-row.is-selected {
+  border-color: var(--accent);
+}
+.study-term-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.study-badge-marked {
+  color: var(--amber);
+  border-color: var(--amber);
+}
+.study-badge-defined {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.study-badge-running {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.study-bar-marked {
+  color: var(--amber);
+}
+.study-bar-evaluating {
+  color: var(--accent);
+}
+.study-term-meta {
+  font-size: 13px;
+}
+.study-remove-confirm {
+  color: var(--red);
+}
+/* Definitions are short — the note editor keeps the tall restate-draft height. */
+.restate-block-editor .restate-draft.study-definition {
+  min-height: 140px;
+  height: 30vh;
+}
