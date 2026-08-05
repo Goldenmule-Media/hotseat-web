@@ -8,32 +8,41 @@
  * only while the editor is NOT focused, so a sync can never fight the cursor.
  */
 import { useEffect, useRef } from "react";
-import { Compartment } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { Compartment, Prec } from "@codemirror/state";
+import { EditorView, keymap } from "@codemirror/view";
 import { liveEditorBase, liveEditorTermsExtension, type EditorTermRef } from "../lib/md-live";
 
 export function MarkdownEditor({
   value,
   onChange,
+  onBlur,
   terms,
   onTermClick,
   placeholder,
   autoFocus,
+  submitOnEnter,
 }: {
   value: string;
   onChange: (text: string) => void;
+  /** Focus left the editor — the caller's moment to commit (e.g. save-on-blur). */
+  onBlur?: () => void;
   terms: readonly EditorTermRef[];
   onTermClick: (termId: string) => void;
   placeholder?: string;
   autoFocus?: boolean;
+  /** Enter blurs the editor (firing `onBlur` — i.e. submit); Shift-Enter still breaks a
+   *  line. For short single-thought fields like a glossary definition. */
+  submitOnEnter?: boolean;
 }): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const termsComp = useRef(new Compartment());
   // The latest callbacks, readable from stable CM closures.
   const onChangeRef = useRef(onChange);
+  const onBlurRef = useRef(onBlur);
   const onTermClickRef = useRef(onTermClick);
   onChangeRef.current = onChange;
+  onBlurRef.current = onBlur;
   onTermClickRef.current = onTermClick;
 
   useEffect(() => {
@@ -43,10 +52,26 @@ export function MarkdownEditor({
       parent: host,
       doc: value,
       extensions: [
+        ...(submitOnEnter === true
+          ? [
+              Prec.highest(
+                keymap.of([
+                  {
+                    key: "Enter",
+                    run: (v) => {
+                      v.contentDOM.blur();
+                      return true;
+                    },
+                  },
+                ]),
+              ),
+            ]
+          : []),
         liveEditorBase(placeholder),
         termsComp.current.of(liveEditorTermsExtension({ terms, onTermClick: (id) => onTermClickRef.current(id) })),
         EditorView.updateListener.of((u) => {
           if (u.docChanged) onChangeRef.current(u.state.doc.toString());
+          if (u.focusChanged && !u.view.hasFocus) onBlurRef.current?.();
         }),
       ],
     });

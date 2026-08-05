@@ -2470,14 +2470,18 @@ button.restate-card-lead:hover {
   cursor: default;
   pointer-events: none;
 }
-/* The glossary rail. */
-.study-add-term {
+/* The glossary rail: the filter box narrows by name and definition. */
+.study-filter {
   display: flex;
+  align-items: center;
   gap: 8px;
 }
-.study-add-term input {
+.study-filter input {
   flex: 1 1 auto;
   min-width: 0;
+}
+.study-filter-mark {
+  margin-top: 8px;
 }
 .study-rail-head {
   font-size: 12px;
@@ -2587,7 +2591,8 @@ button.restate-card-lead:hover {
 .study-collapse-btn:hover {
   color: var(--text);
 }
-/* The title reads as a heading and edits in place — chrome appears only on focus. */
+/* The title reads as a note heading — larger, no leading glyph — and edits in place;
+   chrome appears only on hover/focus. */
 .study-title-inline {
   flex: 1 1 auto;
   min-width: 0;
@@ -2597,6 +2602,7 @@ button.restate-card-lead:hover {
   border-radius: 0;
   color: var(--text);
   font: inherit;
+  font-size: 1.25em;
   font-weight: 650;
   padding: 0 2px;
 }
@@ -2648,6 +2654,20 @@ button.restate-card-lead:hover {
 .study-term-item.is-expanded .study-term-row {
   border-color: transparent;
 }
+/* Row head: the expand button plus the trash riding to the right of the badge. */
+.study-term-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.study-term-head .study-term-row {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.study-term-trash {
+  flex: none;
+  font-size: 12px;
+}
 .study-term-item.is-expanded .study-term-row .study-term-name {
   font-weight: 600;
 }
@@ -2656,4 +2676,172 @@ button.restate-card-lead:hover {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* Collapsible glossary panel: the notes take the full width; a slim strip reopens it. */
+.study-studio.study-rail-collapsed .restate-spec {
+  width: auto;
+  flex: 1 1 auto;
+  padding-right: 0;
+}
+.study-rail-strip {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  border-left: 1px solid var(--border);
+  margin-left: 8px;
+  padding-left: 6px;
+}
+.study-rail-open {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  padding: 10px 4px;
+  cursor: pointer;
+}
+.study-rail-open:hover {
+  color: var(--text);
+}
+.study-rail-open-label {
+  writing-mode: vertical-rl;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.study-rail-open-count {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: 11px;
+}
+.study-rail-open-count.has-marked {
+  color: var(--amber);
+  border-color: var(--amber);
+}
+.study-rail-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.study-rail-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* An SVG chevron instead of a text glyph: it centers exactly, no font metrics involved. */
+.study-rail-collapse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.study-rail-collapse svg {
+  display: block;
+}
+.study-rail-collapse:hover {
+  color: var(--text);
+  background: var(--accent-dim);
+}
+@media (max-width: 980px) {
+  /* Stacked layout: the strip is a plain row, not a right-edge column. */
+  .study-rail-strip {
+    border-left: none;
+    border-top: 1px solid var(--border);
+    margin-left: 0;
+    padding-left: 0;
+  }
+  .study-rail-open {
+    flex-direction: row;
+    justify-content: center;
+  }
+  .study-rail-open-label {
+    writing-mode: horizontal-tb;
+  }
+}
+
+/* The glossary header band (title, sort, collapse, filter) sits OUTSIDE the scroll:
+   the panel is a fixed-header column and only the term list below it scrolls. */
+.study-rail-sticky {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+}
+.study-rail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+@media (min-width: 981px) {
+  /* The aside stops being the scroll container for the study rail; the block fills it
+     and the body scrolls inside, keeping the header truly immobile. */
+  .study-studio .restate-workbench {
+    overflow: hidden;
+    padding-bottom: 0;
+  }
+  .study-studio .study-rail {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .study-studio .study-rail-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-bottom: 12px;
+    /* Push the scrollbar out into the card's right padding so it never overlays the
+       trash icons: the negative margin moves the scroll edge right, the padding puts
+       the content back where it was. */
+    margin-right: -12px;
+    padding-right: 12px;
+  }
+}
+.study-term-item {
+  scroll-margin-top: 8px;
+}
+
+/* The evaluation verdict: terse bullets, then a blurred suggested definition that is
+   revealed only on click — reading it first would defeat the flashcard. */
+.study-eval-points {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.study-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.study-suggestion:not(.is-revealed) {
+  cursor: pointer;
+}
+.study-suggestion-text {
+  filter: blur(6px);
+  user-select: none;
+  transition: filter 0.15s ease;
+}
+.study-suggestion.is-revealed .study-suggestion-text {
+  filter: none;
+  user-select: text;
+}
+.study-suggestion-label {
+  flex: none;
+  color: var(--green);
+  border-color: var(--green);
 }

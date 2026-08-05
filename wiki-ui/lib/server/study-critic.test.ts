@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { evalTimeoutMsFromEnv, evaluationPrompt } from "./study-critic";
+import { evalTimeoutMsFromEnv, evaluationPrompt, validateStudyVerdict } from "./study-critic";
 
 describe("evaluation prompt", () => {
   const input = {
@@ -25,14 +25,37 @@ describe("evaluation prompt", () => {
     expect(p).toContain("TERM: RAG");
   });
 
-  it("demands one JSON object in the critique verdict shape", () => {
+  it("demands one JSON object in the bullets-plus-suggestion shape", () => {
     const p = evaluationPrompt(input);
     expect(p).toContain("EXACTLY one JSON object and nothing else");
     expect(p).toContain('"grade"');
-    expect(p).toContain('"summary"');
-    expect(p).toContain('"gaps"');
-    expect(p).toContain('"improvements"');
-    expect(p).toContain("gaps: at most 4");
+    expect(p).toContain('"points"');
+    expect(p).toContain('"suggestion"');
+    expect(p).not.toContain('"summary"');
+  });
+
+  it("demands terse bullet-only output with a mandatory suggestion", () => {
+    const p = evaluationPrompt(input);
+    expect(p).toContain("BULLETS and nothing else — no summary sentence");
+    expect(p).toContain("points: 1 to 3");
+    expect(p).toContain("suggestion: ALWAYS");
+    expect(p).toContain("BE TERSE");
+  });
+});
+
+describe("validateStudyVerdict", () => {
+  it("caps points at 3 and keeps the suggestion", () => {
+    const v = validateStudyVerdict({ grade: "surface", points: ["a", "b", "c", "d"], suggestion: "Better." });
+    expect(v).toEqual({ grade: "surface", points: ["a", "b", "c"], suggestion: "Better." });
+  });
+
+  it("folds a legacy summary/gaps reply into points", () => {
+    const v = validateStudyVerdict({ grade: "partial", summary: "Reworded.", gaps: ["no mechanism"] });
+    expect(v?.points).toEqual(["Reworded.", "no mechanism"]);
+  });
+
+  it("rejects an empty verdict", () => {
+    expect(validateStudyVerdict({ grade: "understood" })).toBeNull();
   });
 });
 

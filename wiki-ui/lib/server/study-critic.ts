@@ -8,15 +8,7 @@
  * shape (grade / summary / gaps / improvements) and its validators wholesale.
  */
 
-import {
-  extractJson,
-  runClaude,
-  validateCritiqueVerdict,
-  MAX_GAPS,
-  MAX_IMPROVEMENTS,
-  type CritiqueVerdict,
-  type RunClaudeResult,
-} from "./claude-cli";
+import { extractJson, runClaude, type CritiqueGrade, type RunClaudeResult } from "./claude-cli";
 
 export interface TermEvaluationInput {
   /** The glossary term being defined. */
@@ -31,8 +23,20 @@ export interface TermEvaluationInput {
   signal?: AbortSignal;
 }
 
+/** The verdict is a flashcard margin note: a few terse bullets plus one suggested
+ *  definition — no summary sentence, no essay. */
+export const STUDY_MAX_POINTS = 3;
+
+export interface StudyVerdict {
+  grade: CritiqueGrade;
+  /** The verdict itself, as terse bullet fragments — most damaging first. */
+  points: string[];
+  /** The definition as it should have been written (shown blurred until clicked). */
+  suggestion: string;
+}
+
 const EVAL_JSON_SHAPE =
-  '{"grade": "understood"|"partial"|"surface", "summary": "<one sentence, <=25 words>", "gaps": ["<one specific miss, <=20 words>"], "improvements": ["<one genuine strength worth keeping, <=15 words>"]}';
+  '{"grade": "understood"|"partial"|"surface", "points": ["<terse fragment, <=10 words>"], "suggestion": "<the definition as it should read, <=20 words>"}';
 
 const JSON_ONLY = "Reply with EXACTLY one JSON object and nothing else: no prose, no preamble, no code fence.";
 
@@ -48,13 +52,13 @@ export function evaluationPrompt(input: TermEvaluationInput): string {
     "",
     'grade: "understood" = correct and the load-bearing idea is present; "partial" = right shape, something',
     'real missing or fuzzy; "surface" = wrong, circular, or reworded without the substance.',
-    `gaps: at most ${MAX_GAPS}, most damaging first. Each names ONE thing the definition misses, inverts or`,
-    "distorts, and what is actually true. A factual error outranks an omission. Empty when understood.",
-    `improvements: at most ${MAX_IMPROVEMENTS}, only where the definition genuinely beats a textbook one`,
-    "(a sharper example, a truer emphasis). Usually [].",
+    `points: 1 to ${STUDY_MAX_POINTS} BULLETS and nothing else — no summary sentence. Each is a terse fragment`,
+    "(<=10 words) naming one thing missed, inverted, or distorted, most damaging first. A factual error",
+    'outranks an omission. When the grade is "understood", ONE bullet naming the load-bearing idea they got.',
+    "suggestion: ALWAYS — the definition as the learner should have written it, <=20 words, plain and direct.",
     "",
-    "Every entry is one specific thing, stated once. No flattery, no hedging, no restating the definition",
-    "back, no praise for effort. Judge only the text in front of you.",
+    "BE TERSE. Fragments over sentences, every word earning its place. No flattery, no hedging, no",
+    "restating the definition back. Judge only the text in front of you.",
     "",
   ];
   if (input.subject !== undefined && input.subject.trim() !== "") {
@@ -72,9 +76,37 @@ function reinforcementPrompt(): string {
   return `That was not a single valid JSON object. Reply now with ONLY one JSON object matching ${EVAL_JSON_SHAPE} — nothing else.`;
 }
 
-function tryVerdict(text: string): CritiqueVerdict | null {
+function stringList(raw: unknown): string[] {
+  if (typeof raw === "string") return raw.trim() === "" ? [] : [raw];
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "");
+}
+
+function coerceGrade(raw: unknown): CritiqueGrade {
+  if (typeof raw === "string") {
+    const g = raw.trim().toLowerCase();
+    if (g === "understood" || g === "surface") return g;
+  }
+  return "partial";
+}
+
+/** Lenient coercion + the caps; tolerates a legacy summary/gaps reply by folding it into
+ *  points; null when there is nothing usable. */
+export function validateStudyVerdict(raw: unknown): StudyVerdict | null {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const obj = raw as Record<string, unknown>;
+  let points = stringList(obj.points);
+  if (points.length === 0) {
+    points = [...(typeof obj.summary === "string" && obj.summary.trim() !== "" ? [obj.summary] : []), ...stringList(obj.gaps)];
+  }
+  const suggestion = typeof obj.suggestion === "string" ? obj.suggestion.trim() : "";
+  if (points.length === 0 && suggestion === "") return null;
+  return { grade: coerceGrade(obj.grade), points: points.slice(0, STUDY_MAX_POINTS), suggestion };
+}
+
+function tryVerdict(text: string): StudyVerdict | null {
   try {
-    return validateCritiqueVerdict(extractJson(text));
+    return validateStudyVerdict(extractJson(text));
   } catch {
     return null;
   }
@@ -86,7 +118,7 @@ function failureMessage(res: RunClaudeResult): string {
   return `evaluation failed: ${res.result.slice(0, 300)}`;
 }
 
-export type EvaluationOutcome = { ok: true; verdict: CritiqueVerdict } | { ok: false; message: string };
+export type EvaluationOutcome = { ok: true; verdict: StudyVerdict } | { ok: false; message: string };
 
 export async function runTermEvaluation(input: TermEvaluationInput): Promise<EvaluationOutcome> {
   const first = await runClaude(evaluationPrompt(input), {

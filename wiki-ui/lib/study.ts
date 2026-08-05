@@ -7,12 +7,7 @@
  * without a browser; the fetch wrappers for the /api/study routes (same-origin Next API,
  * bearer-token attached, 401 → notifyUnauthorized per app convention) sit alongside.
  */
-import {
-  asCritiqueVerdict,
-  type CritiqueVerdict,
-  type KeyValueStore,
-  type RestateHealth,
-} from "./restate";
+import { type CritiqueGrade, type KeyValueStore, type RestateHealth } from "./restate";
 import { getToken, notifyUnauthorized } from "./auth";
 
 /** The page type the studio serves (the only place the tag is spelled outside models). */
@@ -123,12 +118,107 @@ export function feedbackFromBody(body: string): string | null {
   return text === "" ? null : text;
 }
 
-/** The verdict as the Markdown `recordEvaluation` stores — summary, then gaps/strengths. */
-export function feedbackMarkdown(verdict: CritiqueVerdict): string {
-  const parts = [verdict.summary.trim()];
-  if (verdict.gaps.length > 0) parts.push(`Gaps:\n${verdict.gaps.map((g) => `- ${g}`).join("\n")}`);
-  if (verdict.improvements.length > 0) parts.push(`Strengths:\n${verdict.improvements.map((g) => `- ${g}`).join("\n")}`);
-  return parts.filter((p) => p !== "").join("\n\n");
+// ── the evaluation verdict (bullets + a suggested definition) ───────────────────
+
+export interface StudyVerdict {
+  readonly grade: CritiqueGrade;
+  /** The verdict itself: terse bullet fragments, most damaging first. */
+  readonly points: string[];
+  /** The definition as it should have been written; shown blurred until clicked. */
+  readonly suggestion: string | null;
+}
+
+function stringList(raw: unknown): string[] {
+  return Array.isArray(raw) ? raw.filter((s): s is string => typeof s === "string" && s.trim() !== "") : [];
+}
+
+/** Narrow a route payload to a verdict; tolerates the legacy summary/gaps shape. */
+export function asStudyVerdict(raw: unknown): StudyVerdict | null {
+  if (raw === null || typeof raw !== "object") return null;
+  const v = raw as Record<string, unknown>;
+  const grade = v.grade === "understood" || v.grade === "surface" ? v.grade : "partial";
+  let points = stringList(v.points);
+  if (points.length === 0) {
+    points = [...(typeof v.summary === "string" && v.summary.trim() !== "" ? [v.summary] : []), ...stringList(v.gaps)];
+  }
+  const suggestion = typeof v.suggestion === "string" && v.suggestion.trim() !== "" ? v.suggestion.trim() : null;
+  if (points.length === 0 && suggestion === null) return null;
+  return { grade, points, suggestion };
+}
+
+/** The suggestion's label line, as {@link evaluationFeedbackMarkdown} stores it. */
+const SUGGESTION_LABEL = "**Suggestion:**";
+
+/** The verdict as the Markdown `recordEvaluation` stores — bullets, then the suggestion. */
+export function evaluationFeedbackMarkdown(verdict: StudyVerdict): string {
+  const parts: string[] = [];
+  if (verdict.points.length > 0) parts.push(verdict.points.map((p) => `- ${p.trim()}`).join("\n"));
+  if (verdict.suggestion !== null) parts.push(`${SUGGESTION_LABEL} ${verdict.suggestion}`);
+  return parts.join("\n\n");
+}
+
+/** Split stored feedback back apart: the verdict body, and the suggestion (blurred in the
+ *  UI). Feedback stored before suggestions existed parses as body-only. */
+export function parseEvaluationFeedback(md: string): { body: string; suggestion: string | null } {
+  const at = md.indexOf(SUGGESTION_LABEL);
+  if (at === -1) return { body: md.trim(), suggestion: null };
+  const suggestion = md.slice(at + SUGGESTION_LABEL.length).trim();
+  return { body: md.slice(0, at).trim(), suggestion: suggestion === "" ? null : suggestion };
+}
+
+// ── glossary parsing + filtering (the rail's filter box) ────────────────────────
+
+export interface GlossaryEntry {
+  readonly term: string;
+  readonly definition: string;
+}
+
+/** Exactly an H3 (`### `, not `####`), capturing the heading text. */
+const H3_RE = /^###(?!#)\s+(.*?)\s*$/;
+
+/**
+ * Parse the rendered `## Glossary` slice into `[{term, definition}]` — one entry per
+ * `### Term` chunk, the definition stripped of the appended critique and of the empty
+ * placeholder. Fence-aware. Lets the filter search definitions without a fetch per term.
+ */
+export function glossaryEntries(glossaryMd: string): GlossaryEntry[] {
+  const out: GlossaryEntry[] = [];
+  let term: string | null = null;
+  let buf: string[] = [];
+  let inFence = false;
+  const flush = (): void => {
+    if (term !== null) {
+      const body = definitionFromBody(buf.join("\n").trim());
+      out.push({ term, definition: body === "_None._" ? "" : body });
+    }
+    buf = [];
+  };
+  for (const line of glossaryMd.replace(/\r\n/g, "\n").split("\n")) {
+    if (FENCE_RE.test(line)) inFence = !inFence;
+    const m = inFence ? null : H3_RE.exec(line);
+    if (m !== null) {
+      flush();
+      term = m[1]!.trim();
+      continue;
+    }
+    buf.push(line);
+  }
+  flush();
+  return out;
+}
+
+/**
+ * A term's relevance to a filter query: 0 = name starts with it, 1 = name contains it,
+ * 2 = only the definition contains it, null = no match. Case-insensitive. Sorting by
+ * this rank (then name) puts name matches first, as a filter should.
+ */
+export function termFilterRank(query: string, name: string, definition: string): number | null {
+  const q = query.trim().toLowerCase();
+  if (q === "") return 1;
+  const n = name.toLowerCase();
+  if (n.startsWith(q)) return 0;
+  if (n.includes(q)) return 1;
+  return definition.toLowerCase().includes(q) ? 2 : null;
 }
 
 // ── note context for the evaluator ──────────────────────────────────────────────
@@ -268,7 +358,7 @@ export async function fetchStudyHealth(): Promise<RestateHealth> {
   }
 }
 
-export type EvaluationResult = { ok: true; verdict: CritiqueVerdict } | { ok: false; message: string };
+export type EvaluationResult = { ok: true; verdict: StudyVerdict } | { ok: false; message: string };
 
 /** POST /api/study/evaluate. One JSON verdict, nothing streamed. Never throws. */
 export async function requestEvaluation(req: {
@@ -303,7 +393,7 @@ export async function requestEvaluation(req: {
     return { ok: false, message: "evaluation returned a non-JSON body" };
   }
   const obj = body === null || typeof body !== "object" ? {} : (body as Record<string, unknown>);
-  const verdict = asCritiqueVerdict(obj.verdict);
+  const verdict = asStudyVerdict(obj.verdict);
   if (verdict === null) return { ok: false, message: "evaluation returned an unusable verdict" };
   return { ok: true, verdict };
 }

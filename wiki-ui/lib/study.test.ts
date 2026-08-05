@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  asStudyVerdict,
   boldCandidates,
+  evaluationFeedbackMarkdown,
   findTermMatches,
+  glossaryEntries,
   loadStudyDraft,
+  parseEvaluationFeedback,
   saveStudyDraft,
   studyStorageKey,
   termContext,
+  termFilterRank,
   type StudyDraft,
 } from "./study";
 import type { KeyValueStore } from "./restate";
@@ -74,6 +79,85 @@ describe("termContext", () => {
   it("caps the assembled context", () => {
     const big = [{ title: "N", markdown: Array.from({ length: 200 }, () => "- entropy line").join("\n") }];
     expect(termContext(big, "entropy", 100).length).toBeLessThan(120);
+  });
+});
+
+describe("glossaryEntries", () => {
+  const md = [
+    "### Entropy",
+    "Average information per token.",
+    "",
+    "**Critique:** Solid.",
+    "",
+    "### Logit",
+    "A raw score.",
+    "",
+    "### RLHF",
+    "_None._",
+  ].join("\n");
+
+  it("parses term chunks, stripping critique and the empty placeholder", () => {
+    expect(glossaryEntries(md)).toEqual([
+      { term: "Entropy", definition: "Average information per token." },
+      { term: "Logit", definition: "A raw score." },
+      { term: "RLHF", definition: "" },
+    ]);
+  });
+
+  it("does not split on #### or on headings inside fences", () => {
+    const tricky = "### A\n#### not a term\n```\n### fenced\n```\nbody";
+    expect(glossaryEntries(tricky)).toHaveLength(1);
+  });
+});
+
+describe("termFilterRank", () => {
+  it("ranks name-prefix over name-substring over definition-only, null when absent", () => {
+    expect(termFilterRank("ent", "Entropy", "")).toBe(0);
+    expect(termFilterRank("ent", "Cross Entropy", "")).toBe(1);
+    expect(termFilterRank("bits", "Entropy", "related to bits required")).toBe(2);
+    expect(termFilterRank("zzz", "Entropy", "average information")).toBeNull();
+  });
+
+  it("matches every term on a blank query", () => {
+    expect(termFilterRank("  ", "Anything", "")).toBe(1);
+  });
+});
+
+describe("evaluation feedback round-trip", () => {
+  it("stores bullets then the suggestion, and parses them back apart", () => {
+    const md = evaluationFeedbackMarkdown({
+      grade: "partial",
+      points: ["no reward model", "post-training, not inference"],
+      suggestion: "Post-training that aligns outputs to human preferences via a reward model.",
+    });
+    expect(md).toContain("- no reward model");
+    expect(md).toContain("**Suggestion:**");
+    const parsed = parseEvaluationFeedback(md);
+    expect(parsed.body).toBe("- no reward model\n- post-training, not inference");
+    expect(parsed.suggestion).toContain("aligns outputs");
+  });
+
+  it("parses legacy feedback (no suggestion) as body-only", () => {
+    expect(parseEvaluationFeedback("A sentence.\n\nGaps:\n- x")).toEqual({
+      body: "A sentence.\n\nGaps:\n- x",
+      suggestion: null,
+    });
+  });
+});
+
+describe("asStudyVerdict", () => {
+  it("accepts the points+suggestion shape", () => {
+    const v = asStudyVerdict({ grade: "understood", points: ["load-bearing idea present"], suggestion: "A crisp definition." });
+    expect(v).toEqual({ grade: "understood", points: ["load-bearing idea present"], suggestion: "A crisp definition." });
+  });
+
+  it("folds a legacy summary/gaps reply into points and coerces a bad grade", () => {
+    const v = asStudyVerdict({ grade: "meh", summary: "Reworded only.", gaps: ["no mechanism"] });
+    expect(v).toEqual({ grade: "partial", points: ["Reworded only.", "no mechanism"], suggestion: null });
+  });
+
+  it("rejects a payload with nothing usable", () => {
+    expect(asStudyVerdict({ grade: "surface" })).toBeNull();
   });
 });
 
