@@ -1077,8 +1077,7 @@ export class CommandBus {
         throw e;
       }
 
-      // Success — fold our own envelopes in, advance bookkeeping, fan out. The
-      // committed head is the post-absorb version (after the append; rebases
+      // The committed head is the post-absorb version (after the append; rebases
       // already advanced it before this attempt).
       this.absorb(projection, envelopes);
       await this.maybeSnapshot(projection);

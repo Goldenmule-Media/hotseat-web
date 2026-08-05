@@ -67,7 +67,7 @@ describe("snapshot round-trip & fold equivalence", () => {
       text: "10k rows < 2s.",
     })).value as { caseId: string };
 
-    // Cross-page move: a question relocates brief → plan (ItemRemoved + ItemAdded).
+    // Cross-page move: a question relocates brief → plan (removeElement + addElement).
     const { questionId: q2 } = (await ws.mutate(brief, "askQuestion", {
       text: "Page size?",
     })).value as { questionId: string };

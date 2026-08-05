@@ -1,7 +1,7 @@
 /**
  * In-house FSM guard. typescript-fsm-inspired, ZERO dependency.
  * Pure functions over a declarative transition table. The event log — not any
- * `_current` field — is the source of truth for status; this only answers
+ * stored status field — is the source of truth for status; this only answers
  * "is this transition legal?" and "what's the resulting status?".
  */
 import type { ITransition } from "../api";

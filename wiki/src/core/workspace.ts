@@ -479,9 +479,8 @@ function applyContent(
  * a gap) but SKIPS any event with `version <= fromVersion` so a coarse-cursor
  * snapshot read stays idempotent. Returns the folded state.
  *
- * @param from optional snapshot state to fold the tail onto.
- * @param fromVersion the workspace version a `from` snapshot already covers; events
- *   with `version <= fromVersion` are skipped (defaults to -1 = consume all).
+ * @param from optional snapshot state to fold the tail onto, plus the workspace version
+ *   that snapshot already covers; events at or below it are skipped (absent = consume all).
  */
 export function foldWorkspace(
   events: readonly IEventEnvelope[],

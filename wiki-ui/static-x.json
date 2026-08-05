@@ -1,0 +1,37 @@
+{
+  "ts": {
+    "comments": {
+      "stale-refs": {
+        "input": {
+          "extraRoots": ["../wiki", "../wiki-models", "../wiki-mcp", "../wiki-server"]
+        },
+        "ignore": [
+          "Next.js",
+          "CodeMirror",
+          "IndexedDB",
+          "Comlink.expose",
+          "SharedWorkerGlobalScope",
+          "WebWorker",
+          "FetchError",
+          "DurableStreamError",
+          "compileStreaming",
+          "surroundContents",
+          "innerHTML",
+          "remotePatterns",
+          "fitView",
+          "SameSite",
+          "lib",
+          "$defs",
+          "ts_headline",
+          "StartSel",
+          "StopSel",
+          "globals.css",
+          "wiki.ts",
+          "mcp.json",
+          "ANTHROPIC_API_KEY",
+          "NEXT_PUBLIC_WIKI_MCP_URL"
+        ]
+      }
+    }
+  }
+}

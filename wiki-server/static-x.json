@@ -1,0 +1,20 @@
+{
+  "ts": {
+    "comments": {
+      "stale-refs": {
+        "input": {
+          "extraRoots": ["../wiki", "../wiki-models", "../wiki-mcp", "../wiki-mirror"]
+        },
+        "ignore": [
+          "TestServerOptions",
+          "DurableStreamTestServer",
+          "resource_metadata",
+          "SameSite",
+          "WIKI_SERVER_MODELS_DIR",
+          "access.json",
+          "bin"
+        ]
+      }
+    }
+  }
+}

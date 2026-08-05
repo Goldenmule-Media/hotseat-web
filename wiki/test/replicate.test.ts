@@ -20,7 +20,7 @@ const NS = "test"; // matches wikiOn's default namespace
 
 const cfg = (url: string): IStreamConfig => ({ baseUrl: url, namespace: NS });
 
-/** A deterministic id generator with a distinct prefix (so two wikis mint distinct eventIds). */
+/** A deterministic id generator with a distinct prefix (so two wikis mint distinct event ids). */
 function prefixedIds(prefix: string): () => string {
   let n = 0;
   return () => `${prefix}-${++n}`;
@@ -168,7 +168,7 @@ describe("replicateWorkspace: copy a workspace between servers", () => {
     const { wsId } = await seedWorkspace(srcWiki);
 
     // Pre-create a DIFFERENT workspace under the SAME id on the destination, using a
-    // distinct id generator so its events carry distinct eventIds.
+    // distinct id generator so its events carry distinct event ids.
     const intruder = wikiOn(dstServer.url, featurePageTypes, { ids: prefixedIds("dst") });
     opened.push(intruder);
     const dHandle = await intruder.createWorkspace({ name: "Different", id: wsId });

@@ -319,7 +319,7 @@ export const reparent: StructureHandler = (state, args) => {
   ];
 
   // If a position was requested, emit the resulting sibling order explicitly so
-  // the reducer doesn't have to guess. Compute the order after the move.
+  // the reducer doesn't have to guess.
   if (position !== undefined) {
     const siblings = childrenOf(state, newParent).filter((id) => id !== pageId);
     const clamped = Math.max(0, Math.min(position, siblings.length));

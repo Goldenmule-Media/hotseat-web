@@ -1,0 +1,38 @@
+{
+  "ts": {
+    "comments": {
+      "stale-refs": {
+        "input": {
+          "extraRoots": ["../wiki", "../wiki-models", "../wiki-server", "../wiki-mirror"]
+        },
+        "ignore": [
+          "Server",
+          "McpServer",
+          "McpServer.registerTool",
+          "StreamableHTTPServerTransport",
+          "callTool",
+          "Program",
+          "SourceFile",
+          "ScriptTarget",
+          "ScriptKind",
+          "Identifier",
+          "getStart",
+          "setParentNodes",
+          "FileMigrationProvider",
+          "Pool",
+          "BEGIN",
+          "COMMIT",
+          "ROLLBACK",
+          "resource_metadata",
+          "WIKI_MCP_PG_URL",
+          "marketplace.json",
+          "plugin.json",
+          "withShadow",
+          "bin",
+          "ns",
+          "T"
+        ]
+      }
+    }
+  }
+}

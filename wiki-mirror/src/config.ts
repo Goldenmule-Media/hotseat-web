@@ -68,7 +68,7 @@ interface IMirrorConfigFile {
 export const DEFAULT_CONFIG_FILENAME = "wiki-mirror.config.json";
 export const DEFAULT_STREAM_BASE_URL = "http://127.0.0.1:4437";
 export const DEFAULT_NAMESPACE = "default";
-/** Fixed default for the local health endpoint (4437 stream / 4438 control / 4439 mcp / 4440 mirror). */
+/** Local health endpoint, one past the trio (4437 stream / 4438 control / 4439 mcp / 4440 mirror). */
 export const DEFAULT_HEALTH_PORT = 4440;
 export const DEFAULT_HEALTH_HOST = "127.0.0.1";
 

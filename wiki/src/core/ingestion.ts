@@ -5,7 +5,7 @@
  * - `contentHash` — a tiny dependency-free FNV-1a hash for `code` source.
  * - `normalizeBlocks` — block normal form: merge adjacent same-mark text,
  *   canonical-sort marks. Runs at ingestion so render is a pure identity projection.
- * - `validateSections` — field-kind grammar, no-markdown-in-text-leaf, block normal
+ * - `validatePage` — field-kind grammar, no-markdown-in-text-leaf, block normal
  *   form, and ref integrity over the whole page.
  */
 import type {
@@ -43,7 +43,7 @@ export function contentHash(source: string): string {
 // Mark canonicalization
 // ────────────────────────────────────────────────────────────────────────────
 
-/** Fixed total order: emphasis < strong < link(href) by href. */
+/** The canonical total order: emphasis < strong < link(href) by href. */
 function markRank(m: Mark): string {
   if (m === "emphasis") return "0";
   if (m === "strong") return "1";

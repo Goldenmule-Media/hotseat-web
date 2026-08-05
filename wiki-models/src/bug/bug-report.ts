@@ -82,7 +82,8 @@ export const BugReport = definePageType({
   version: 1,
   initialStatus: "draft",
   statusTransitions: [
-    // The forward completeness edge the agent drives itself (gated by reportComplete).
+    // The forward completeness edge the agent drives itself (gated by the report fields'
+    // `requiredIn`).
     t("draft", "open", "open", { agency: "agent" }),
     // close/reopen carry no agency: closing claims a real fix landed — never auto-driven.
     t("open", "close", "closed"),

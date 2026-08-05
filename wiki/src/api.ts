@@ -958,7 +958,7 @@ export type FieldDecl =
 export interface SectionDecl {
   readonly name: string;
   readonly description?: string;
-  /** requiredSection — materialized empty at create. */
+  /** Materialized empty at create. */
   readonly required?: boolean;
   /** The write-gate. */
   readonly mutableIn?: readonly string[];

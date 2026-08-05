@@ -43,7 +43,7 @@ export interface ServerCredentials {
   readonly refreshTokenExp: number;
   /** The token endpoint the grant came from (re-used for refresh). */
   readonly tokenEndpoint: string;
-  /** The signed-in login — display only (`whoami`), never an ACL input. */
+  /** The signed-in login — display only, never an ACL input. */
   readonly user: string;
 }
 

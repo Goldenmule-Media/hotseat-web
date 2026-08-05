@@ -1,10 +1,10 @@
 "use client";
 
 /**
- * The tab side of the SharedWorker seam (feature: shared engine in a SharedWorker). Replaces
- * the old per-tab `getWiki()`: instead of constructing the engine + PGlite in this tab, it
- * connects to the ONE shared worker and exposes a small typed {@link WikiHost} facade over the
- * Comlink proxy. The facade hides Comlink entirely from the rest of the UI.
+ * The tab side of the SharedWorker seam (feature: shared engine in a SharedWorker). Instead of
+ * constructing a per-tab engine + PGlite, it connects to the ONE shared worker and exposes a
+ * small typed {@link WikiHost} facade over the Comlink proxy. The facade hides Comlink
+ * entirely from the rest of the UI.
  *
  * SharedWorker-only, no fallback (deliberate scope): where it (or module-worker support) is
  * absent we throw {@link UnsupportedBrowserError} and the app shows an unsupported-browser

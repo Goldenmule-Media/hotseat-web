@@ -17,7 +17,7 @@
  *    so it keeps rendering with an "(archived)" marker. Labels are render-derived, so renames reflow.
  *
  * Lifecycle is lightweight, no draft (docs follow code): born `current`, an agent flips
- * `current ⇄ stale` and records the `syncedCommit` it last verified against. Nodes live as
+ * `current ⇄ stale` and records the `sync.commit` it last verified against. Nodes live as
  * children of a `toc` "Architecture Overview" page, which renders the grouped index.
  */
 import type {
@@ -139,7 +139,7 @@ export const Architecture = definePageType({
     // Free-form design narrative: prose paragraphs + code blocks (type defs, pseudo-code) — the
     // high-value mechanics that don't fit the structured prose fields. Required so it materializes
     // empty on every page (incl. pre-existing) at fold time (no backfill), and so the addBlock-based
-    // commands have a section to target (a non-required section would never materialize → SectionNotFound).
+    // commands have a section to target (a non-required section would never materialize → SectionNotFoundError).
     details: { name: "Design notes", required: true, mutableIn: editable, fields: { body: { kind: "blocks" } } },
     codeReferences: {
       name: "Code references",

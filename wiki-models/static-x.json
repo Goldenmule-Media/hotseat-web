@@ -1,0 +1,12 @@
+{
+  "ts": {
+    "comments": {
+      "stale-refs": {
+        "input": {
+          "extraRoots": ["../wiki", "../wiki-mcp", "../wiki-server", "../wiki-mirror"]
+        },
+        "ignore": ["image"]
+      }
+    }
+  }
+}

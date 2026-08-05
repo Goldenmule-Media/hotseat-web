@@ -1,0 +1,19 @@
+{
+  "ts": {
+    "comments": {
+      "stale-refs": {
+        "input": {
+          "extraRoots": ["../wiki", "../wiki-models", "../wiki-mcp", "../wiki-server"]
+        },
+        "ignore": [
+          "fs",
+          "index.md",
+          "credentials.json",
+          "wiki-mirror.config.json",
+          "WIKI_MIRROR_CONFIG",
+          "bin"
+        ]
+      }
+    }
+  }
+}

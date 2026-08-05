@@ -151,7 +151,7 @@ describe("self-direction: nextActions roll-up + generic attention scan", () => {
     const qId = (ask.data as { result: { questionId: string } }).result.questionId;
     await drain();
 
-    // Generic cross-workspace attention scan (the rewritten openQuestions) finds it.
+    // The generic `attention` scan finds it — no element-type literal in the host.
     const att = (await run("attention", { workspaceId: wsId }, session)).data as Array<{ pageId: string; itemId: string; sectionKey: string }>;
     const hit = att.find((a) => a.itemId === qId);
     expect(hit).toBeDefined();

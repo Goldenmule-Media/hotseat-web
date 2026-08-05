@@ -18,7 +18,7 @@
  *    drops the engine's subclass identity + own-props (`WikiError.code`,
  *    `UnknownPageTypeError.types`, …). The worker therefore throws a plain {@link WikiErrorDTO}
  *    *object* (never an `Error`): Comlink clones it verbatim and re-throws it on the tab, so
- *    `classify()` keeps the connection-vs-schema distinction it is built on.
+ *    {@link classifyError} keeps the connection-vs-schema distinction it is built on.
  */
 import type {
   FsmDescriptor,
@@ -186,7 +186,7 @@ export interface WikiHostApi {
 /**
  * The wire shape of an engine error. A plain object — NOT an `Error` — so Comlink clones it
  * verbatim and re-throws it intact on the tab (an `Error` would be reduced to name/message/
- * stack, dropping `code`/`types`). `classify()` duck-types `code`/`types` off this.
+ * stack, dropping `code`/`types`). {@link classifyError} duck-types `code`/`types` off this.
  */
 export interface WikiErrorDTO {
   readonly __wikiError: true;

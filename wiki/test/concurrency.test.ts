@@ -161,7 +161,7 @@ describe("concurrency: two handles on one workspace", () => {
     expect((error as MutationNotAllowedError).command).toBe("answerQuestion");
 
     // The question is resolved exactly once in the authoritative log: one
-    // QuestionAnswered event total.
+    // element `answer` transition total.
     const fresh = await wikiC.openWorkspace(wsId);
     const answered = countOps(await fresh.history(), (op) => op.op === "transition" && op.level === "element" && op.event === "answer");
     expect(answered).toBe(1);

@@ -1466,7 +1466,7 @@ const renameSymbolTool: WikiTool = {
 
 /**
  * Read the CURRENT canonical source + hash for a `(page, section, field, block?)` code
- * target from the read-model page row. `bypassCache` is accepted for symmetry with a
+ * target from the read-model page row. `_bypassCache` is accepted for symmetry with a
  * post-conflict re-read; the read model is queried fresh either way.
  */
 async function readCode(

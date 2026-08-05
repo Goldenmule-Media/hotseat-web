@@ -19,7 +19,7 @@ import { createTestWiki, type ITestWiki } from "../src/testing";
 
 /**
  * Build the "Bulk export" brief at status `building` and return the handle +
- * the brief's page id. `rbacTitle` is the title of a sibling brief used as the
+ * the brief's page id. A sibling "Access control (RBAC)" brief is created as the
  * `depends-on` reference target.
  */
 async function buildBuildingBrief(

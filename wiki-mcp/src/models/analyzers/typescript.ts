@@ -2,17 +2,18 @@
  * The built-in TypeScript / JavaScript analyzer.
  *
  * A pure, deterministic symbol/reference indexer over canonical `code` source, built on
- * the **`typescript` compiler API** — `ts.createSourceFile` + a single deterministic
- * AST walk. It needs **no `Program` and no type-checker**: a symbol *index* and a
- * by-name *reference* index are syntactic, so a lone `SourceFile` parse suffices (and
- * keeps it cheap, side-effect-free, and version-pinned to the installed `typescript`).
+ * the **`typescript` compiler API**. INDEXING needs **no `Program` and no type-checker**:
+ * a symbol *index* and a by-name *reference* index are syntactic, so `ts.createSourceFile`
+ * plus a single deterministic AST walk suffices (cheap, side-effect-free, version-pinned
+ * to the installed `typescript`). RENAME is type-aware and does build a checker — see
+ * {@link singleFileProgram}.
  *
  * Determinism: the only inputs are the source string and the constant
  * `ScriptTarget`/`ScriptKind` we pick from `lang`; no wall-clock, no RNG, no filesystem.
  * Offsets are 0-based UTF-16 code-unit offsets into the canonical source (the units
  * `ts.Node` positions and `String.slice` share), so a `[defStart, defEnd)` slice is the
- * declaration's verbatim text. Cross-file / type-aware resolution (which `bar` a
- * reference binds to) is **Phase 3** — here references are keyed by name + offset.
+ * declaration's verbatim text. Cross-file resolution is deferred — the index keys
+ * references by name + offset, and a rename binds within ONE source unit.
  *
  * `typescript` is a host dependency of `wiki-mcp` and stays EXTERNAL in the tsdown
  * build (never bundled); `wiki` never sees it.
@@ -231,7 +232,8 @@ class TypeScriptAnalyzer implements ILanguageAnalyzer {
     const out: AnalyzerReference[] = [];
 
     // Every `Identifier` occurrence is a reference-by-name. Property/binding names are
-    // included (a rename's where-used set wants them); resolution to a binding is Phase 3.
+    // included (a rename's where-used set wants them); binding resolution is the checker's
+    // job in `rename`, not this index's.
     const visit = (node: ts.Node): void => {
       if (ts.isIdentifier(node)) {
         const text = node.text;

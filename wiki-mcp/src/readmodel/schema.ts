@@ -78,8 +78,8 @@ export interface OutlineTable {
  * `name` / `kind` / `def_start` / `def_end` carry the symbol and its `[def_start,
  * def_end)` offset range into canonical source. For a `lang` with **no** analyzer it
  * keeps the Phase-1 STUB shape — one location-only row with `name`/`kind`/offsets null
- * (the "opaque blob served verbatim" case). `source_hash` is the field/block
- * content hash (`def_hash`), so a rename reads source + hash straight from here.
+ * (the "opaque blob served verbatim" case). `source_hash` is the code field/block's own
+ * content hash, so a rename reads source + hash straight from here.
  */
 export interface SymbolIndexTable {
   workspace_id: string;
