@@ -2516,10 +2516,22 @@ button.restate-card-lead:hover {
   border-color: var(--accent);
 }
 .study-term-name {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: left;
+}
+/* Reference count, riding the row: how often the term appears in the notes. */
+.study-term-count {
+  flex: none;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.study-term-count.is-zero {
+  opacity: 0.45;
 }
 .study-badge-marked {
   color: var(--amber);
@@ -2545,8 +2557,103 @@ button.restate-card-lead:hover {
 .study-remove-confirm {
   color: var(--red);
 }
-/* Definitions are short — the note editor keeps the tall restate-draft height. */
-.restate-block-editor .restate-draft.study-definition {
-  min-height: 140px;
-  height: 30vh;
+
+/* Live markdown editing (the card IS the editor — CodeMirror live preview). */
+.study-cm {
+  min-height: 24px;
+}
+.study-cm .cm-editor {
+  background: transparent;
+}
+.study-cm .cm-scroller {
+  font-family: inherit;
+  line-height: 1.55;
+  overflow: visible; /* the page scrolls; the editor never does */
+}
+/* Term underlines inside the editor are spans, not <mark>s — same classes apply. */
+.study-cm .study-term {
+  background: transparent;
+}
+.study-collapse-btn {
+  flex: none;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+.study-collapse-btn:hover {
+  color: var(--text);
+}
+/* The title reads as a heading and edits in place — chrome appears only on focus. */
+.study-title-inline {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  color: var(--text);
+  font: inherit;
+  font-weight: 650;
+  padding: 0 2px;
+}
+.study-title-inline:hover {
+  border-bottom-color: var(--border);
+}
+.study-title-inline:focus {
+  outline: none;
+  border-bottom-color: var(--accent);
+}
+.study-definition-editor {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  padding: 8px 10px;
+}
+.study-definition-editor:focus-within {
+  border-color: var(--accent);
+}
+.study-save-state {
+  flex: none;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.study-save-state.is-error {
+  color: var(--red);
+}
+.study-save-error {
+  font-size: 13px;
+  margin: 0;
+}
+.study-composer-hint {
+  font-size: 13px;
+  margin: 0 0 6px;
+}
+.study-mutation-notice {
+  margin-bottom: 12px;
+}
+/* Accordion term rows: the expanded body hangs off its row. */
+.study-term-item {
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+.study-term-item.is-expanded {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--accent-dim) 30%, transparent);
+}
+.study-term-item.is-expanded .study-term-row {
+  border-color: transparent;
+}
+.study-term-item.is-expanded .study-term-row .study-term-name {
+  font-weight: 600;
+}
+.study-term-body {
+  padding: 0 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
