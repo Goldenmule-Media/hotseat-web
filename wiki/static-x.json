@@ -1,0 +1,30 @@
+{
+  "ts": {
+    "comments": {
+      "stale-refs": {
+        "input": {
+          "extraRoots": ["../wiki-models", "../wiki-mcp", "../wiki-server", "../wiki-ui"]
+        },
+        "ignore": [
+          "tsvector",
+          "to_tsvector",
+          "to_tsquery",
+          "websearch_to_tsquery",
+          "ts_rank",
+          "ts_headline",
+          "excluded",
+          "__x__",
+          "process_emphasis",
+          "etc2",
+          "tsc",
+          "toEqual",
+          "z",
+          "selectFrom",
+          "credentials.json",
+          "DurableStreamError",
+          "DurableStreamTestServer"
+        ]
+      }
+    }
+  }
+}
