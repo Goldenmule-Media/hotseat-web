@@ -492,6 +492,16 @@ function makeApi(conn: PortConn): WikiHostApi {
         throw toWikiErrorDTO(e);
       }
     },
+    async createPage(ws: WorkspaceId, type: string, title: string, parentId: PageId | null) {
+      const host = await ensureHost(ws);
+      try {
+        const h = await host.handle();
+        const { value } = await h.createPage(type, { title, parentId });
+        return value;
+      } catch (e) {
+        throw toWikiErrorDTO(e);
+      }
+    },
     async archivePage(ws: WorkspaceId, page: PageId) {
       const host = await ensureHost(ws);
       try {

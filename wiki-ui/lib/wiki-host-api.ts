@@ -167,6 +167,11 @@ export interface WikiHostApi {
   listSectionElements(ws: WorkspaceId, page: PageId, sectionKey: string): Promise<readonly SectionElementSummary[]>;
 
   mutate(ws: WorkspaceId, page: PageId, command: string, args: Record<string, unknown>): Promise<void>;
+  /** Create a page (plus any `requiredChildren`, recursively) as ONE atomic commit and
+   *  return the new page's id. Creation takes NO per-type args: the engine's structural
+   *  handler reads only type/title/parentId, and a type may not gate a field on its own
+   *  initial status (pages are born empty), so there is nothing else to collect. */
+  createPage(ws: WorkspaceId, type: string, title: string, parentId: PageId | null): Promise<PageId>;
   archivePage(ws: WorkspaceId, page: PageId): Promise<void>;
   unarchivePage(ws: WorkspaceId, page: PageId): Promise<void>;
   /** Rename the workspace (its display name; the id never changes). */

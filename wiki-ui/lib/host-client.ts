@@ -60,6 +60,7 @@ export interface WikiHost {
   renderElement(ws: WorkspaceId, page: PageId, sectionKey: string, elementId: string): Promise<string>;
   listSectionElements(ws: WorkspaceId, page: PageId, sectionKey: string): Promise<readonly SectionElementSummary[]>;
   mutate(ws: WorkspaceId, page: PageId, command: string, args: Record<string, unknown>): Promise<void>;
+  createPage(ws: WorkspaceId, type: string, title: string, parentId: PageId | null): Promise<PageId>;
   archivePage(ws: WorkspaceId, page: PageId): Promise<void>;
   unarchivePage(ws: WorkspaceId, page: PageId): Promise<void>;
   renameWorkspace(ws: WorkspaceId, name: string): Promise<void>;
@@ -158,6 +159,7 @@ async function connect(): Promise<WikiHost> {
     renderElement: (ws, page, sectionKey, elementId) => guard(remote.renderElement(ws, page, sectionKey, elementId)),
     listSectionElements: (ws, page, sectionKey) => guard(remote.listSectionElements(ws, page, sectionKey)),
     mutate: (ws, page, command, args) => guard(remote.mutate(ws, page, command, args)),
+    createPage: (ws, type, title, parentId) => guard(remote.createPage(ws, type, title, parentId)),
     archivePage: (ws, page) => guard(remote.archivePage(ws, page)),
     unarchivePage: (ws, page) => guard(remote.unarchivePage(ws, page)),
     renameWorkspace: (ws, name) => guard(remote.renameWorkspace(ws, name)),

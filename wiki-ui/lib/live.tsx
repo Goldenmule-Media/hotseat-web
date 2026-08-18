@@ -402,6 +402,9 @@ export function usePageMutator(workspaceId: WorkspaceId, pageId: PageId): PageMu
 }
 
 export interface StructuralMutator {
+  /** Create a page (plus any `requiredChildren`, one atomic commit). Resolves the new page's
+   *  id, or `null` when the engine rejected it (see {@link StructuralMutator.error}). */
+  create: (type: string, title: string, parentId: PageId | null) => Promise<PageId | null>;
   /** Archive a page — hides it (and its subtree) from default tree views. Resolves `true` on commit. */
   archive: (pageId: PageId) => Promise<boolean>;
   /** Unarchive a page — restores it to default tree views. */
@@ -412,34 +415,49 @@ export interface StructuralMutator {
 }
 
 /**
- * Structural writes for the sidebar (archive / unarchive). Like {@link usePageMutator}, these
- * go to the worker; the committed event flows back through the tail and re-projects the tree,
- * so callers never refresh a view themselves.
+ * Structural writes for the sidebar (create / archive / unarchive). Like {@link usePageMutator},
+ * these go to the worker; the committed event flows back through the tail and re-projects the
+ * tree, so callers never refresh a view themselves.
  */
 export function useStructuralMutator(workspaceId: WorkspaceId): StructuralMutator {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Returns a discriminated result rather than a bare value so a write that legitimately
+  // resolves `undefined` (archive) stays distinguishable from a rejection.
   const call = useCallback(
-    async (fn: (h: WikiHost) => Promise<unknown>): Promise<boolean> => {
+    async <T,>(fn: (h: WikiHost) => Promise<T>): Promise<{ readonly ok: true; readonly value: T } | { readonly ok: false }> => {
       setPending(true);
       setError(null);
       try {
         const h = await getHost();
-        await fn(h);
+        const value = await fn(h);
         setPending(false);
-        return true;
+        return { ok: true, value };
       } catch (e) {
         setError(classifyError(e).message);
         setPending(false);
-        return false;
+        return { ok: false };
       }
     },
     [],
   );
 
-  const archive = useCallback((pageId: PageId) => call((h) => h.archivePage(workspaceId, pageId)), [call, workspaceId]);
-  const unarchive = useCallback((pageId: PageId) => call((h) => h.unarchivePage(workspaceId, pageId)), [call, workspaceId]);
+  const create = useCallback(
+    async (type: string, title: string, parentId: PageId | null): Promise<PageId | null> => {
+      const r = await call((h) => h.createPage(workspaceId, type, title, parentId));
+      return r.ok ? r.value : null;
+    },
+    [call, workspaceId],
+  );
+  const archive = useCallback(
+    async (pageId: PageId) => (await call((h) => h.archivePage(workspaceId, pageId))).ok,
+    [call, workspaceId],
+  );
+  const unarchive = useCallback(
+    async (pageId: PageId) => (await call((h) => h.unarchivePage(workspaceId, pageId))).ok,
+    [call, workspaceId],
+  );
 
-  return { archive, unarchive, pending, error };
+  return { create, archive, unarchive, pending, error };
 }
