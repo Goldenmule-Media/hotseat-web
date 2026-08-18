@@ -2483,6 +2483,34 @@ button.restate-card-lead:hover {
 .study-filter-mark {
   margin-top: 8px;
 }
+/* The term list's add affordance: a button at the top of the list that swaps itself for
+   an in-list composer. */
+.study-add-term-open {
+  align-self: flex-start;
+}
+.study-add-term {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 10px;
+}
+.study-add-term input {
+  width: 100%;
+  min-width: 0;
+}
+.study-add-term-dup {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.study-add-term-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
 .study-rail-head {
   font-size: 12px;
   text-transform: uppercase;

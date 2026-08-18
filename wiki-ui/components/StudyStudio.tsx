@@ -714,6 +714,63 @@ function TermRowBody({
   );
 }
 
+/** The term list's own way in: the rail's `+ Add term` button swaps itself for this
+ *  in-list composer. A term already in the glossary would be refused model-side, so the
+ *  button opens that row instead of marking a duplicate. */
+function TermComposer({
+  terms,
+  busy,
+  onAdd,
+  onReveal,
+  onClose,
+}: {
+  terms: readonly TermRef[];
+  busy: boolean;
+  onAdd: (term: string) => void;
+  onReveal: (termId: string) => void;
+  onClose: () => void;
+}): React.JSX.Element {
+  const [text, setText] = useState("");
+  const clean = text.trim().replace(/\s+/g, " ");
+  const dup = clean === "" ? undefined : terms.find((t) => t.term.trim().toLowerCase() === clean.toLowerCase());
+  const submit = (): void => {
+    if (clean === "" || busy) return;
+    if (dup === undefined) onAdd(clean);
+    else onReveal(dup.id);
+    onClose();
+  };
+  return (
+    <form
+      className="study-add-term"
+      onSubmit={(e) => {
+        e.preventDefault();
+        submit();
+      }}
+    >
+      <input
+        type="text"
+        value={text}
+        autoFocus
+        placeholder="New term…"
+        aria-label="New glossary term"
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") onClose();
+        }}
+      />
+      {dup !== undefined && <p className="study-add-term-dup">Already in the glossary.</p>}
+      <div className="study-add-term-actions">
+        <button type="button" className="restate-cancel" onClick={onClose}>
+          Cancel
+        </button>
+        <button type="submit" className="restate-gap-btn" disabled={busy || clean === ""}>
+          {dup === undefined ? "Add term" : `Open “${dup.term}”`}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 // ── the studio ──────────────────────────────────────────────────────────────────
 
 export function StudyStudio({
@@ -765,6 +822,8 @@ export function StudyStudio({
   const [railCollapsed, setRailCollapsed] = useState(false);
   /** After markTerm commits, expand the term once its element appears (host.mutate returns no result). */
   const [pendingTermKey, setPendingTermKey] = useState<string | null>(null);
+  /** The in-list term composer is open (the rail's `+ Add term` button opened it). */
+  const [addingTerm, setAddingTerm] = useState(false);
   /** Floating "add to glossary" action for a text selection inside the notes column. */
   const [floatMark, setFloatMark] = useState<{ text: string; x: number; y: number } | null>(null);
   const studioRef = useRef<HTMLDivElement | null>(null);
@@ -1703,12 +1762,33 @@ export function StudyStudio({
             )}
             </div>
             <div className="study-rail-body">
+            {capturing && !filtering && (
+              addingTerm ? (
+                <TermComposer
+                  terms={termRefs}
+                  busy={mutating}
+                  onAdd={(t) => void onMarkTerm(t)}
+                  onReveal={revealTerm}
+                  onClose={() => setAddingTerm(false)}
+                />
+              ) : (
+                <button
+                  type="button"
+                  className="restate-gap-btn study-add-term-open"
+                  disabled={mutating}
+                  title="Add a term to the glossary"
+                  onClick={() => setAddingTerm(true)}
+                >
+                  + Add term
+                </button>
+              )
+            )}
             {glossary.loading && glossary.elements.length === 0 ? (
               <p className="muted">Loading glossary…</p>
             ) : glossary.elements.length === 0 && !filtering ? (
               <p className="muted">
-                No terms yet. Select text in a note, click a suggested <span className="study-chip study-chip-demo">+ term</span> chip, or type
-                a term above and mark it.
+                No terms yet. Hit <strong>+ Add term</strong> above, select text in a note, or click a suggested{" "}
+                <span className="study-chip study-chip-demo">+ term</span> chip.
               </p>
             ) : filtering ? (
               <>
