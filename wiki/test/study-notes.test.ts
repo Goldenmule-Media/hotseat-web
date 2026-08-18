@@ -184,6 +184,47 @@ describe("study-notes model", () => {
     expect(scalarOf(el, "grade")).toBe("");
   });
 
+  it("accepts a term only on the human's say-so, and reopens it with its verdict intact", async () => {
+    const page = await newPage("Accept");
+    const id = await mark(page, "Attention");
+    // Accepting an undefined term is refused — there is nothing to understand yet.
+    await expect(ws.mutate(page, "acceptTerm", { termId: id })).rejects.toThrow(/define it before accepting/);
+
+    await ws.mutate(page, "defineTerm", { termId: id, markdown: "Weighing every token against every other." });
+    await ws.mutate(page, "recordEvaluation", { termId: id, grade: "understood", markdown: "Right idea." });
+    // The critic's verdict does NOT accept it: that stays the human's call.
+    expect((await termsOf(page))[0]!.status).toBe("checked");
+
+    await ws.mutate(page, "acceptTerm", { termId: id });
+    let el = (await termsOf(page))[0]!;
+    expect(el.status).toBe("accepted");
+    expect(scalarOf(el, "grade")).toBe("understood");
+
+    // Reopening keeps definition and verdict — neither changed.
+    await ws.mutate(page, "reopenTerm", { termId: id });
+    el = (await termsOf(page))[0]!;
+    expect(el.status).toBe("defined");
+    expect(scalarOf(el, "grade")).toBe("understood");
+    await expect(ws.mutate(page, "reopenTerm", { termId: id })).rejects.toThrow(/only an accepted term reopens/);
+
+    // Editing the text drops the now-stale verdict.
+    await ws.mutate(page, "defineTerm", { termId: id, markdown: "Every token weighs every other token." });
+    el = (await termsOf(page))[0]!;
+    expect(el.status).toBe("defined");
+    expect(scalarOf(el, "grade")).toBe("");
+    expect(blocksLen(el, "feedback")).toBe(0);
+  });
+
+  it("accepts an unevaluated term, and an edit while accepted returns it to defined", async () => {
+    const page = await newPage("Accept unevaluated");
+    const id = await mark(page, "Softmax", "Turns scores into a distribution.");
+    await ws.mutate(page, "acceptTerm", { termId: id });
+    expect((await termsOf(page))[0]!.status).toBe("accepted");
+
+    await ws.mutate(page, "defineTerm", { termId: id, markdown: "Exponentiate, then normalise." });
+    expect((await termsOf(page))[0]!.status).toBe("defined");
+  });
+
   it("gates finish on every term being defined, and reopens", async () => {
     const page = await newPage("Finish gate");
     await capture(page, "Notes", "Some notes.");
@@ -210,8 +251,11 @@ describe("study-notes model", () => {
     const items = await view.attentionItems();
     expect(items.some((i) => i.elementId === id && i.status === "marked")).toBe(true);
 
-    // Defining it clears the attention flag.
+    // Defining it is not the end of it — the term waits for the human to accept it.
     await ws.mutate(page, "defineTerm", { termId: id, markdown: "The exponential of cross entropy." });
+    expect((await (await ws.page(page)).attentionItems()).some((i) => i.elementId === id)).toBe(true);
+
+    await ws.mutate(page, "acceptTerm", { termId: id });
     expect((await (await ws.page(page)).attentionItems()).some((i) => i.elementId === id)).toBe(false);
   });
 

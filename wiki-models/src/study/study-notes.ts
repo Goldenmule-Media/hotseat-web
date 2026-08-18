@@ -153,6 +153,15 @@ function clearEvaluation(termId: string): SectionOp[] {
   ];
 }
 
+/** What a term must do BEFORE its content changes: a settled term (checked or accepted)
+ *  steps back to `defined`, and a verdict about the old text goes with it. */
+function beforeContentEdit(el: DeepReadonly<IItem>): SectionOp[] {
+  const ops: SectionOp[] = [];
+  if (el.status === "checked" || el.status === "accepted") ops.push(termTransition(el.id, "redefine"));
+  if (scalarOf(el, "grade") !== "") ops.push(...clearEvaluation(el.id));
+  return ops;
+}
+
 const allTermsDefined: Precondition = (page) => {
   const open = termsOf(page).filter((e) => e.status === "marked");
   return open.length === 0
@@ -173,8 +182,11 @@ export const StudyNotes = definePageType({
     "refused). The human DEFINES each term in their own words in the Study studio — an agent never authors " +
     "definitions, that would defeat the point. `recordEvaluation` is the studio critic's verb: it records " +
     "an AI evaluation of the human's definition (grade + feedback) and moves the term to `checked`. NEVER " +
-    "call it with a grade you did not actually produce by critiquing the definition. Redefining a checked " +
+    "call it with a grade you did not actually produce by critiquing the definition. Redefining a settled " +
     "term honestly returns it to `defined` and clears the stale verdict.\n\n" +
+    "A term is WORKING (`marked` | `defined` | `checked`) until the human accepts it: `acceptTerm` is their " +
+    "\"I understand this\" and the only way to `accepted`, `reopenTerm` puts it back. Nothing an agent or " +
+    "the critic does moves a term out of the working set.\n\n" +
     "`finish` is a human gate, refused while any term is still undefined; `reopen` resumes capturing.",
   version: 1,
   initialStatus: "capturing",
@@ -222,12 +234,18 @@ export const StudyNotes = definePageType({
           t("marked", "define", "defined"),
           t("defined", "evaluate", "checked"),
           t("checked", "redefine", "defined"),
+          // `accept` is the human's own "I understand this" — the only way out of the
+          // working set. Available with or without a critic verdict.
+          t("defined", "accept", "accepted"),
+          t("checked", "accept", "accepted"),
+          t("accepted", "reopen", "defined"),
+          t("accepted", "redefine", "defined"),
         ],
       },
       // Content edits stop at `checked`: editing an evaluated term must `redefine` first,
       // so a grade can never silently attest to text it did not judge.
       mutableIn: ["marked", "defined"],
-      awaitsHuman: (el) => el.status === "marked",
+      awaitsHuman: (el) => el.status !== "accepted",
     },
   },
   sectionSet: { mode: "closed" },
@@ -411,10 +429,7 @@ export const StudyNotes = definePageType({
       produces: (page, args, ctx) => {
         const a = args as { termId: string; markdown: string };
         const el = termAt(page, a.termId);
-        const ops: SectionOp[] = [];
-        if (el.status === "checked") {
-          ops.push(termTransition(a.termId, "redefine"), ...clearEvaluation(a.termId));
-        }
+        const ops: SectionOp[] = beforeContentEdit(el);
         ops.push({
           op: "setElementField",
           section: "glossary",
@@ -440,10 +455,7 @@ export const StudyNotes = definePageType({
         const el = termAt(page, a.termId);
         const terms = termsOf(page);
         requireFreshTerm(terms, term, a.termId);
-        const ops: SectionOp[] = [];
-        if (el.status === "checked") {
-          ops.push(termTransition(a.termId, "redefine"), ...clearEvaluation(a.termId));
-        }
+        const ops: SectionOp[] = beforeContentEdit(el);
         ops.push(
           { op: "setElementField", section: "glossary", field: "terms", id: a.termId, elementField: "title", value: { kind: "prose", value: term } },
           { op: "moveElement", section: "glossary", field: "terms", id: a.termId, toIndex: alphabeticalIndex(terms, term, a.termId) },
@@ -483,6 +495,37 @@ export const StudyNotes = definePageType({
           { op: "setElementField", section: "glossary", field: "terms", id: a.termId, elementField: "feedback", value: { kind: "blocks", blocks: parseBlocks(a.markdown, ctx.newId) } },
           termTransition(a.termId, "evaluate"),
         ];
+      },
+    },
+    acceptTerm: {
+      description:
+        "The HUMAN's own call that they understand a term: it leaves the working set for the accepted " +
+        "glossary. Runs on a `defined` or `checked` term (a critic verdict is welcome but not required). " +
+        "NEVER call this on the human's behalf — only they can say they understand something.",
+      args: zodSchema(z.object({ termId: z.string() })),
+      target: { section: "glossary", field: "terms" },
+      produces: (page, args) => {
+        const a = args as { termId: string };
+        const el = termAt(page, a.termId);
+        if (el.status === "marked") {
+          throw new InvariantViolationError(`"${titleOf(el)}" has no definition yet — define it before accepting it`);
+        }
+        return [termTransition(a.termId, "accept")];
+      },
+    },
+    reopenTerm: {
+      description:
+        "Take an accepted term back into the working set — the human decided it is not settled after all. " +
+        "The definition and the last verdict are kept, since neither changed.",
+      args: zodSchema(z.object({ termId: z.string() })),
+      target: { section: "glossary", field: "terms" },
+      produces: (page, args) => {
+        const a = args as { termId: string };
+        const el = termAt(page, a.termId);
+        if (el.status !== "accepted") {
+          throw new InvariantViolationError(`"${titleOf(el)}" is ${el.status ?? "statusless"} — only an accepted term reopens`);
+        }
+        return [termTransition(a.termId, "reopen")];
       },
     },
     finish: {
