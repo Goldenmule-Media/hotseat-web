@@ -2415,6 +2415,10 @@ button.restate-card-lead:hover {
 }
 .study-term-checked {
   border-bottom-style: solid;
+  border-bottom-color: var(--accent);
+}
+.study-term-accepted {
+  border-bottom-style: solid;
   border-bottom-color: var(--green);
 }
 /* The floating "add to glossary" action over a text selection. */
@@ -2482,6 +2486,12 @@ button.restate-card-lead:hover {
 }
 .study-filter-mark {
   margin-top: 8px;
+}
+/* Accept / reopen: the human's own move between the working and accepted groups. */
+.study-term-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
 }
 /* The term list's add affordance: a button at the top of the list that swaps itself for
    an in-list composer. */
@@ -2572,6 +2582,10 @@ button.restate-card-lead:hover {
 .study-badge-defined {
   color: var(--accent);
   border-color: var(--accent);
+}
+.study-badge-accepted {
+  color: var(--green);
+  border-color: var(--green);
 }
 .study-badge-running {
   color: var(--accent);

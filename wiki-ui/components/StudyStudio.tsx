@@ -11,7 +11,9 @@
  * Every glossary term's occurrences are highlighted in the rendered bodies by status
  * (needs-definition / defined / checked), and clicking one jumps to that term on the
  * right. The RIGHT is the glossary as an accordion: clicking a term expands it IN PLACE
- * into its definition editor (occurrences, Save & evaluate, the critic's verdict, remove).
+ * into its definition editor (occurrences, Save & evaluate, the critic's verdict, remove). The list has two groups —
+ * working and accepted — and ONLY the human's "Mark as understood" moves a term between
+ * them, so a row never jumps while it is being worked on.
  *
  * Marking terms is the fluid part: select any text in a note and a floating "add to
  * glossary" action appears; a note's `**bold**` runs (the learner's existing habit) are
@@ -121,6 +123,7 @@ const STATUS_LABEL: Record<string, string> = {
   marked: "Needs definition",
   defined: "Defined",
   checked: "Checked",
+  accepted: "Accepted",
 };
 
 /** Seconds since `startedAt` (null = not running), ticking once a second. */
@@ -552,6 +555,7 @@ function termBadge(el: SectionElementSummary, running: boolean, queued: boolean)
   const grade = gradeOf(el);
   if (running) return <span className="restate-badge study-badge-running">Evaluating…</span>;
   if (queued) return <span className="restate-badge">Queued</span>;
+  if (el.status === "accepted") return <span className="restate-badge study-badge-accepted">✓ Accepted</span>;
   if (el.status === "checked" && grade !== "") {
     return <span className={`restate-badge restate-grade-${grade}`}>{GRADE_LABEL[grade as CritiqueGrade] ?? grade}</span>;
   }
@@ -575,6 +579,8 @@ function TermRowBody({
   queued,
   startedAt,
   onCancelEval,
+  onAccept,
+  onReopen,
 }: {
   workspaceId: WorkspaceId;
   pageId: PageId;
@@ -591,6 +597,9 @@ function TermRowBody({
   queued: boolean;
   startedAt: number | null;
   onCancelEval: () => void;
+  /** The human's "I understand this" — the only exit from the working set. */
+  onAccept: () => void;
+  onReopen: () => void;
 }): React.JSX.Element {
   const { markdown, loading } = useElementMarkdown(workspaceId, pageId, GLOSSARY_KEY, el.id);
   const parsedBody = markdown === null ? null : splitRenderedElement(markdown).body;
@@ -693,7 +702,7 @@ function TermRowBody({
         </div>
       )}
 
-      {!running && !queued && evalState === undefined && termStatus === "checked" && storedFeedback !== null && (
+      {!running && !queued && evalState === undefined && termStatus !== "marked" && grade !== "" && storedFeedback !== null && (
         <div className="restate-critique">
           <div className="restate-critique-head">
             <span>
@@ -708,6 +717,26 @@ function TermRowBody({
             )}
             {storedFeedback.suggestion !== null && <Suggestion text={storedFeedback.suggestion} />}
           </div>
+        </div>
+      )}
+
+      {capturing && termStatus !== "marked" && (
+        <div className="study-term-actions">
+          {termStatus === "accepted" ? (
+            <button type="button" className="restate-cancel" title="Put this term back in the working set" onClick={onReopen}>
+              Reopen
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="restate-gap-btn"
+              disabled={running || queued}
+              title={running || queued ? "The evaluation lands in a moment — read it first" : "Move this term to the accepted glossary"}
+              onClick={onAccept}
+            >
+              Mark as understood
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -1263,27 +1292,18 @@ export function StudyStudio({
   const termLastSaved = useRef(new Map<string, string>());
   const termDraftsRef = useRef(termDrafts);
   const criticReadyRef = useRef(criticReady);
-  const glossaryElementsRef = useRef(glossary.elements);
   useEffect(() => {
     termDraftsRef.current = termDrafts;
   }, [termDrafts]);
   useEffect(() => {
     criticReadyRef.current = criticReady;
   }, [criticReady]);
-  useEffect(() => {
-    glossaryElementsRef.current = glossary.elements;
-  }, [glossary.elements]);
-  /** A just-saved MARKED term: once its element lands as defined, follow it to its new
-   *  place in the list (it changes groups) and keep it open. */
-  const [pendingDefinedReveal, setPendingDefinedReveal] = useState<string | null>(null);
-
   /** Commit a term's definition (if dirty) — fired on editor BLUR, never mid-typing —
    *  then AUTO-EVALUATE the settled text. */
   const flushTermSave = useCallback(
     async (termId: string): Promise<void> => {
       const markdown = (termDraftsRef.current[termId] ?? "").trim();
       if (markdown === "" || termLastSaved.current.get(termId) === markdown) return;
-      const wasMarked = glossaryElementsRef.current.find((e) => e.id === termId)?.status === "marked";
       // A stale in-flight evaluation is about text that no longer exists.
       cancelEval(termId);
       setTermSaveStates((s) => ({ ...s, [termId]: { state: "saving" } }));
@@ -1292,7 +1312,6 @@ export function StudyStudio({
         await h.mutate(workspaceId, pageId, "defineTerm", { termId, markdown });
         termLastSaved.current.set(termId, markdown);
         setTermSaveStates((s) => ({ ...s, [termId]: { state: "saved" } }));
-        if (wasMarked) setPendingDefinedReveal(termId);
         if (criticReadyRef.current) enqueueEval(termId, markdown);
       } catch (e) {
         setTermSaveStates((s) => ({ ...s, [termId]: { state: "error", message: errText(e) } }));
@@ -1300,21 +1319,6 @@ export function StudyStudio({
     },
     [workspaceId, pageId, cancelEval, enqueueEval],
   );
-
-  // The saved term re-groups from "Needs definition" to "Defined" on the live tail —
-  // scroll to where it landed, still expanded.
-  useEffect(() => {
-    if (pendingDefinedReveal === null) return;
-    const hit = glossary.elements.find((e) => e.id === pendingDefinedReveal);
-    if (hit === undefined) {
-      setPendingDefinedReveal(null);
-      return;
-    }
-    if (hit.status !== "marked") {
-      revealTerm(hit.id);
-      setPendingDefinedReveal(null);
-    }
-  }, [pendingDefinedReveal, glossary.elements, revealTerm]);
 
   // Best effort: leaving the studio commits the definition still open in the editor.
   const expandedTermRef = useRef(expandedTerm);
@@ -1381,8 +1385,10 @@ export function StudyStudio({
 
   const hidden = useMemo(() => hiddenByCollapse(notes.elements, collapsed), [notes.elements, collapsed]);
   const marked = glossary.elements.filter((e) => e.status === "marked");
-  const defined = glossary.elements.filter((e) => e.status === "defined");
-  const checked = glossary.elements.filter((e) => e.status === "checked");
+  /** The list has exactly two groups, and only the human's accept moves a term between
+   *  them — defining a term or a verdict landing must never make a row jump. */
+  const working = glossary.elements.filter((e) => e.status !== "accepted");
+  const accepted = glossary.elements.filter((e) => e.status === "accepted");
   const evaluating = Object.keys(evalRuns).length > 0 || evalQueue.length > 0;
   const total = glossary.elements.length;
 
@@ -1507,6 +1513,8 @@ export function StudyStudio({
             queued={queued}
             startedAt={evalRuns[el.id]?.startedAt ?? null}
             onCancelEval={() => cancelEval(el.id)}
+            onAccept={() => void runMutation("acceptTerm", { termId: el.id })}
+            onReopen={() => void runMutation("reopenTerm", { termId: el.id })}
           />
         )}
       </li>
@@ -1537,7 +1545,7 @@ export function StudyStudio({
         <p className="restate-progress">
           {notes.elements.length} note{notes.elements.length === 1 ? "" : "s"} · {total} term{total === 1 ? "" : "s"}
           {marked.length > 0 && <span className="study-bar-marked"> · {marked.length} need{marked.length === 1 ? "s" : ""} a definition</span>}
-          {checked.length > 0 && ` · ${checked.length} checked`}
+          {accepted.length > 0 && ` · ${accepted.length} accepted`}
           {evaluating && <span className="study-bar-evaluating"> · evaluating…</span>}
         </p>
         {(notes.error !== null || glossary.error !== null) && (
@@ -1814,22 +1822,16 @@ export function StudyStudio({
               </>
             ) : (
               <>
-                {marked.length > 0 && (
+                {working.length > 0 && (
                   <>
-                    <h3 className="study-rail-head">Needs definition ({marked.length})</h3>
-                    <ul className="study-term-list">{sortRows(marked).map(termRow)}</ul>
+                    <h3 className="study-rail-head">Working ({working.length})</h3>
+                    <ul className="study-term-list">{sortRows(working).map(termRow)}</ul>
                   </>
                 )}
-                {defined.length > 0 && (
+                {accepted.length > 0 && (
                   <>
-                    <h3 className="study-rail-head">Defined ({defined.length})</h3>
-                    <ul className="study-term-list">{sortRows(defined).map(termRow)}</ul>
-                  </>
-                )}
-                {checked.length > 0 && (
-                  <>
-                    <h3 className="study-rail-head">Checked ({checked.length})</h3>
-                    <ul className="study-term-list">{sortRows(checked).map(termRow)}</ul>
+                    <h3 className="study-rail-head">Accepted ({accepted.length})</h3>
+                    <ul className="study-term-list">{sortRows(accepted).map(termRow)}</ul>
                   </>
                 )}
               </>
