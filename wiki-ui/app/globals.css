@@ -3033,3 +3033,26 @@ button.restate-card-lead:hover {
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* Per-row "new child page" action — revealed on hover, like the archived list's restore
+   button, so the tree stays quiet at rest. Kept reachable by keyboard via :focus-visible. */
+.tree-add {
+  flex: 0 0 auto;
+  opacity: 0;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+.tree-row:hover .tree-add,
+.tree-add:focus-visible {
+  opacity: 1;
+}
+.tree-add:hover {
+  color: var(--text);
+  background: var(--accent-dim);
+}

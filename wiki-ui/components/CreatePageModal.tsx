@@ -25,9 +25,12 @@ import { ModalPortal } from "./ModalPortal";
 
 export function CreatePageModal({
   workspaceId,
+  initialParentId = null,
   onClose,
 }: {
   workspaceId: WorkspaceId;
+  /** Preselected parent — set when opened from a tree row's `+`. Null = top level. */
+  initialParentId?: PageId | null;
   onClose: () => void;
 }): React.JSX.Element {
   const router = useRouter();
@@ -42,7 +45,7 @@ export function CreatePageModal({
   const [type, setType] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   // "" is the top level (parentId null) — a select can't carry null as a value.
-  const [parent, setParent] = useState("");
+  const [parent, setParent] = useState<string>(initialParentId ?? "");
 
   // Picking a type is the first decision; move the cursor straight on to naming it.
   useEffect(() => {

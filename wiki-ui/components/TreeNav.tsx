@@ -18,6 +18,7 @@ import { useCollapsed, type CollapsedState } from "../lib/useCollapsed";
 import { useShowArchived } from "../lib/useShowArchived";
 import { useStructuralMutator } from "../lib/live";
 import { isTerminalNodeStatus } from "../lib/terminal";
+import { CreatePageModal } from "./CreatePageModal";
 
 /** The status chip next to a sidebar title — visually distinct when the status is terminal
  *  (sealed/final), so finished pages read differently at a glance. */
@@ -33,6 +34,8 @@ type DragState = { id: string; parentKey: string } | null;
 interface TreeCtx {
   workspaceId: WorkspaceId;
   activePageId: string | null;
+  /** Open the new-page modal with this row preselected as the parent. */
+  createUnder: (pageId: PageId) => void;
   collapse: CollapsedState;
   order: ChildOrder;
   drag: DragState;
@@ -190,6 +193,21 @@ function TreeItem({
           <span className="tree-title">{node.displayTitle ?? node.title}</span>
           <StatusChip node={node} />
         </span>
+        {/* The whole row is one click target, so this action must not bubble into it. */}
+        <button
+          type="button"
+          className="tree-add"
+          title="New page under this one"
+          aria-label={`New page under ${node.title}`}
+          draggable={false}
+          onClick={(e) => {
+            e.stopPropagation();
+            ctx.createUnder(node.id as PageId);
+          }}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          +
+        </button>
       </div>
       {hasChildren && !collapsed && <TreeChildren parentKey={id} siblings={node.children} ctx={ctx} />}
     </li>
@@ -268,13 +286,25 @@ export function TreeNav({
   const archivedView = useShowArchived(workspaceId);
   const [drag, setDrag] = useState<DragState>(null);
   const [overId, setOverId] = useState<string | null>(null);
+  // The row whose `+` was clicked — the new page's preselected parent.
+  const [createParent, setCreateParent] = useState<PageId | null>(null);
 
   if (tree === null) return <p className="muted">Loading tree…</p>;
   if (tree.children.length === 0) {
     return <p className="muted">No pages yet — use + next to the workspace name to create one.</p>;
   }
 
-  const ctx: TreeCtx = { workspaceId, activePageId, collapse, order, drag, setDrag, overId, setOverId };
+  const ctx: TreeCtx = {
+    workspaceId,
+    activePageId,
+    collapse,
+    order,
+    drag,
+    setDrag,
+    overId,
+    setOverId,
+    createUnder: setCreateParent,
+  };
 
   return (
     <div className="tree-wrap">
@@ -285,6 +315,13 @@ export function TreeNav({
         expanded={archivedView.show}
         onToggle={archivedView.toggle}
       />
+      {createParent !== null && (
+        <CreatePageModal
+          workspaceId={workspaceId}
+          initialParentId={createParent}
+          onClose={() => setCreateParent(null)}
+        />
+      )}
     </div>
   );
 }
