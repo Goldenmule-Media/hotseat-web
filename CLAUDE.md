@@ -127,6 +127,8 @@ The load-bearing mental model; full detail in [`architecture/wiki/`](docs/hotsea
 
 ## Conventions & gotchas
 
+- **Commit incrementally.** Land each coherent change as its own commit on the current branch as
+  you go — don't batch a session's work into one commit at the end, and don't pre-branch.
 - **Comments: short and rare.** Most code needs none. When one is warranted (a constraint the
   code can't express), keep it to a line or two — never essay-length, never restating what the
   code does.
