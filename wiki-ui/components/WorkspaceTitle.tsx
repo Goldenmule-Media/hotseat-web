@@ -1,7 +1,7 @@
 "use client";
 
-/** Sidebar workspace title: the current workspace's name plus a copy-id button — and,
- *  when auth is enabled, a members button opening the access-management panel.
+/** Sidebar workspace title: the current workspace's name plus copy-id and new-page buttons —
+ *  and, when auth is enabled, a members button opening the access-management panel.
  *  The name itself is the rename affordance: click it to edit in place — Enter or
  *  leaving the field saves (the worker-side engine appends `WorkspaceRenamed` and
  *  syncs the catalog), Escape cancels. An empty draft reverts without saving. */
@@ -11,6 +11,7 @@ import { useAuth } from "../lib/auth-context";
 import { getHost } from "../lib/host-client";
 import { useWorkspaces } from "../lib/live";
 import { classifyError } from "../lib/wiki-host-api";
+import { CreatePageModal } from "./CreatePageModal";
 import { MembersPanel } from "./MembersPanel";
 
 export function WorkspaceTitle({ id }: { id: WorkspaceId }): React.JSX.Element {
@@ -20,6 +21,7 @@ export function WorkspaceTitle({ id }: { id: WorkspaceId }): React.JSX.Element {
   const [copied, setCopied] = useState(false);
   const [draft, setDraft] = useState<string | null>(null);
   const [membersOpen, setMembersOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Enter commits AND blurs (disabling the input mid-commit drops focus), so guard
@@ -102,6 +104,9 @@ export function WorkspaceTitle({ id }: { id: WorkspaceId }): React.JSX.Element {
       >
         {copied ? "✓" : "⧉"}
       </button>
+      <button className="icon-btn" title="New page" aria-label="New page" onClick={() => setCreateOpen(true)}>
+        +
+      </button>
       {/* Members are an auth-gateway concept — the button only exists when signed in. */}
       {authStatus === "authenticated" && (
         <button
@@ -114,6 +119,7 @@ export function WorkspaceTitle({ id }: { id: WorkspaceId }): React.JSX.Element {
         </button>
       )}
       {membersOpen && <MembersPanel workspaceId={id} onClose={() => setMembersOpen(false)} />}
+      {createOpen && <CreatePageModal workspaceId={id} onClose={() => setCreateOpen(false)} />}
     </div>
   );
 }

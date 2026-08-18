@@ -270,7 +270,9 @@ export function TreeNav({
   const [overId, setOverId] = useState<string | null>(null);
 
   if (tree === null) return <p className="muted">Loading tree…</p>;
-  if (tree.children.length === 0) return <p className="muted">No pages in this workspace yet.</p>;
+  if (tree.children.length === 0) {
+    return <p className="muted">No pages yet — use + next to the workspace name to create one.</p>;
+  }
 
   const ctx: TreeCtx = { workspaceId, activePageId, collapse, order, drag, setDrag, overId, setOverId };
 
