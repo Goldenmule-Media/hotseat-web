@@ -36,6 +36,22 @@ services:
     volumes:
       - wikidata:/data
       - ./models:/models:ro     # built wiki-models bundles, rsynced by deploy.sh
+    # READINESS, not liveness: the control listener binds LAST (after the read-model
+    # projection, the model bundles and the auth gateway), so a 200 here means the stack
+    # can actually serve. It listens on the container's loopback in auth mode, so the
+    # probe has to run inside the container. During `start_period` a failing probe leaves
+    # the container "starting" rather than "unhealthy" — a cold read model replays the
+    # whole stream and that is slow, not broken.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - 'fetch(`http://127.0.0.1:${WIKI_SERVER_CONTROL_PORT:-4438}/_server/health`).then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))'
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 300s
 
   caddy:
     image: caddy:2-alpine

@@ -18,10 +18,13 @@ fail()  { echo -e "${RED}[deploy]${NC} $1"; exit 1; }
 
 usage() {
   cat <<'EOF'
-Usage: ./deploy.sh [-i <key.pem>] <user@host>
+Usage: ./deploy.sh [-i <key.pem>] [--timeout <seconds>] <user@host>
 
-  -i <key.pem>   SSH identity file (e.g., -i ~/.ssh/wiki.pem)
-  <user@host>    SSH target (e.g., ubuntu@1.2.3.4)
+  -i <key.pem>       SSH identity file (e.g., -i ~/.ssh/wiki.pem)
+  --timeout <secs>   How long to wait for wiki-server to become READY
+                     (default 420, or $WIKI_DEPLOY_TIMEOUT). A cold read model
+                     replays the whole stream on first boot — that is slow, not broken.
+  <user@host>        SSH target (e.g., ubuntu@1.2.3.4)
 
 Expects a .env in the repo root (copy from .env.example, fill in POSTGRES_PASSWORD and
 the WIKI_SERVER_* GitHub-auth settings). See DEPLOY.md for full instructions.
@@ -33,14 +36,18 @@ HOST=""
 SSH_KEY=""
 SSH_OPTS=""
 REMOTE_DIR="~/wiki-server"
+READY_TIMEOUT="${WIKI_DEPLOY_TIMEOUT:-420}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h) usage ;;
     -i) SSH_KEY="$2"; shift 2 ;;
+    --timeout) READY_TIMEOUT="$2"; shift 2 ;;
     *) HOST="$1"; shift ;;
   esac
 done
+
+[[ "$READY_TIMEOUT" =~ ^[0-9]+$ ]] || fail "--timeout takes seconds (got: $READY_TIMEOUT)"
 
 [[ -z "$HOST" ]] && fail "Missing <user@host> argument. Run with --help for usage."
 if [[ -n "$SSH_KEY" ]]; then
@@ -96,50 +103,88 @@ docker compose up -d --build
 docker compose up -d --force-recreate caddy
 REMOTE_DEPLOY
 
-info "Verifying services are healthy ..."
-ssh $SSH_OPTS "$HOST" "bash -s" <<REMOTE_CHECK || fail "Health check failed — services may be crash-looping. Check: docker compose -f $REMOTE_DIR/docker-compose.yml logs"
-set -euo pipefail
+info "Waiting for services to become ready (up to ${READY_TIMEOUT}s) ..."
+CHECK_RC=0
+ssh $SSH_OPTS "$HOST" "bash -s" <<REMOTE_CHECK || CHECK_RC=$?
+# NOT set -e: only the checks below decide what is fatal. Exit codes: 1 crashed,
+# 2 not ready in time, 3 public TLS.
+set -uo pipefail
 cd $REMOTE_DIR
 
-check_running() {
-  local svc="\$1" cid state
-  for _ in \$(seq 1 20); do
+insp() { docker inspect -f "\$2" "\$1" 2>/dev/null || echo ""; }
+last_msg() { docker compose logs --tail 8 "\$1" 2>/dev/null | sed -n 's/.*"msg":"\([^"]*\)".*/\1/p' | tail -1; }
+
+# Two different questions, kept apart: LIVENESS ("is it alive and not looping?") is what
+# fails a deploy fast; READINESS ("does its probe pass?") is what we WAIT for. A service
+# with no healthcheck declares readiness by running.
+wait_ready() {
+  local svc="\$1" budget="\$2" deadline cid state health restarts base="" now noted=0 left
+  deadline=\$(( \$(date +%s) + budget ))
+  while :; do
     cid="\$(docker compose ps -q "\$svc" 2>/dev/null || true)"
     if [ -n "\$cid" ]; then
-      state="\$(docker inspect -f '{{.State.Status}}' "\$cid" 2>/dev/null || echo unknown)"
-      [ "\$state" = "running" ] && { echo "  \$svc -> running"; return 0; }
+      state="\$(insp "\$cid" '{{.State.Status}}')"
+      health="\$(insp "\$cid" '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}')"
+      restarts="\$(insp "\$cid" '{{.RestartCount}}')"
+      [ -z "\$base" ] && base="\${restarts:-0}"
+      # The ONLY fast failure. Slow-but-alive never lands here.
+      if [ "\$state" = exited ] || [ "\$state" = dead ] || [ "\${restarts:-0}" -gt "\$base" ]; then
+        echo "  \$svc -> CRASHED (state: \$state, restarts: \${restarts:-0})"
+        docker compose logs --tail 40 "\$svc"
+        return 1
+      fi
+      if [ "\$state" = running ] && [ "\$health" = healthy ]; then echo "  \$svc -> ready (healthy)"; return 0; fi
+      if [ "\$state" = running ] && [ "\$health" = none ]; then echo "  \$svc -> running (no readiness probe)"; return 0; fi
     fi
-    sleep 2
+    now=\$(date +%s)
+    left=\$(( deadline - now ))
+    if [ "\$left" -le 0 ]; then
+      echo "  \$svc -> NOT READY YET (state: \${state:-none}, health: \${health:-none})"
+      docker compose logs --tail 20 "\$svc"
+      return 2
+    fi
+    if [ \$(( now - noted )) -ge 15 ]; then
+      noted=\$now
+      echo "  \$svc: \${health:-starting} — \$(last_msg "\$svc" || true) (\${left}s left)"
+    fi
+    sleep 3
   done
-  echo "ERROR: \$svc not running (last state: \${state:-none})"
-  docker compose logs --tail 40 "\$svc" || true
-  return 1
 }
 
-check_running postgres
-check_running wiki-server
-check_running caddy
+wait_ready postgres 120 || exit \$?
+wait_ready wiki-server $READY_TIMEOUT || exit \$?
+wait_ready caddy 60 || exit \$?
 
-# Gateway up on loopback.
-for _ in \$(seq 1 15); do
+# Ready means the gateway is listening, so this should answer at once.
+for _ in \$(seq 1 10); do
   code="\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:4437/auth/config 2>/dev/null || echo 000)"
-  if [ "\$code" = "200" ]; then echo "  gateway (loopback) /auth/config -> 200"; break; fi
+  [ "\$code" = "200" ] && { echo "  gateway (loopback) /auth/config -> 200"; break; }
   sleep 2
 done
-[ "\$code" = "200" ] || { echo "ERROR: gateway not answering on loopback (last: \${code:-none})"; docker compose logs --tail 40 wiki-server; exit 1; }
+[ "\${code:-000}" = "200" ] || { echo "ERROR: gateway not answering on loopback (last: \${code:-none})"; docker compose logs --tail 40 wiki-server; exit 1; }
 
 # Public TLS through Caddy — retry ~90s for first-boot ACME issuance.
 for _ in \$(seq 1 30); do
   tls="\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 https://$DOMAIN/auth/config 2>/dev/null || echo 000)"
-  if [ "\$tls" = "200" ]; then echo "  https://$DOMAIN/auth/config -> 200 (valid cert)"; exit 0; fi
+  [ "\$tls" = "200" ] && { echo "  https://$DOMAIN/auth/config -> 200 (valid cert)"; exit 0; }
   sleep 3
 done
 echo "ERROR: https://$DOMAIN did not serve a valid cert / 200 (last: \${tls:-none})."
-echo "  Check: DNS A record for $DOMAIN → this host, security-group ports 80 + 443 open, then:"
-echo "  docker compose logs caddy"
 docker compose logs --tail 40 caddy || true
-exit 1
+exit 3
 REMOTE_CHECK
+
+case "$CHECK_RC" in
+  0) ;;
+  2) fail "Timed out after ${READY_TIMEOUT}s. The stack is still STARTING, not crashed — a cold read
+    model replays the whole stream before the server accepts traffic. Give it longer:
+      WIKI_DEPLOY_TIMEOUT=900 $0 ${SSH_KEY:+-i $SSH_KEY} $HOST
+    or watch it come up: ssh $SSH_OPTS $HOST 'cd ${REMOTE_DIR/#\~/~} && docker compose logs -f wiki-server'
+    (it is up when the log says \"wiki-server ready\"; docker compose ps shows the same as (healthy))." ;;
+  3) fail "Services are ready, but https://$DOMAIN is not serving a valid cert yet. Check the DNS A
+    record for $DOMAIN points at this host and ports 80 + 443 are open, then: docker compose logs caddy" ;;
+  *) fail "Health check failed — services are crash-looping. Check: docker compose -f $REMOTE_DIR/docker-compose.yml logs" ;;
+esac
 
 info "Deployed successfully!"
 info "Gateway:  https://$DOMAIN  (TLS via Caddy — Let's Encrypt, auto-renewing)"

@@ -78,6 +78,24 @@ valid cert at `https://$WIKI_DOMAIN/auth/config`. Re-run it any time to ship upd
 including schema-only changes, which reload from the `/models` mount without rebuilding the
 image.
 
+**Alive is not ready.** `wiki-server` declares readiness with a compose healthcheck that
+probes its control listener (`/_server/health`) from inside the container. That listener
+binds LAST — after the read-model projection, the model bundles and the auth gateway — so
+`(healthy)` in `docker compose ps` means the stack can actually serve. `deploy.sh` waits
+for that, and only calls a deploy failed when a container **crashes** (exits, or its restart
+count climbs). A slow boot is not a failure: a cold read model replays the whole stream
+before the server accepts traffic, so give it room —
+
+```bash
+./deploy.sh --timeout 900 -i ~/.ssh/your-key.pem ubuntu@<public-ip>   # or WIKI_DEPLOY_TIMEOUT=900
+```
+
+The default budget is 420s, and timing out says so plainly (still starting, not crashed)
+instead of blaming a crash loop. While it waits it prints each service's health plus the
+server's latest log line. `start_period` in `docker-compose.yml` (5m) is the same
+distinction inside Docker: a probe that fails during it leaves the container `starting`
+rather than marking it `unhealthy`.
+
 > Requires Node + npm on the machine you run `deploy.sh` from (it builds `wiki-models`).
 > The EC2 host needs only Docker.
 >
@@ -101,7 +119,7 @@ claims it as owner.
 SSH in (`ssh -i … ubuntu@<public-ip>`), then from `~/wiki-server`:
 
 ```bash
-docker compose ps                       # container status
+docker compose ps                       # container status (wiki-server shows (healthy) once ready)
 docker compose logs -f wiki-server      # server logs (JSON)
 docker compose logs -f caddy            # TLS / cert issuance
 docker compose logs -f postgres
