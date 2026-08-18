@@ -25,6 +25,7 @@ import {
   type WorkspaceMembers,
 } from "../lib/auth";
 import { useAuth } from "../lib/auth-context";
+import { ModalPortal } from "./ModalPortal";
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -103,105 +104,107 @@ export function MembersPanel({
   }
 
   return (
-    <div
-      className="members-overlay"
-      role="presentation"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
+    <ModalPortal>
       <div
-        className="members-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Workspace members"
-        onKeyDown={(e) => {
-          if (e.key === "Escape") onClose();
+        className="members-overlay"
+        role="presentation"
+        onMouseDown={(e) => {
+          if (e.target === e.currentTarget) onClose();
         }}
       >
-        <header className="members-head">
-          <h2>Members</h2>
-          <button className="icon-btn" onClick={onClose} aria-label="Close">
-            ✕
-          </button>
-        </header>
+        <div
+          className="members-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Workspace members"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") onClose();
+          }}
+        >
+          <header className="members-head">
+            <h2>Members</h2>
+            <button className="icon-btn" onClick={onClose} aria-label="Close">
+              ✕
+            </button>
+          </header>
 
-        {loadError !== null ? (
-          <div className="notice error">
-            <strong>Couldn&apos;t load members</strong>
-            <p className="muted">{loadError}</p>
-          </div>
-        ) : data === null ? (
-          <p className="muted">Loading…</p>
-        ) : (
-          <>
-            {unclaimed ? (
-              <>
-                <p className="muted members-owner">
-                  Unclaimed — every signed-in user can read and write this workspace.
-                </p>
-                <button
-                  className="tf-btn tf-btn-primary"
-                  disabled={pending}
-                  onClick={() => void act(() => claimWorkspace(workspaceId))}
-                >
-                  {pending ? "Claiming…" : "Claim ownership"}
-                </button>
-              </>
-            ) : (
-              <p className="muted members-owner">
-                Owner: <strong>{data.owner}</strong>
-                {data.owner === login ? " (you)" : ""}
-              </p>
-            )}
-
-            <ul className="members-list">
-              {data.members.length === 0 ? (
-                <li className="muted members-empty">No members{unclaimed ? "" : " besides the owner"}.</li>
+          {loadError !== null ? (
+            <div className="notice error">
+              <strong>Couldn&apos;t load members</strong>
+              <p className="muted">{loadError}</p>
+            </div>
+          ) : data === null ? (
+            <p className="muted">Loading…</p>
+          ) : (
+            <>
+              {unclaimed ? (
+                <>
+                  <p className="muted members-owner">
+                    Unclaimed — every signed-in user can read and write this workspace.
+                  </p>
+                  <button
+                    className="tf-btn tf-btn-primary"
+                    disabled={pending}
+                    onClick={() => void act(() => claimWorkspace(workspaceId))}
+                  >
+                    {pending ? "Claiming…" : "Claim ownership"}
+                  </button>
+                </>
               ) : (
-                data.members.map((m) => (
-                  <li key={m}>
-                    <span>
-                      {m}
-                      {m === login ? " (you)" : ""}
-                    </span>
-                    {isOwner && (
-                      <button
-                        className="icon-btn"
-                        disabled={pending}
-                        title={`Remove ${m}`}
-                        aria-label={`Remove ${m}`}
-                        onClick={() => void act(() => removeMember(workspaceId, m))}
-                      >
-                        ✕
-                      </button>
-                    )}
-                  </li>
-                ))
+                <p className="muted members-owner">
+                  Owner: <strong>{data.owner}</strong>
+                  {data.owner === login ? " (you)" : ""}
+                </p>
               )}
-            </ul>
 
-            {isOwner && (
-              <form className="members-add" onSubmit={onAdd}>
-                <input
-                  type="text"
-                  value={draft}
-                  placeholder="github-login"
-                  aria-label="GitHub login to add"
-                  spellCheck={false}
-                  disabled={pending}
-                  onChange={(e) => setDraft(e.target.value)}
-                />
-                <button type="submit" className="tf-btn tf-btn-primary" disabled={pending || draft.trim() === ""}>
-                  Add
-                </button>
-              </form>
-            )}
+              <ul className="members-list">
+                {data.members.length === 0 ? (
+                  <li className="muted members-empty">No members{unclaimed ? "" : " besides the owner"}.</li>
+                ) : (
+                  data.members.map((m) => (
+                    <li key={m}>
+                      <span>
+                        {m}
+                        {m === login ? " (you)" : ""}
+                      </span>
+                      {isOwner && (
+                        <button
+                          className="icon-btn"
+                          disabled={pending}
+                          title={`Remove ${m}`}
+                          aria-label={`Remove ${m}`}
+                          onClick={() => void act(() => removeMember(workspaceId, m))}
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </li>
+                  ))
+                )}
+              </ul>
 
-            {error !== null && <div className="notice error members-error">{error}</div>}
-          </>
-        )}
+              {isOwner && (
+                <form className="members-add" onSubmit={onAdd}>
+                  <input
+                    type="text"
+                    value={draft}
+                    placeholder="github-login"
+                    aria-label="GitHub login to add"
+                    spellCheck={false}
+                    disabled={pending}
+                    onChange={(e) => setDraft(e.target.value)}
+                  />
+                  <button type="submit" className="tf-btn tf-btn-primary" disabled={pending || draft.trim() === ""}>
+                    Add
+                  </button>
+                </form>
+              )}
+
+              {error !== null && <div className="notice error members-error">{error}</div>}
+            </>
+          )}
+        </div>
       </div>
-    </div>
+    </ModalPortal>
   );
 }
