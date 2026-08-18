@@ -14,7 +14,7 @@
  * duplicate required child surfaces verbatim and leaves the modal open to correct.
  */
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { PageId, WorkspaceId } from "wiki";
 import { useLiveWorkspace, useStructuralMutator } from "../lib/live";
 import { pageTypes } from "../lib/models";
@@ -37,10 +37,16 @@ export function CreatePageModal({
   const labelOfType = useMemo(() => new Map(options.map((o) => [o.type, o.label])), [options]);
   const parents = useMemo(() => parentOptions(ws.tree), [ws.tree]);
 
+  const titleRef = useRef<HTMLInputElement>(null);
   const [type, setType] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   // "" is the top level (parentId null) — a select can't carry null as a value.
   const [parent, setParent] = useState("");
+
+  // Picking a type is the first decision; move the cursor straight on to naming it.
+  useEffect(() => {
+    if (type !== null) titleRef.current?.focus();
+  }, [type]);
 
   const selected = options.find((o) => o.type === type) ?? null;
   const canSubmit = type !== null && title.trim() !== "" && !pending;
@@ -112,6 +118,7 @@ export function CreatePageModal({
             </label>
             <input
               id="cp-title"
+              ref={titleRef}
               type="text"
               value={title}
               disabled={pending}
@@ -126,7 +133,7 @@ export function CreatePageModal({
               <option value="">(Top level)</option>
               {parents.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {`${"  ".repeat(p.depth)}${p.title}`}
+                  {`${"\u00a0\u00a0".repeat(p.depth)}${p.title}`}
                 </option>
               ))}
             </select>
