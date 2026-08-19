@@ -8,6 +8,7 @@
  */
 import { createWiki } from "wiki";
 import type { IWiki, WorkspaceId } from "wiki";
+import { AttachmentClient } from "wiki/attachments";
 import { loginLoopback, resolveAuthorization } from "wiki/auth-client";
 import { Registry } from "wiki/registry";
 
@@ -43,13 +44,22 @@ export async function startMirror(
   // the engine's IStreamHeaders seam evaluates it per request, so a near-expiry access token
   // renews itself mid-tail; else no headers key at all (an open server). Never logged.
   const authorization = resolveAuthorization(config.streamBaseUrl, config.token);
+  const streamHeaders = authorization !== undefined ? { authorization } : undefined;
   const wiki = createWiki({
     stream: {
       baseUrl: config.streamBaseUrl,
       namespace: config.namespace,
-      ...(authorization !== undefined ? { headers: { authorization } } : {}),
+      ...(streamHeaders !== undefined ? { headers: streamHeaders } : {}),
     },
     pageTypes,
+  });
+
+  // Attachments ride the SAME origin and the same credentials as the stream: a mirror
+  // that may read a workspace's events may read the bytes those events reference.
+  const attachments = new AttachmentClient({
+    baseUrl: config.streamBaseUrl,
+    namespace: config.namespace,
+    ...(streamHeaders !== undefined ? { headers: streamHeaders } : {}),
   });
 
   const mirrors: WorkspaceMirror[] = [];
@@ -59,6 +69,7 @@ export async function startMirror(
       const sink = new MarkdownDiskProjector(
         { enabled: true, root: entry.root, workspaces: [entry.workspaceId], layout: "tree" },
         logger.child?.({ subsystem: "markdown-disk", workspace: entry.workspaceId, root: entry.root }) ?? logger,
+        attachments,
       );
       const mirror = new WorkspaceMirror(
         handle,

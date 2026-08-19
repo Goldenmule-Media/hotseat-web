@@ -34,6 +34,7 @@ import { createHash } from "node:crypto";
 import { dirname, join, posix } from "node:path";
 
 import type { IWorkspaceState, PageId, SearchDoc, WorkspaceId } from "wiki";
+import { attachmentRefsIn, type AttachmentClient } from "wiki/attachments";
 
 import type { Logger } from "./logger.js";
 
@@ -56,6 +57,14 @@ interface WorkspaceManifest {
   files: Record<string, string>;
   /** page id → workspace-relative posix path (tracks moves across renames/reparents). */
   pages: Record<string, string>;
+  /**
+   * page id → the asset files that page references. Needed only for FROZEN pages: their
+   * body is never re-rendered, so nothing else would keep their images out of the orphan
+   * sweep, and a partial-registry boot would delete every image under an
+   * unregistered-type page while keeping its `.md`. Absent in an older manifest, which
+   * simply means "none tracked yet" — the next rebuild populates it.
+   */
+  assets?: Record<string, string[]>;
 }
 
 /** The persisted manifest for the whole `root`: workspace id → its {@link WorkspaceManifest}. */
@@ -166,6 +175,24 @@ function withRootLock<T>(root: string, fn: () => Promise<T>): Promise<T> {
 /** The directory archived pages' files live under, inside the workspace directory. */
 const ARCHIVED_DIR = ".archived";
 
+/** Where a workspace's attachment bytes land, beside `.archived` in the same tree. */
+const ASSETS_DIR = ".assets";
+
+/** File extension for a stored mime. Unknown types get none — the bytes still resolve. */
+const EXT_BY_MIME: Readonly<Record<string, string>> = {
+  "image/png": ".png",
+  "image/jpeg": ".jpg",
+  "image/gif": ".gif",
+  "image/webp": ".webp",
+  "image/svg+xml": ".svg",
+  "image/avif": ".avif",
+  "application/pdf": ".pdf",
+};
+
+function extForMime(mime: string): string {
+  return EXT_BY_MIME[mime.split(";")[0]!.trim().toLowerCase()] ?? "";
+}
+
 /**
  * The filesystem-safe file name for an archived page, derived from its ID — not its tree
  * position — so the file NEVER moves again once archived (renames/reparents above it, even a
@@ -221,6 +248,12 @@ export class MarkdownDiskProjector {
   constructor(
     private readonly cfg: IMarkdownProjectionConfig,
     private readonly logger: Logger,
+    /**
+     * Downloads the bytes an `attachment:` ref points at. Optional: without it the refs
+     * stay verbatim in the Markdown (still correct, just not resolvable on disk), which
+     * is what keeps every existing test and a blob-less server working unchanged.
+     */
+    private readonly attachments?: AttachmentClient,
   ) {}
 
   /** The absolute on-disk root this projector writes under (surfaced in the mirror's status). */
@@ -255,7 +288,10 @@ export class MarkdownDiskProjector {
       for (const [rel, hash] of Object.entries(m.files)) {
         let ok = false;
         try {
-          ok = sha256(await readFile(join(this.cfg.root, rel), "utf8")) === hash;
+          // Hash the raw BYTES, not a utf8 decode: an asset (a PNG, a PDF) would not
+          // survive the round-trip and would read as stale on every boot, re-downloading
+          // every attachment each restart. For text the digest is identical either way.
+          ok = createHash("sha256").update(await readFile(join(this.cfg.root, rel))).digest("hex") === hash;
         } catch {
           // missing/unreadable → not ok
         }
@@ -392,16 +428,31 @@ export class MarkdownDiskProjector {
       expected.set(posix.join(wsDir, pageRel), { pageId: node.id, body: bodyByPage.get(node.id) ?? "" });
     }
 
+    // Attachments: download what the bodies reference and rewrite the refs to relative
+    // paths. This MUTATES the bodies in `expected`, so it must run before they are written.
+    const { assetsByPage, written: assetsWritten } = await this.materializeAssets(workspace, wsDir, expected, m);
+
     let written = 0;
     const nextPages: Record<string, string> = {};
     const nextFiles: Record<string, string> = {};
+    const nextAssets: Record<string, string[]> = {};
     for (const [rel, { pageId, body }] of expected) {
       if (await this.writeIfChanged(rel, body, m)) written++;
       nextPages[pageId] = rel;
       nextFiles[rel] = m.files[rel]!; // writeIfChanged guarantees a hash for every expected file
+      // Re-register this page's assets EVERY rebuild. The orphan sweep below is driven by
+      // nextFiles, so an asset left out of it is deleted — and one no longer referenced
+      // is collected for free by the same rule.
+      const mine = assetsByPage[pageId];
+      if (mine !== undefined) {
+        nextAssets[pageId] = mine;
+        for (const assetRel of mine) nextFiles[assetRel] = m.files[assetRel]!;
+      }
     }
 
     // Frozen pages keep their last-known file + manifest entry verbatim (no write, no move).
+    // Their assets come along: nothing re-renders their body, so nothing else would keep
+    // those files out of the sweep.
     const kept = new Set<string>();
     for (const pageId of frozen) {
       const rel = m.pages[pageId];
@@ -409,15 +460,26 @@ export class MarkdownDiskProjector {
       nextPages[pageId] = rel;
       if (m.files[rel] !== undefined) nextFiles[rel] = m.files[rel];
       kept.add(rel);
+      const mine = m.assets?.[pageId];
+      if (mine !== undefined) {
+        nextAssets[pageId] = mine;
+        for (const assetRel of mine) {
+          if (m.files[assetRel] !== undefined) nextFiles[assetRel] = m.files[assetRel];
+          kept.add(assetRel);
+        }
+      }
     }
 
     // Orphans: any tracked file not in the new expected set (deletes, archives, old paths
-    // after moves) — frozen pages' files excepted.
-    const orphans = Object.keys(m.files).filter((rel) => !expected.has(rel) && !kept.has(rel));
+    // after moves, unreferenced assets) — frozen pages' files excepted.
+    const orphans = Object.keys(m.files).filter(
+      (rel) => !expected.has(rel) && !kept.has(rel) && nextFiles[rel] === undefined,
+    );
     await this.removeFiles(orphans);
 
     m.files = nextFiles;
     m.pages = nextPages;
+    m.assets = nextAssets;
     m.version = version;
     await this.persist();
     this.logger.info("markdown-disk reconciled", {
@@ -426,6 +488,7 @@ export class MarkdownDiskProjector {
       written,
       removed: orphans.length,
       pages: expected.size,
+      ...(assetsWritten > 0 ? { assets: assetsWritten } : {}),
       ...(frozen.length > 0 ? { frozen: frozen.length } : {}),
     });
   }
@@ -460,6 +523,94 @@ export class MarkdownDiskProjector {
     await rename(tmp, abs); // atomic replace on POSIX
     m.files[rel] = hash;
     return true;
+  }
+
+  /** Write bytes to `rel` only when their hash changed; atomic, like {@link writeIfChanged}. */
+  private async writeBytesIfChanged(rel: string, bytes: Uint8Array, m: WorkspaceManifest): Promise<boolean> {
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    if (m.files[rel] === hash) return false;
+    const abs = join(this.cfg.root, rel);
+    await mkdir(dirname(abs), { recursive: true });
+    const tmp = `${abs}.tmp-${process.pid}-${this.tmpCounter++}`;
+    await writeFile(tmp, bytes);
+    await rename(tmp, abs);
+    m.files[rel] = hash;
+    return true;
+  }
+
+  /**
+   * Materialize every attachment the rendered bodies reference, and rewrite those refs
+   * to paths relative to the page that carries them.
+   *
+   * Carrier-blind on purpose: it substitutes the `attachment:<sha>` STRING, so an image
+   * block's `![alt](…)` and an attachment-ref field's `[name](…)` both come out correct
+   * with no branch, and a PDF needs no more code than a screenshot.
+   *
+   * Bytes are content-addressed, so a ref already on disk is never re-fetched — the cost
+   * is one download the first time a page mentions an attachment, and nothing after.
+   */
+  private async materializeAssets(
+    workspace: WorkspaceId,
+    wsDir: string,
+    expected: Map<string, { pageId: string; body: string }>,
+    m: WorkspaceManifest,
+  ): Promise<{ assetsByPage: Record<string, string[]>; written: number }> {
+    const assetsByPage: Record<string, string[]> = {};
+    if (this.attachments === undefined) return { assetsByPage, written: 0 };
+
+    // Any asset already tracked for this workspace, indexed by its content hash, so a
+    // second rebuild resolves refs without touching the network.
+    const knownBySha = new Map<string, string>();
+    const assetPrefix = `${posix.join(wsDir, ASSETS_DIR)}/`;
+    for (const rel of Object.keys(m.files)) {
+      if (!rel.startsWith(assetPrefix)) continue;
+      const sha = posix.basename(rel).split(".")[0]!;
+      if (/^[0-9a-f]{64}$/.test(sha)) knownBySha.set(sha, rel);
+    }
+
+    let written = 0;
+    const failed = new Set<string>();
+    for (const [pageAbsRel, entry] of expected) {
+      const refs = attachmentRefsIn(entry.body);
+      if (refs.length === 0) continue;
+      const pageDir = posix.dirname(posix.relative(wsDir, pageAbsRel));
+      const mine: string[] = [];
+      let body = entry.body;
+      for (const sha of refs) {
+        if (failed.has(sha)) continue;
+        let rel = knownBySha.get(sha);
+        if (rel === undefined) {
+          let found: Awaited<ReturnType<AttachmentClient["download"]>>;
+          try {
+            found = await this.attachments.download(workspace, sha);
+          } catch (err) {
+            // One unreachable attachment must not stall the whole mirror: leave the ref
+            // verbatim, say so, and pick it up on a later reconcile.
+            this.logger.warn("attachment download failed", { workspace, id: sha, error: (err as Error).message });
+            failed.add(sha);
+            continue;
+          }
+          if (found === undefined) {
+            this.logger.warn("attachment not found", { workspace, id: sha });
+            failed.add(sha);
+            continue;
+          }
+          rel = posix.join(wsDir, ASSETS_DIR, `${sha}${extForMime(found.meta.mime)}`);
+          if (await this.writeBytesIfChanged(rel, found.bytes, m)) written++;
+          knownBySha.set(sha, rel);
+        }
+        mine.push(rel);
+        // Relative to the page's OWN directory, so a folder page (index.md) and a leaf
+        // page (<slug>.md) both resolve.
+        const href = posix.relative(pageDir, posix.relative(wsDir, rel));
+        body = body.split(`attachment:${sha}`).join(href);
+      }
+      if (mine.length > 0) {
+        assetsByPage[entry.pageId] = mine;
+        expected.set(pageAbsRel, { pageId: entry.pageId, body });
+      }
+    }
+    return { assetsByPage, written };
   }
 
   /** Remove files (drop) and prune now-empty parent directories; best-effort. */
