@@ -24,6 +24,13 @@ const QUOTE = /^ {0,3}> ?(.*)$/;
 const DIVIDER = /^ {0,3}([-_*])(\s*\1){2,}\s*$/;
 const UNORDERED_ITEM = /^( {0,3})([-*])\s+(.*)$/;
 const ORDERED_ITEM = /^( {0,3})(\d{1,9}\.)\s+(.*)$/;
+/**
+ * A line that is EXACTLY one image: `![alt](ref)` or `![alt](ref "title")`.
+ * Block position only. An image in the middle of a paragraph keeps the historic
+ * degradation (a literal `!` followed by a link), which is still a `parseInline`
+ * fixed point — so nothing that parses today changes shape.
+ */
+const IMAGE_LINE = /^ {0,3}!\[([^\]]*)\]\(([^\s()]+)(?:\s+"([^"]*)")?\)\s*$/;
 
 /** Parse a Markdown document into the closed block vocabulary. */
 export function parseBlocks(markdown: string, newId: NewId): IBlock[] {
@@ -44,7 +51,8 @@ function startsBlock(line: string): boolean {
     QUOTE.test(line) ||
     DIVIDER.test(line) ||
     UNORDERED_ITEM.test(line) ||
-    ORDERED_ITEM.test(line)
+    ORDERED_ITEM.test(line) ||
+    IMAGE_LINE.test(line)
   );
 }
 
@@ -141,6 +149,20 @@ function parseLines(lines: readonly string[], newId: NewId): IBlock[] {
 
     if (DIVIDER.test(line)) {
       out.push({ kind: "divider", id: newId() as BlockId });
+      i++;
+      continue;
+    }
+
+    const img = IMAGE_LINE.exec(line);
+    if (img !== null) {
+      const title = img[3];
+      out.push({
+        kind: "image",
+        id: newId() as BlockId,
+        ref: img[2]!,
+        alt: img[1]!,
+        ...(title !== undefined && title.length > 0 ? { title } : {}),
+      });
       i++;
       continue;
     }

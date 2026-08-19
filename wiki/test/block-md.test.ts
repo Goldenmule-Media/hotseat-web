@@ -282,3 +282,49 @@ describe("parseBlocks output through real blocks-field ingestion", () => {
     expect(rendered).toContain("> note");
   });
 });
+
+describe("image blocks", () => {
+  const ids = (): (() => string) => {
+    let n = 0;
+    return () => `b${++n}`;
+  };
+
+  it("parses a line that is exactly one image", () => {
+    expect(parseBlocks("![A diagram](attachment:" + "a".repeat(64) + ")", ids())).toEqual([
+      { kind: "image", id: "b1", ref: "attachment:" + "a".repeat(64), alt: "A diagram" },
+    ]);
+  });
+
+  it("parses an optional title, and an ordinary URL ref", () => {
+    expect(parseBlocks('![Cat](https://example.com/cat.png "A cat")', ids())).toEqual([
+      { kind: "image", id: "b1", ref: "https://example.com/cat.png", alt: "Cat", title: "A cat" },
+    ]);
+  });
+
+  it("leaves an image that is not the whole line as a paragraph", () => {
+    // Mid-paragraph images keep the historic degradation (a literal `!` plus a link),
+    // so nothing that parses today changes shape.
+    const [block] = parseBlocks("see ![Cat](https://example.com/cat.png) here", ids());
+    expect(block?.kind).toBe("paragraph");
+    const [trailing] = parseBlocks("![Cat](https://example.com/cat.png).", ids());
+    expect(trailing?.kind).toBe("paragraph");
+  });
+
+  it("round-trips as a parse fixed point", () => {
+    for (const md of [
+      "![A diagram](attachment:" + "b".repeat(64) + ")",
+      '![Cat](https://example.com/cat.png "A cat")',
+      "![](attachment:" + "c".repeat(64) + ")",
+    ]) {
+      const blocks = parseBlocks(md, ids());
+      const rendered = renderBlocks(blocks, () => "");
+      expect(rendered).toBe(md);
+      expect(parseBlocks(rendered, ids())).toEqual(blocks);
+    }
+  });
+
+  it("separates an image from surrounding paragraphs", () => {
+    const blocks = parseBlocks("Before\n![Shot](attachment:" + "d".repeat(64) + ")\nAfter", ids());
+    expect(blocks.map((b) => b.kind)).toEqual(["paragraph", "image", "paragraph"]);
+  });
+});

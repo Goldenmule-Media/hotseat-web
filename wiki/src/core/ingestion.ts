@@ -113,6 +113,14 @@ export function normalizeBlock(block: IBlock): IBlock {
       return { kind: "quote", id: block.id, ...(block.variant !== undefined ? { variant: block.variant } : {}), blocks: block.blocks.map(normalizeBlock) };
     case "divider":
       return { kind: "divider", id: block.id };
+    case "image":
+      return {
+        kind: "image",
+        id: block.id,
+        ref: block.ref.trim(),
+        alt: block.alt.trim(),
+        ...(block.title !== undefined && block.title.trim().length > 0 ? { title: block.title.trim() } : {}),
+      };
   }
 }
 
@@ -195,6 +203,18 @@ function assertBlockNormalForm(block: IBlock): void {
       break;
     case "divider":
       break;
+    case "image": {
+      if (block.ref.length === 0) throw new BlockNormalFormError("An image block requires a ref.");
+      // The render is `![alt](ref "title")`, so a newline or an unbalanced delimiter in
+      // any part would produce Markdown that no longer parses back to this block.
+      for (const [what, value] of [["ref", block.ref], ["alt", block.alt], ["title", block.title ?? ""]] as const) {
+        if (/[\r\n]/.test(value)) throw new BlockNormalFormError(`An image block's ${what} may not contain a newline.`);
+      }
+      if (/[()]/.test(block.ref)) throw new BlockNormalFormError("An image block's ref may not contain parentheses.");
+      if (/[[\]]/.test(block.alt)) throw new BlockNormalFormError("An image block's alt may not contain brackets.");
+      if ((block.title ?? "").includes('"')) throw new BlockNormalFormError("An image block's title may not contain a quote.");
+      break;
+    }
   }
 }
 

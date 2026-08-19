@@ -77,4 +77,28 @@ describe("blocks", () => {
     const p = page([sec({ doc: { kind: "blocks", blocks: [block] } })]);
     expect(() => validatePage(workspaceWith(p), p, registry)).toThrow(BlockNormalFormError);
   });
+
+  it("rejects an image whose parts would not render back to itself", () => {
+    // Each of these would emit Markdown that no longer parses to the same block,
+    // breaking the round-trip fixed point the whole content model rests on.
+    const bad: IBlock[] = [
+      { kind: "image", id: "b1" as never, ref: "", alt: "x" },
+      { kind: "image", id: "b1" as never, ref: "a\nb", alt: "x" },
+      { kind: "image", id: "b1" as never, ref: "a(b)", alt: "x" },
+      { kind: "image", id: "b1" as never, ref: "a", alt: "[x]" },
+      { kind: "image", id: "b1" as never, ref: "a", alt: "x", title: 'a "b' },
+    ];
+    for (const block of bad) {
+      const p = page([sec({ doc: { kind: "blocks", blocks: [block] } })]);
+      expect(() => validatePage(workspaceWith(p), p, registry)).toThrow(BlockNormalFormError);
+    }
+  });
+
+  it("accepts a well-formed image and leaves its ref unchecked", () => {
+    // An attachment ref is NOT integrity-checked: validation is synchronous and pure,
+    // and an existence check would need I/O. It has the same standing as any URL.
+    const block: IBlock = { kind: "image", id: "b1" as never, ref: `attachment:${"a".repeat(64)}`, alt: "Diagram" };
+    const p = page([sec({ doc: { kind: "blocks", blocks: [block] } })]);
+    expect(() => validatePage(workspaceWith(p), p, registry)).not.toThrow();
+  });
 });

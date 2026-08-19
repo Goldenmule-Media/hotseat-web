@@ -195,7 +195,16 @@ export type IBlock =
       rows: IInline[][][];
     }
   | { readonly kind: "quote"; id: BlockId; variant?: string; blocks: IBlock[] }
-  | { readonly kind: "divider"; id: BlockId };
+  | { readonly kind: "divider"; id: BlockId }
+  /**
+   * An image. `ref` is either `attachment:<sha256>` — bytes in this wiki's own
+   * attachment store, which the event stream references but never carries — or an
+   * ordinary absolute URL. Added under its own decision record, as ADR-6 requires of
+   * any new block kind: its render is closed (`![alt](ref)`), it is addressable by a
+   * stable BlockId like every other block, and it has no opaque leaf (`ref`, `alt`
+   * and `title` are attributes, not embedded markup).
+   */
+  | { readonly kind: "image"; id: BlockId; ref: string; alt: string; title?: string };
 
 /** A typed field value — the closed value shapes per field-kind. */
 export type IField =

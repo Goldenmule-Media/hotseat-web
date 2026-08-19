@@ -84,6 +84,14 @@ export function renderBlock(block: IBlock, label: LabelResolver): string {
         .join("\n");
     case "divider":
       return "---";
+    case "image": {
+      // The ref renders VERBATIM — an `attachment:<sha>` stays a stable id here.
+      // Resolving it to a URL is each consumer's job (wiki-ui to an object URL,
+      // wiki-mirror to a relative asset path); baking a base URL into the renderer
+      // would make the Markdown host-dependent and break byte-identical determinism.
+      const title = block.title !== undefined && block.title.length > 0 ? ` "${block.title}"` : "";
+      return `![${block.alt}](${block.ref}${title})`;
+    }
   }
 }
 
