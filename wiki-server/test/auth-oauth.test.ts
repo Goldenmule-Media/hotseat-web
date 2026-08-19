@@ -17,6 +17,17 @@ import { AccessStore } from "../src/auth/access";
 import { startGateway, type Gateway } from "../src/auth/gateway";
 import { signRefreshToken, verifySession } from "../src/auth/tokens";
 import { createLogger } from "../src/logger";
+import { BlobStore } from "../src/blobs/store";
+
+/** A throwaway attachment store — these suites exercise auth, not blobs. */
+const testBlobs = () => ({
+  store: new BlobStore({
+    dir: mkdtempSync(join(tmpdir(), "wiki-gw-blobs-")),
+    maxBytes: 1024,
+    mimeAllow: ["image/*"],
+  }),
+  maxBytes: 1024,
+});
 
 const SECRET = "oauth-test-secret-oauth-test-secret";
 const NOW = 1_750_000_000;
@@ -62,6 +73,7 @@ describe("OAuth 2.1 façade", () => {
       host: "127.0.0.1",
       port: 0,
       internalBaseUrl: internalUrl,
+      blobs: testBlobs(),
       publicUrl: "http://127.0.0.1:4437",
       uiOrigins: ["http://localhost:3000"],
       github: { clientId: "cid", clientSecret: "csecret", callbackUrl: "http://127.0.0.1:4437/auth/github/callback", fetchImpl: githubStub },
@@ -299,6 +311,7 @@ describe("OAuth 2.1 façade", () => {
       host: "127.0.0.1",
       port: 0,
       internalBaseUrl: internalUrl,
+      blobs: testBlobs(),
       publicUrl: "http://127.0.0.1:4437",
       uiOrigins: [],
       github: { clientId: "cid", clientSecret: "csecret", callbackUrl: "http://127.0.0.1:4437/auth/github/callback", fetchImpl: githubStub },

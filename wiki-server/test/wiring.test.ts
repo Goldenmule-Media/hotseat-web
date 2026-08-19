@@ -7,8 +7,12 @@
  * The hosted `wiki-mcp` is injected via the `startMcp` seam so the smoke test
  * exercises the wiring (stream host → control listener, with `wiki-mcp` pointed at
  * the live `baseUrl`) without standing up the full engine + PGlite read model — that
- * surface is covered by `wiki-mcp`'s own suite. We still assert the
- * wiring fed `wiki-mcp` THIS host's localhost `baseUrl` and the host's `mcp` logger.
+ * surface is covered by `wiki-mcp`'s own suite. We still assert the wiring fed
+ * `wiki-mcp` the INTERNAL stream URL — in-process consumers bypass the front door
+ * rather than loop back through it — and the host's `mcp` logger.
+ *
+ * The public `baseUrl` is the front door in every auth mode, so the stream round-trip
+ * below is also the proof that streams still work through the proxy leg.
  */
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -59,8 +63,11 @@ describe("wiring smoke", () => {
     });
     running.push(server);
 
-    // ── the wiring pointed wiki-mcp at THIS host's live baseUrl + the mcp logger ──
-    expect(mcpBaseUrl).toBe(server.baseUrl);
+    // ── the wiring pointed wiki-mcp at the INTERNAL stream host + the mcp logger ──
+    // Not the public baseUrl: the front door owns that, and an in-process consumer
+    // has no reason to take a proxy hop back to the host it is already beside.
+    expect(mcpBaseUrl).toBeDefined();
+    expect(mcpBaseUrl).not.toBe(server.baseUrl);
     expect(mcpLogger).toBeDefined();
     // The injected logger is the host's consolidating logger (mcp records land in the
     // same buffer the control listener reads).
@@ -85,5 +92,36 @@ describe("wiring smoke", () => {
     expect(facts.storage).toBe("memory");
     expect(facts.baseUrl).toBe(server.baseUrl); // info reports the SAME live baseUrl
     expect(facts.boot).toBe(server.logger.boot);
+  });
+
+  it("serves attachments from the same public address as streams, with auth off", async () => {
+    const cfg = resolveConfig(["--storage", "memory", "--port", "0", "--control-port", "0"], {});
+    const server = await startWikiServer(cfg, {
+      startMcp: async (baseUrl) => ({
+        config: {
+          namespace: "smoke",
+          streamBaseUrl: baseUrl,
+          db: { kind: "pglite" },
+          readConsistencyTimeoutMs: 5000,
+          waitForPollMs: 50,
+        } satisfies WikiMcpConfig,
+      }),
+    });
+    running.push(server);
+
+    const png = Buffer.from("89504e470d0a1a0a", "hex");
+    const blobs = `${server.baseUrl}/smoke/workspace/ws%3A1/blobs`;
+    const up = await fetch(blobs, {
+      method: "POST",
+      headers: { "content-type": "image/png", "content-disposition": 'attachment; filename="shot.png"' },
+      body: new Uint8Array(png),
+    });
+    expect(up.status).toBe(201);
+    const { id } = (await up.json()) as { id: string };
+
+    const down = await fetch(`${blobs}/${id}`);
+    expect(down.status).toBe(200);
+    expect(down.headers.get("content-type")).toBe("image/png");
+    expect(Buffer.from(await down.arrayBuffer()).equals(png)).toBe(true);
   });
 });

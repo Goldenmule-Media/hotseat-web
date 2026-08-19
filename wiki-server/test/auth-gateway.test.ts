@@ -18,6 +18,17 @@ import { AccessStore } from "../src/auth/access";
 import { startGateway, type Gateway } from "../src/auth/gateway";
 import { signSession, verifySession } from "../src/auth/tokens";
 import { createLogger } from "../src/logger";
+import { BlobStore } from "../src/blobs/store";
+
+/** A throwaway attachment store — these suites exercise auth, not blobs. */
+const testBlobs = () => ({
+  store: new BlobStore({
+    dir: mkdtempSync(join(tmpdir(), "wiki-gw-blobs-")),
+    maxBytes: 1024,
+    mimeAllow: ["image/*"],
+  }),
+  maxBytes: 1024,
+});
 
 const SECRET = "gateway-test-secret-gateway-test";
 const JSON_CT = "application/json";
@@ -56,6 +67,7 @@ describe("auth gateway", () => {
       host: "127.0.0.1",
       port: 0,
       internalBaseUrl: internalUrl,
+      blobs: testBlobs(),
       publicUrl: "http://127.0.0.1:4437",
       uiOrigins: ["http://localhost:3000"],
       github: { clientId: "cid", clientSecret: "csecret", callbackUrl: "http://127.0.0.1:4437/auth/github/callback", fetchImpl: githubStub },
@@ -228,6 +240,37 @@ describe("auth gateway", () => {
     expect((await fetch(ws("ws-beta"), { headers: bearer("bob") })).status).toBe(403);
   });
 
+  it("gates attachments on workspace membership, not a second policy", async () => {
+    await DurableStream.create({ url: ws("ws-blobs"), contentType: JSON_CT, headers: bearer("alice") });
+    const blobs = `${ws("ws-blobs")}/blobs`;
+    const png = Buffer.from("89504e470d0a1a0a", "hex");
+    const post = (login: string): Promise<Response> =>
+      fetch(blobs, {
+        method: "POST",
+        headers: { ...bearer(login), "content-type": "image/png" },
+        body: new Uint8Array(png),
+      });
+
+    // The owner uploads; a non-member is refused by the SAME check that guards the stream.
+    const up = await post("alice");
+    expect(up.status).toBe(201);
+    const { id } = (await up.json()) as { id: string };
+    expect((await post("bob")).status).toBe(403);
+    expect((await fetch(`${blobs}/${id}`, { headers: bearer("bob") })).status).toBe(403);
+    expect((await fetch(`${blobs}/${id}`)).status).toBe(401);
+
+    // Downloads never reach the stream host: the bytes come back from the blob store.
+    const down = await fetch(`${blobs}/${id}`, { headers: bearer("alice") });
+    expect(down.status).toBe(200);
+    expect(Buffer.from(await down.arrayBuffer()).equals(png)).toBe(true);
+
+    // The upload preflight must allow content-disposition, which the stream host's
+    // CORS does not — so it is answered here rather than proxied.
+    const pre = await fetch(blobs, { method: "OPTIONS" });
+    expect(pre.status).toBe(204);
+    expect(pre.headers.get("access-control-allow-headers")).toContain("content-disposition");
+  });
+
   it("leaves pre-auth (unclaimed) workspaces open and lets any user claim them once", async () => {
     // Created directly on the INTERNAL host — as if it predates auth. No record.
     await DurableStream.create({ url: `${internalUrl}/test/workspace/ws-legacy`, contentType: JSON_CT });
@@ -261,6 +304,7 @@ describe("auth gateway", () => {
       host: "127.0.0.1",
       port: 0,
       internalBaseUrl: internalUrl,
+      blobs: testBlobs(),
       publicUrl: "http://127.0.0.1:4437",
       uiOrigins: ["http://localhost:3000"],
       github: { clientId: "cid", clientSecret: "csecret", callbackUrl: "http://127.0.0.1:4437/auth/github/callback", fetchImpl: githubStub },

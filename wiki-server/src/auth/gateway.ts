@@ -24,11 +24,13 @@
  * the tool layer (`McpAuth`), so identity is enforced per-surface, never trusted
  * across surfaces.
  */
-import { createServer, request as httpRequest, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 
 import type { IConsolidatingLogger } from "../logger.js";
+import { handleBlobRequest, matchBlobRoute, type BlobRoutesConfig } from "../blobs/routes.js";
+import { proxyRequest } from "../proxy.js";
 import { AccessError, AccessStore } from "./access.js";
 import { authorizeUrl, exchangeCodeForUser, type GitHubOAuthConfig } from "./github.js";
 import {
@@ -69,6 +71,12 @@ export interface GatewayConfig {
   /** OAuth refresh-token lifetime in seconds. */
   readonly refreshTokenTtlSeconds: number;
   readonly store: AccessStore;
+  /**
+   * The attachment store served at `/{ns}/workspace/{id}/blobs`. It rides this
+   * listener rather than one of its own precisely so blob access inherits the
+   * workspace membership check above instead of carrying a second policy.
+   */
+  readonly blobs: BlobRoutesConfig;
   readonly logger: IConsolidatingLogger;
   /** Unix-seconds clock (injected for token-expiry tests). */
   readonly nowSeconds?: () => number;
@@ -80,19 +88,6 @@ export interface Gateway {
   readonly url: string;
   stop(): Promise<void>;
 }
-
-/** Hop-by-hop headers a proxy must not forward (RFC 9110 §7.6.1). */
-const HOP_BY_HOP = new Set([
-  "connection",
-  "keep-alive",
-  "proxy-authenticate",
-  "proxy-authorization",
-  "te",
-  "trailer",
-  "transfer-encoding",
-  "upgrade",
-  "host",
-]);
 
 /** CORS for gateway-AUTHORED responses (proxied ones carry the stream host's). */
 const CORS_HEADERS: Record<string, string> = {
@@ -121,6 +116,7 @@ export async function startGateway(cfg: GatewayConfig): Promise<Gateway> {
   const log = cfg.logger.forSource("auth");
   const now = cfg.nowSeconds ?? (() => Math.floor(Date.now() / 1000));
   const internal = new URL(cfg.internalBaseUrl);
+  const blobs = cfg.blobs;
 
   /** Origins a post-login redirect may target: the UI origins + this gateway itself. */
   const allowedRedirectOrigins = new Set<string>([...cfg.uiOrigins, new URL(cfg.publicUrl).origin]);
@@ -435,43 +431,23 @@ export async function startGateway(cfg: GatewayConfig): Promise<Gateway> {
   // ── the authenticated reverse proxy (the data plane) ────────────────────────
 
   function proxy(req: IncomingMessage, res: ServerResponse, onResponse?: (status: number) => void): void {
-    const headers: Record<string, string | string[]> = {};
-    for (const [key, value] of Object.entries(req.headers)) {
-      if (value !== undefined && !HOP_BY_HOP.has(key)) headers[key] = value;
-    }
-    const upstream = httpRequest(
-      {
-        host: internal.hostname,
-        port: internal.port,
-        method: req.method,
-        path: req.url,
-        headers,
-      },
-      (upstreamRes) => {
-        onResponse?.(upstreamRes.statusCode ?? 0);
-        const outHeaders: Record<string, string | string[]> = {};
-        for (const [key, value] of Object.entries(upstreamRes.headers)) {
-          if (value !== undefined && !HOP_BY_HOP.has(key)) outHeaders[key] = value;
-        }
-        res.writeHead(upstreamRes.statusCode ?? 502, outHeaders);
-        // Pipe the body through unbuffered — SSE and long-polls stream chunk by chunk.
-        upstreamRes.pipe(res);
-        upstreamRes.on("error", () => res.destroy());
-      },
-    );
-    upstream.on("error", (err) => {
-      log.error("proxy upstream error", { method: req.method, path: req.url, error: err.message });
-      if (!res.headersSent) json(res, 502, { error: "stream host unreachable" });
-      else res.destroy();
+    proxyRequest(req, res, internal, {
+      ...(onResponse !== undefined ? { onResponse } : {}),
+      onError: (err) => log.error("proxy upstream error", { method: req.method, path: req.url, error: err.message }),
     });
-    // A client that walks away tears the upstream leg down with it (frees long-polls/SSE).
-    res.on("close", () => upstream.destroy());
-    req.pipe(upstream);
   }
 
   function handleDataPlane(req: IncomingMessage, res: ServerResponse, url: URL): void {
-    // Preflights carry no credentials by spec; the stream host answers them with
-    // its permissive CORS (which is what lets the browser then SEND the bearer).
+    const preflightSegments = pathSegments(url.pathname);
+    // Blob preflights are answered HERE rather than proxied: an upload sends
+    // `content-disposition`, which the stream host's CORS does not allow, so a
+    // proxied preflight would fail the request before it was ever sent.
+    if (req.method === "OPTIONS" && preflightSegments !== undefined && matchBlobRoute(preflightSegments) !== undefined) {
+      void handleBlobRequest(req, res, matchBlobRoute(preflightSegments)!, blobs);
+      return;
+    }
+    // Other preflights carry no credentials by spec; the stream host answers them
+    // with its permissive CORS (which is what lets the browser then SEND the bearer).
     if (req.method === "OPTIONS") {
       proxy(req, res);
       return;
@@ -504,6 +480,18 @@ export async function startGateway(cfg: GatewayConfig): Promise<Gateway> {
       const claimed = cfg.store.record(workspaceId) !== undefined;
       if (req.method === "DELETE" && claimed && !cfg.store.isOwner(session.login, workspaceId)) {
         json(res, 403, { error: "forbidden: only the owner may delete a workspace stream", workspaceId });
+        return;
+      }
+      // Attachments are served HERE, not proxied: bytes never enter the stream, and
+      // the membership check above is the whole of their authorization. Nothing about
+      // blob access is a second policy that could drift from workspace access.
+      const blobRoute = matchBlobRoute(segments);
+      if (blobRoute !== undefined) {
+        void handleBlobRequest(req, res, blobRoute, blobs).catch((err: unknown) => {
+          log.error("blob request failed", { path: req.url, error: (err as Error).message });
+          if (!res.headersSent) json(res, 500, { error: "internal error" });
+          else res.destroy();
+        });
         return;
       }
     } else if (!(segments.length === 2 && segments[1] === "_catalog")) {

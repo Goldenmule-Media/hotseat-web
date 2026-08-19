@@ -36,6 +36,8 @@ import { createLogger, type IConsolidatingLogger } from "./logger.js";
 import { startControlServer, type ControlServer } from "./control.js";
 import { AccessStore } from "./auth/access.js";
 import { startGateway, type Gateway } from "./auth/gateway.js";
+import { BlobStore } from "./blobs/store.js";
+import { startFrontDoor, type FrontDoor } from "./front-door.js";
 import { protectedResourceMetadata } from "./auth/oauth.js";
 import { ensureSessionSecret, ephemeralSessionSecret } from "./auth/secret.js";
 import { bearerSession } from "./auth/tokens.js";
@@ -75,7 +77,7 @@ export interface WikiServerDeps {
   /**
    * Start `wiki-mcp` against the given stream `baseUrl`, injecting the host's
    * `mcp`-sourced logger. Defaults to {@link createWikiMcp} with config resolved
-   * from flags/env. Return `undefined` to skip the hosted module entirely.
+   * from flags/env. OMIT the returned `mcp` to skip the hosted module entirely.
    */
   readonly startMcp?: (
     baseUrl: string,
@@ -143,20 +145,34 @@ export async function startWikiServer(
   for (const warning of configWarnings(cfg)) serverLog.warn(warning);
 
   // ── 2. start the stream host ──
-  // Auth mode: the host hides on an internal loopback ephemeral port and the auth
-  // gateway (started below) takes the PUBLIC `cfg.host:cfg.port` in its place. The
-  // in-process consumers (wiki-mcp's engine) keep talking to the internal URL — they
+  // The host ALWAYS hides on an internal loopback ephemeral port; a front door takes
+  // the public `cfg.host:cfg.port` in its place (the auth gateway under `--auth
+  // github`, the plain front door otherwise). The stream host treats every
+  // non-reserved path as a stream path and cannot be extended, so anything served
+  // alongside streams — the attachment store — must be intercepted in front of it,
+  // and keeping the topology identical in both auth modes means blobs cannot be
+  // reachable in production but missing in local development.
+  // In-process consumers (wiki-mcp's engine) keep talking to the internal URL — they
   // enforce the same ledger at their own surface, so no request loops back through
-  // the gateway.
-  const streamBind = authEnabled ? { host: "127.0.0.1", port: 0 } : { host: cfg.host, port: cfg.port };
-  const server = new DurableStreamTestServer(serverOptions(cfg, streamBind, streamLog));
+  // the front door.
+  const server = new DurableStreamTestServer(serverOptions(cfg, { host: "127.0.0.1", port: 0 }, streamLog));
   const internalBaseUrl = await server.start();
   serverLog.info("stream host up", {
     baseUrl: internalBaseUrl,
-    internal: authEnabled,
+    internal: true,
     storage: cfg.storage,
     dataDir: cfg.storage === "file" ? cfg.dataDir : undefined,
   });
+
+  // The attachment store: bytes the event stream references by id and never carries.
+  const blobs = {
+    store: new BlobStore({
+      dir: join(cfg.dataDir, "blobs"),
+      maxBytes: cfg.blobMaxBytes,
+      mimeAllow: cfg.blobMimeAllow,
+    }),
+    maxBytes: cfg.blobMaxBytes,
+  };
 
   // ── 2b. the auth plane (github mode): session secret, access ledger, McpAuth ──
   // `storage=memory` keeps auth state ephemeral too (no disk writes): a persisted
@@ -281,11 +297,23 @@ export async function startWikiServer(
       accessTokenTtlSeconds: cfg.accessTokenTtlSeconds,
       refreshTokenTtlSeconds: cfg.refreshTokenTtlDays * 86_400,
       store,
+      blobs,
       logger,
     });
   }
-  /** What clients point at: the gateway when auth is on, the raw host otherwise. */
-  const baseUrl = gateway?.url ?? internalBaseUrl;
+  // ── 4b. …or the plain front door, when auth is off ──
+  let frontDoor: FrontDoor | undefined;
+  if (gateway === undefined) {
+    frontDoor = await startFrontDoor({
+      host: cfg.host,
+      port: cfg.port,
+      internalBaseUrl,
+      blobs,
+      logger,
+    });
+  }
+  /** What clients point at: whichever front door owns the public address. */
+  const baseUrl = gateway?.url ?? frontDoor?.url ?? internalBaseUrl;
 
   // ── 5. start the control listener ──
   // Auth mode binds it LOOPBACK-ONLY regardless of cfg.host: its privileged
@@ -321,14 +349,21 @@ export async function startWikiServer(
     logger,
     mcp,
     /**
-     * Stop wiki-mcp, the control listener, the gateway, and the stream host.
+     * Stop wiki-mcp, the control listener, the front door, and the stream host.
      * wiki-mcp drains its tailer + MCP server and closes the engine + read-model
      * store; the stream host drains connections, cancels long-polls/SSE, and closes
      * the store (each append is already fsynced in file mode, so there is no
      * final-flush window to lose). Surfaces the first failure once all have settled.
      */
     async stop(): Promise<void> {
-      const results = await Promise.allSettled([mcp?.close(), control.stop(), gateway?.stop(), server.stop(), store?.flush()]);
+      const results = await Promise.allSettled([
+        mcp?.close(),
+        control.stop(),
+        gateway?.stop(),
+        frontDoor?.stop(),
+        server.stop(),
+        store?.flush(),
+      ]);
       const failed = results.find((r) => r.status === "rejected");
       if (failed !== undefined) throw (failed as PromiseRejectedResult).reason;
     },

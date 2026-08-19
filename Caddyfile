@@ -9,4 +9,12 @@
 	# https://{$WIKI_DOMAIN}/.well-known/oauth-protected-resource, served by :4437.
 	reverse_proxy /mcp wiki-server:4439
 	reverse_proxy wiki-server:4437
+
+	# Attachment uploads (POST .../blobs) are the only large bodies this server takes.
+	# Caddy buffers a request body up to this size; the server enforces its own
+	# WIKI_SERVER_BLOB_MAX_BYTES, so keep this at or above that value or uploads fail
+	# at the edge with a confusing 413 the server never sees.
+	request_body {
+		max_size 32MB
+	}
 }
