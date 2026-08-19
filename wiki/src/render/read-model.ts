@@ -221,7 +221,9 @@ function renderListField(
           ? placeholder()
           : sr.as === "sections"
             ? matched.map((el, i) => renderElementSection(el, i + 1, sr, label)).join("\n\n")
-            : asList(matched.map((el) => fillTemplate(g.item ?? "", el, label)));
+            : sr.as === "stack"
+              ? matched.map((el) => renderElementStack(el, sr, label)).filter((b) => b.length > 0).join("\n\n")
+              : asList(matched.map((el) => fillTemplate(g.item ?? "", el, label)));
       blocks.push(section(heading(2, g.heading ?? g.when), body));
     }
     return blocks.join("\n\n");
@@ -229,6 +231,13 @@ function renderListField(
   if (f.elements.length === 0) return sr.placeholder ?? placeholder();
   if (sr.as === "sections") {
     return f.elements.map((el, i) => renderElementSection(el, i + 1, sr, label)).join("\n\n");
+  }
+  if (sr.as === "stack") {
+    // An element whose body parts are all empty contributes nothing rather than a
+    // blank run — joinBlocks would collapse it anyway, and the placeholder above
+    // already covers the "no elements at all" case.
+    const bodies = f.elements.map((el) => renderElementStack(el, sr, label)).filter((b) => b.length > 0);
+    return bodies.length === 0 ? (sr.placeholder ?? placeholder()) : bodies.join("\n\n");
   }
   const template = sr.item ?? "{text}";
   if (sr.as === "checklist") {
@@ -241,6 +250,20 @@ function renderListField(
 }
 
 /**
+ * Render one list element as a STACK entry (`as: "stack"`): its declared body parts and
+ * nothing else — no heading, no ordinal. The companion of {@link renderElementSection}
+ * for lists whose items are rich text rather than titled subsections.
+ */
+function renderElementStack(el: IItem, sr: SectionRender, label: LabelResolver): string {
+  const parts: string[] = [];
+  for (const part of sr.element?.body ?? []) {
+    const rendered = renderElementBodyPart(el, part, label);
+    if (rendered.length > 0) parts.push(rendered);
+  }
+  return parts.join("\n\n");
+}
+
+/**
  * Render one list element as a subsection (the `as: "sections"` mode): a heading template
  * filled from the element's fields, then each non-empty declared body part. The ordinal is
  * supplied by the caller from the element's position in its rendered group, so it matches
@@ -250,7 +273,7 @@ function renderListField(
  */
 function renderElementSection(el: IItem, ordinal: number, sr: SectionRender, label: LabelResolver): string {
   const spec = sr.element;
-  const headingText = spec !== undefined ? fillTemplate(spec.heading, el, label) : "";
+  const headingText = spec?.heading !== undefined ? fillTemplate(spec.heading, el, label) : "";
   const parts: string[] = [];
   for (const part of spec?.body ?? []) {
     const rendered = renderElementBodyPart(el, part, label);
@@ -447,6 +470,7 @@ function renderDerivedList(items: readonly DerivedItem[]): string {
  * for an `as: "sections"` config the `### {ordinal}. {heading}` subsection (heading only
  * under `numbered: false`; deeper under `depthField`) plus the
  * declared body parts (ordinal from the same per-group index the full render uses); for
+ * an `as: "stack"` config its body parts alone, with no heading; for
  * bullets/numbered/checklist the single rendered item line. An element filtered out of
  * every rendered group still renders — via the group whose `when` matches its status,
  * else the base config — with its stored-order position as the ordinal fallback. Throws
@@ -489,6 +513,7 @@ export function renderPageElement(
     ordinals.get(ordinalKey(sec.id, fieldKey, elementId)) ?? list.elements.findIndex((e) => e.id === elementId) + 1;
 
   if (sr.as === "sections") return renderElementSection(el, ordinal, sr, label);
+  if (sr.as === "stack") return renderElementStack(el, sr, label);
   const group =
     sr.groupBy !== undefined && sr.groups !== undefined
       ? sr.groups.find((g) => g.when === (el.status ?? ""))

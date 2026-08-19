@@ -1072,7 +1072,19 @@ export interface SectionRender {
   readonly placeholder?: string;
   /** Which field of the section to render as the body. */
   readonly field?: string;
-  readonly as?: "block" | "inline" | "fenced" | "link" | "bullets" | "numbered" | "table" | "blocks" | "checklist" | "sections";
+  /**
+   * How a LIST field lays out. Only a few values change behaviour — `numbered`,
+   * `checklist`, `sections`, `stack` — the rest document intent and fall back to
+   * bullets; non-list fields ignore it entirely.
+   *
+   * `stack` is the companion of `sections` for elements that have no heading: each
+   * element's {@link element} body parts render as top-level blocks, one after
+   * another. `sections` cannot express this, because an empty heading template emits
+   * a bare `###` with trailing whitespace, which the canonical Markdown contract
+   * forbids. Reach for it when the list's items ARE rich text — reading notes,
+   * captured excerpts — rather than titled subsections.
+   */
+  readonly as?: "block" | "inline" | "fenced" | "link" | "bullets" | "numbered" | "table" | "blocks" | "checklist" | "sections" | "stack";
   /** Element template, e.g. "{text}" / "{field?}". */
   readonly item?: string;
   /** For `as: "checklist"`: the element status value that renders a checked box `[x]` (else `[ ]`). */
@@ -1090,7 +1102,8 @@ export interface SectionRender {
    * `field` (optionally prefixed `**label:** `), skipping a part whose field is empty.
    */
   readonly element?: {
-    readonly heading: string;
+    /** Required by `as: "sections"`; omitted under `as: "stack"`, which has no heading. */
+    readonly heading?: string;
     readonly body?: readonly { readonly label?: string; readonly field: string }[];
   };
   /** For `as: "sections"`: prefix each element heading with its render-time ordinal
