@@ -10,22 +10,19 @@
  * ⌘-click one to open it on the right.
  * Every glossary term's occurrences are highlighted in the rendered bodies by status
  * (needs-definition / defined / checked), and clicking one jumps to that term on the
- * right. The RIGHT is the glossary as an accordion: clicking a term expands it IN PLACE
- * into its definition editor (occurrences, Save & evaluate, the critic's verdict, remove). The list has two groups —
- * working and accepted — and ONLY the human's "Mark as understood" moves a term between
- * them, so a row never jumps while it is being worked on.
+ * right. The RIGHT is a collapsible column holding <GlossaryPane> — the term rail shared
+ * with the standalone `restatement-glossary` page. This studio owns the column (and
+ * whether it is collapsed) and feeds the pane the two note-derived extras a standalone
+ * glossary has no source for: reference counts and the excerpts that ground the critic.
  *
  * Marking terms is the fluid part: select any text in a note and a floating "add to
  * glossary" action appears; a note's `**bold**` runs (the learner's existing habit) are
  * offered as one-click candidate chips; and the rail takes free-typed terms. A
  * freshly-marked term expands on the right, ready to define.
  *
- * Evaluation is asynchronous and parallel (unlike the restate critic's one serialized
- * session): saving a definition auto-queues a stateless claude evaluation
- * (/api/study/evaluate), a couple run concurrently, and each verdict lands on the PAGE
- * via `recordEvaluation` (grade + feedback, term → checked) — the wiki, not the browser,
- * is the record. Editing a checked definition downgrades it honestly (`defineTerm`
- * clears the stale verdict model-side).
+ * Defining and evaluating terms lives in the pane; the two things this studio persists
+ * for it — the open row and the definition drafts — ride in the same localStorage blob
+ * as the note drafts, so they are CONTROLLED props.
  *
  * A note card is in edit mode exactly when it has a DRAFT (`noteDrafts[id]`), so
  * in-progress edits survive reloads via localStorage (per workspace+page), pruned when
@@ -44,31 +41,28 @@ import {
 } from "../lib/live";
 import { renderMarkdown } from "../lib/markdown";
 import {
+  glossaryDefinitions,
+  STATUS_LABEL,
+  termRefsOf,
+  titleOf,
+  type SaveState,
+  type TermRef,
+} from "../lib/glossary";
+import { GlossaryPane } from "./GlossaryPane";
+import {
   isEditable,
   pruneBySection,
   sliceH2Section,
   splitRenderedElement,
-  type CritiqueGrade,
   type KeyValueStore,
-  type RestateHealth,
 } from "../lib/restate";
 import { clampSplit, DEFAULT_SPLIT, loadSplit, saveSplit } from "../lib/restate-split";
 import {
   boldCandidates,
   clearStudyDraft,
-  definitionFromBody,
-  evaluationFeedbackMarkdown,
-  feedbackFromBody,
-  fetchStudyHealth,
   findTermMatches,
-  glossaryEntries,
   loadStudyDraft,
-  parseEvaluationFeedback,
-  requestEvaluation,
   saveStudyDraft,
-  termContext,
-  termFilterRank,
-  type StudyVerdict,
 } from "../lib/study";
 import { canIndent, canOutdent, depthOf, hiddenByCollapse, siblingMoveTarget, subtreeIds } from "../lib/outline";
 import { pageHref } from "../lib/routes";
@@ -78,8 +72,6 @@ const NOTES_KEY = "notes";
 const GLOSSARY_KEY = "glossary";
 /** The composer's draft key in `noteDrafts` — a new note has no element id yet. */
 const NEW_NOTE_KEY = "";
-/** How many evaluations run concurrently (stateless calls — no shared session). */
-const EVAL_CONCURRENCY = 2;
 /** Autosave debounce: one `reviseNote` per typing pause, not per keystroke. */
 const AUTOSAVE_MS = 1000;
 /** The collapsed-glossary preference (localStorage; shared across pages). */
@@ -94,15 +86,6 @@ function browserStore(): KeyValueStore | null {
   }
 }
 
-function titleOf(el: SectionElementSummary | undefined): string {
-  return el?.title ?? el?.id ?? "Untitled";
-}
-
-function gradeOf(el: SectionElementSummary): string {
-  const g = el.scalars?.["grade"];
-  return typeof g === "string" ? g : "";
-}
-
 function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
@@ -113,42 +96,8 @@ function omit<T>(record: Readonly<Record<string, T>>, key: string): Record<strin
   return next;
 }
 
-const GRADE_LABEL: Record<CritiqueGrade, string> = {
-  understood: "Understood",
-  partial: "Partial",
-  surface: "Surface",
-};
-
-const STATUS_LABEL: Record<string, string> = {
-  marked: "Needs definition",
-  defined: "Defined",
-  checked: "Checked",
-  accepted: "Accepted",
-};
-
-/** Seconds since `startedAt` (null = not running), ticking once a second. */
-function useElapsedSeconds(startedAt: number | null): number {
-  const [elapsed, setElapsed] = useState(0);
-  useEffect(() => {
-    if (startedAt === null) {
-      setElapsed(0);
-      return;
-    }
-    setElapsed(0);
-    const t = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 1000);
-    return () => clearInterval(t);
-  }, [startedAt]);
-  return elapsed;
-}
 
 // ── term highlighting (DOM post-pass over rendered note HTML) ───────────────────
-
-interface TermRef {
-  readonly id: string;
-  readonly term: string;
-  readonly status: string;
-  readonly grade: string;
-}
 
 /**
  * Wrap every glossary-term occurrence in `root`'s text with a status-classed
@@ -237,8 +186,6 @@ function CandidateChips({
 // ── left column: one note card (always a live editor while capturing) ───────────
 
 /** One note's autosave status, shown quietly on the card. */
-type SaveState = { readonly state: "saving" | "saved" } | { readonly state: "error"; readonly message: string };
-
 interface NoteStructure {
   readonly canUp: boolean;
   readonly canDown: boolean;
@@ -526,280 +473,6 @@ function NoteComposer({
   );
 }
 
-// ── right column: one glossary term (accordion row) ─────────────────────────────
-
-interface EvalState {
-  readonly verdict: StudyVerdict | null;
-  readonly error: string | null;
-}
-
-/** The critic's suggested definition, blurred until deliberately revealed — reading it
- *  first would defeat the flashcard. */
-function Suggestion({ text }: { text: string }): React.JSX.Element {
-  const [revealed, setRevealed] = useState(false);
-  useEffect(() => setRevealed(false), [text]);
-  return (
-    <div
-      className={`study-suggestion${revealed ? " is-revealed" : ""}`}
-      role={revealed ? undefined : "button"}
-      title={revealed ? undefined : "Click to reveal the suggested definition"}
-      onClick={() => setRevealed(true)}
-    >
-      <span className="restate-verdict-label study-suggestion-label">Suggestion</span>
-      <span className="study-suggestion-text">{text}</span>
-    </div>
-  );
-}
-
-function termBadge(el: SectionElementSummary, running: boolean, queued: boolean): React.JSX.Element {
-  const grade = gradeOf(el);
-  if (running) return <span className="restate-badge study-badge-running">Evaluating…</span>;
-  if (queued) return <span className="restate-badge">Queued</span>;
-  if (el.status === "accepted") return <span className="restate-badge study-badge-accepted">✓ Accepted</span>;
-  if (el.status === "checked" && grade !== "") {
-    return <span className={`restate-badge restate-grade-${grade}`}>{GRADE_LABEL[grade as CritiqueGrade] ?? grade}</span>;
-  }
-  return <span className={`restate-badge study-badge-${el.status ?? "marked"}`}>{STATUS_LABEL[el.status ?? "marked"] ?? el.status}</span>;
-}
-
-/** The expanded term's body — its own component so the element render + draft seeding
- *  only run for the open row. */
-function TermRowBody({
-  workspaceId,
-  pageId,
-  el,
-  draft,
-  onDraftChange,
-  onEditorBlur,
-  onSeed,
-  capturing,
-  saveState,
-  evalState,
-  running,
-  queued,
-  startedAt,
-  onCancelEval,
-  onAccept,
-  onReopen,
-}: {
-  workspaceId: WorkspaceId;
-  pageId: PageId;
-  el: SectionElementSummary;
-  draft: string | undefined;
-  onDraftChange: (text: string) => void;
-  /** Focus left the definition editor: the save-and-evaluate moment. */
-  onEditorBlur: () => void;
-  onSeed: (text: string) => void;
-  capturing: boolean;
-  saveState: SaveState | undefined;
-  evalState: EvalState | undefined;
-  running: boolean;
-  queued: boolean;
-  startedAt: number | null;
-  onCancelEval: () => void;
-  /** The human's "I understand this" — the only exit from the working set. */
-  onAccept: () => void;
-  onReopen: () => void;
-}): React.JSX.Element {
-  const { markdown, loading } = useElementMarkdown(workspaceId, pageId, GLOSSARY_KEY, el.id);
-  const parsedBody = markdown === null ? null : splitRenderedElement(markdown).body;
-  const storedFeedback = useMemo(() => {
-    const raw = parsedBody === null ? null : feedbackFromBody(parsedBody);
-    return raw === null ? null : parseEvaluationFeedback(raw);
-  }, [parsedBody]);
-  const storedFeedbackHtml = useMemo(
-    () => (storedFeedback === null || storedFeedback.body === "" ? "" : renderMarkdown(storedFeedback.body, workspaceId)),
-    [storedFeedback, workspaceId],
-  );
-  const elapsed = useElapsedSeconds(running ? startedAt : null);
-  const grade = gradeOf(el);
-  const verdict = evalState?.verdict ?? null;
-  const termStatus = el.status ?? "marked";
-
-  // Seed the definition editor from the stored definition — the FIRST time only; the
-  // draft entry then owns the text (typing during the fetch is never overwritten).
-  useEffect(() => {
-    if (draft !== undefined || parsedBody === null) return;
-    onSeed(definitionFromBody(parsedBody));
-  }, [draft, parsedBody, onSeed]);
-
-  const text = draft ?? (parsedBody === null ? "" : definitionFromBody(parsedBody));
-
-  return (
-    <div className="study-term-body">
-      {capturing && saveState !== undefined && (
-        <p className="muted study-term-meta">
-          <span
-            className={`study-save-state${saveState.state === "error" ? " is-error" : ""}`}
-            role={saveState.state === "error" ? "alert" : "status"}
-            title={saveState.state === "error" ? saveState.message : undefined}
-          >
-            {saveState.state === "saving" ? "Saving…" : saveState.state === "saved" ? "Saved" : "Save failed"}
-          </span>
-        </p>
-      )}
-      {capturing ? (
-        <>
-          <div className="study-definition-editor">
-            <MarkdownEditor
-              value={text}
-              onChange={onDraftChange}
-              onBlur={onEditorBlur}
-              terms={[]}
-              onTermClick={() => {}}
-              submitOnEnter
-              placeholder={
-                draft === undefined && loading ? "Loading the definition…" : "Define this term in your own words — Enter saves and evaluates…"
-              }
-            />
-          </div>
-          {saveState?.state === "error" && (
-            <p className="error study-save-error">Autosave failed: {saveState.message} — your text is kept; it retries on the next pause.</p>
-          )}
-        </>
-      ) : parsedBody !== null && definitionFromBody(parsedBody) !== "" ? (
-        /* eslint-disable-next-line react/no-danger */
-        <div className="markdown restate-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(definitionFromBody(parsedBody), workspaceId) }} />
-      ) : (
-        <p className="muted">No definition — reopen the page to write one.</p>
-      )}
-
-      {(running || queued || evalState !== undefined) && (
-        <div className="restate-critique">
-          <div className="restate-critique-head">
-            <span>
-              {running ? (
-                `Evaluating… ${elapsed}s`
-              ) : queued ? (
-                "Evaluation queued…"
-              ) : verdict !== null ? (
-                <>
-                  Evaluation <span className={`restate-badge restate-grade-${verdict.grade}`}>{GRADE_LABEL[verdict.grade]}</span>
-                </>
-              ) : (
-                "Evaluation"
-              )}
-            </span>
-            {(running || queued) && (
-              <button type="button" className="restate-cancel" onClick={onCancelEval}>
-                Cancel
-              </button>
-            )}
-          </div>
-          {verdict !== null && (
-            <div className="restate-verdict">
-              {verdict.points.length > 0 && (
-                <ul className="study-eval-points">
-                  {verdict.points.map((p, i) => (
-                    <li key={i}>{p}</li>
-                  ))}
-                </ul>
-              )}
-              {verdict.suggestion !== null && <Suggestion text={verdict.suggestion} />}
-            </div>
-          )}
-          {evalState?.error != null && <p className="error">{evalState.error}</p>}
-        </div>
-      )}
-
-      {!running && !queued && evalState === undefined && termStatus !== "marked" && grade !== "" && storedFeedback !== null && (
-        <div className="restate-critique">
-          <div className="restate-critique-head">
-            <span>
-              Last evaluation{" "}
-              {grade !== "" && <span className={`restate-badge restate-grade-${grade}`}>{GRADE_LABEL[grade as CritiqueGrade] ?? grade}</span>}
-            </span>
-          </div>
-          <div className="restate-verdict">
-            {storedFeedbackHtml !== "" && (
-              /* eslint-disable-next-line react/no-danger */
-              <div className="markdown" dangerouslySetInnerHTML={{ __html: storedFeedbackHtml }} />
-            )}
-            {storedFeedback.suggestion !== null && <Suggestion text={storedFeedback.suggestion} />}
-          </div>
-        </div>
-      )}
-
-      {capturing && termStatus !== "marked" && (
-        <div className="study-term-actions">
-          {termStatus === "accepted" ? (
-            <button type="button" className="restate-cancel" title="Put this term back in the working set" onClick={onReopen}>
-              Reopen
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="restate-gap-btn"
-              disabled={running || queued}
-              title={running || queued ? "The evaluation lands in a moment — read it first" : "Move this term to the accepted glossary"}
-              onClick={onAccept}
-            >
-              Mark as understood
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** The term list's own way in: the rail's `+ Add term` button swaps itself for this
- *  in-list composer. A term already in the glossary would be refused model-side, so the
- *  button opens that row instead of marking a duplicate. */
-function TermComposer({
-  terms,
-  busy,
-  onAdd,
-  onReveal,
-  onClose,
-}: {
-  terms: readonly TermRef[];
-  busy: boolean;
-  onAdd: (term: string) => void;
-  onReveal: (termId: string) => void;
-  onClose: () => void;
-}): React.JSX.Element {
-  const [text, setText] = useState("");
-  const clean = text.trim().replace(/\s+/g, " ");
-  const dup = clean === "" ? undefined : terms.find((t) => t.term.trim().toLowerCase() === clean.toLowerCase());
-  const submit = (): void => {
-    if (clean === "" || busy) return;
-    if (dup === undefined) onAdd(clean);
-    else onReveal(dup.id);
-    onClose();
-  };
-  return (
-    <form
-      className="study-add-term"
-      onSubmit={(e) => {
-        e.preventDefault();
-        submit();
-      }}
-    >
-      <input
-        type="text"
-        value={text}
-        autoFocus
-        placeholder="New term…"
-        aria-label="New glossary term"
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") onClose();
-        }}
-      />
-      {dup !== undefined && <p className="study-add-term-dup">Already in the glossary.</p>}
-      <div className="study-add-term-actions">
-        <button type="button" className="restate-cancel" onClick={onClose}>
-          Cancel
-        </button>
-        <button type="submit" className="restate-gap-btn" disabled={busy || clean === ""}>
-          {dup === undefined ? "Add term" : `Open “${dup.term}”`}
-        </button>
-      </div>
-    </form>
-  );
-}
-
 // ── the studio ──────────────────────────────────────────────────────────────────
 
 export function StudyStudio({
@@ -833,26 +506,15 @@ export function StudyStudio({
   /** Where the composer inserts: afterId, or null for "first note". Hidden when absent. */
   const [composing, setComposing] = useState<{ afterId: string | null } | null>(null);
   const [expandedTerm, setExpandedTerm] = useState<string | null>(null);
-  const [evals, setEvals] = useState<Readonly<Record<string, EvalState>>>({});
-  const [evalRuns, setEvalRuns] = useState<Readonly<Record<string, { startedAt: number }>>>({});
-  const [evalQueue, setEvalQueue] = useState<readonly { termId: string; definition: string | null }[]>([]);
-  const evalAborts = useRef(new Map<string, AbortController>());
   const [restored, setRestored] = useState(false);
-  const [health, setHealth] = useState<RestateHealth | null>(null);
+  /** Reported up by the glossary pane, for the status bar. */
+  const [evaluating, setEvaluating] = useState(false);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [deleting, setDeleting] = useState<string | null>(null);
-  /** The rail's filter box: narrows terms by name and definition, relevance-ordered. */
-  const [filterText, setFilterText] = useState("");
-  /** Rail ordering outside a filter: stored alphabetical, or by reference count. */
-  const [sortMode, setSortMode] = useState<"alpha" | "refs">("alpha");
-  /** The term whose trash icon is armed — the second click deletes. */
-  const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   /** Collapsed glossary panel: the notes take the full width; ⌘-clicking a term reopens it. */
   const [railCollapsed, setRailCollapsed] = useState(false);
   /** After markTerm commits, expand the term once its element appears (host.mutate returns no result). */
   const [pendingTermKey, setPendingTermKey] = useState<string | null>(null);
-  /** The in-list term composer is open (the rail's `+ Add term` button opened it). */
-  const [addingTerm, setAddingTerm] = useState(false);
   /** Floating "add to glossary" action for a text selection inside the notes column. */
   const [floatMark, setFloatMark] = useState<{ text: string; x: number; y: number } | null>(null);
   const studioRef = useRef<HTMLDivElement | null>(null);
@@ -860,16 +522,7 @@ export function StudyStudio({
   const railRef = useRef<HTMLElement | null>(null);
 
   const capturing = status === "capturing";
-  const termRefs = useMemo<readonly TermRef[]>(
-    () =>
-      glossary.elements.map((e) => ({
-        id: e.id,
-        term: titleOf(e),
-        status: e.status ?? "marked",
-        grade: gradeOf(e),
-      })),
-    [glossary.elements],
-  );
+  const termRefs = useMemo<readonly TermRef[]>(() => termRefsOf(glossary.elements), [glossary.elements]);
   /** The notes slice of the page render — the evaluator's source context. */
   const notesMarkdown = useMemo(
     () => (pageMarkdown === null ? null : sliceH2Section(pageMarkdown, "Notes", "first")),
@@ -892,17 +545,6 @@ export function StudyStudio({
     }
     setRestored(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Probe the evaluator once per mount; evaluation buttons disable with the reason.
-  useEffect(() => {
-    let cancelled = false;
-    void fetchStudyHealth().then((h) => {
-      if (!cancelled) setHealth(h);
-    });
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
   // Persist {expanded term, drafts}; an all-empty state clears the key.
@@ -931,15 +573,7 @@ export function StudyStudio({
     if (Object.keys(keptNotes).length !== Object.keys(noteDrafts).length) setNoteDrafts(keptNotes);
     const keptTerms = pruneBySection(termDrafts, glossary.elements);
     if (Object.keys(keptTerms).length !== Object.keys(termDrafts).length) setTermDrafts(keptTerms);
-    const keptEvals = pruneBySection(evals, glossary.elements);
-    if (Object.keys(keptEvals).length !== Object.keys(evals).length) setEvals(keptEvals);
     if (deleting !== null && !notes.elements.some((e) => e.id === deleting)) setDeleting(null);
-    for (const [termId, ctrl] of evalAborts.current) {
-      if (!glossary.elements.some((e) => e.id === termId)) {
-        ctrl.abort();
-        evalAborts.current.delete(termId);
-      }
-    }
     // A deleted note's pending autosave must never fire against a gone element.
     for (const [noteId, timer] of saveTimers.current) {
       if (noteId !== NEW_NOTE_KEY && !notes.elements.some((e) => e.id === noteId)) {
@@ -948,7 +582,7 @@ export function StudyStudio({
         lastSaved.current.delete(noteId);
       }
     }
-  }, [restored, notes, glossary, expandedTerm, noteDrafts, termDrafts, evals, deleting]);
+  }, [restored, notes, glossary, expandedTerm, noteDrafts, termDrafts, deleting]);
 
   // The collapsed glossary panel is a UI preference, shared across pages.
   useEffect(() => {
@@ -992,14 +626,6 @@ export function StudyStudio({
       setPendingTermKey(null);
     }
   }, [pendingTermKey, glossary.elements, revealTerm]);
-
-  // Abort every in-flight evaluation on unmount.
-  useEffect(() => {
-    const aborts = evalAborts.current;
-    return () => {
-      for (const ctrl of aborts.values()) ctrl.abort();
-    };
-  }, []);
 
   // Restore the persisted column split; drags write the CSS var directly.
   useEffect(() => {
@@ -1095,91 +721,6 @@ export function StudyStudio({
     window.addEventListener("scroll", clear, true);
     return () => window.removeEventListener("scroll", clear, true);
   }, [floatMark]);
-
-  // ── evaluation queue (async, parallel, capped) ────────────────────────────────
-
-  const criticReady = health !== null && health.available;
-  const criticGate =
-    health === null ? "Probing the evaluator…" : criticReady ? null : (health.reason ?? "the evaluator is not available");
-
-  const enqueueEval = useCallback((termId: string, definition: string | null) => {
-    setEvalQueue((q) => (q.some((e) => e.termId === termId) ? q : [...q, { termId, definition }]));
-  }, []);
-
-  const runEval = useCallback(
-    async (termId: string, definition: string | null) => {
-      const el = glossary.elements.find((e) => e.id === termId);
-      if (el === undefined) return;
-      const term = titleOf(el);
-      const ctrl = new AbortController();
-      evalAborts.current.get(termId)?.abort();
-      evalAborts.current.set(termId, ctrl);
-      setEvals((s) => omit(s, termId));
-      setEvalRuns((r) => ({ ...r, [termId]: { startedAt: Date.now() } }));
-      const land = (state: EvalState | null): void => {
-        if (evalAborts.current.get(termId) === ctrl) evalAborts.current.delete(termId);
-        setEvalRuns((r) => omit(r, termId));
-        if (state !== null) setEvals((s) => ({ ...s, [termId]: state }));
-      };
-      try {
-        let def = definition;
-        if (def === null) {
-          const h = await getHost();
-          def = definitionFromBody(splitRenderedElement(await h.renderElement(workspaceId, pageId, GLOSSARY_KEY, termId)).body);
-        }
-        if (def.trim() === "") {
-          land({ verdict: null, error: "nothing to evaluate — the definition is empty" });
-          return;
-        }
-        const out = await requestEvaluation({
-          term,
-          definition: def,
-          context: termContext(contextNotes, term),
-          ...(pageTitle !== null ? { subject: pageTitle } : {}),
-          signal: ctrl.signal,
-        });
-        if (ctrl.signal.aborted) {
-          land(null);
-          return;
-        }
-        if (!out.ok) {
-          land({ verdict: null, error: out.message });
-          return;
-        }
-        // The verdict is recorded ON THE PAGE — grade + feedback + checked, one commit.
-        // Direct host call: an eval failure belongs to this term's row, not the global
-        // mutation banner.
-        const h = await getHost();
-        try {
-          await h.mutate(workspaceId, pageId, "recordEvaluation", {
-            termId,
-            grade: out.verdict.grade,
-            markdown: evaluationFeedbackMarkdown(out.verdict),
-          });
-        } catch (e) {
-          land({ verdict: out.verdict, error: `verdict not recorded: ${errText(e)}` });
-          return;
-        }
-        land({ verdict: out.verdict, error: null });
-      } catch (e) {
-        land(ctrl.signal.aborted ? null : { verdict: null, error: errText(e) });
-      }
-    },
-    [glossary.elements, workspaceId, pageId, contextNotes, pageTitle],
-  );
-
-  // Drain the queue while slots are free.
-  useEffect(() => {
-    if (evalQueue.length === 0 || Object.keys(evalRuns).length >= EVAL_CONCURRENCY) return;
-    const [next, ...rest] = evalQueue;
-    setEvalQueue(rest);
-    void runEval(next!.termId, next!.definition);
-  }, [evalQueue, evalRuns, runEval]);
-
-  const cancelEval = useCallback((termId: string) => {
-    evalAborts.current.get(termId)?.abort();
-    setEvalQueue((q) => q.filter((e) => e.termId !== termId));
-  }, []);
 
   // ── note editing (inline, on the left; debounced autosave, no save button) ────
 
@@ -1285,81 +826,6 @@ export function StudyStudio({
     if (ok) closeComposer();
   }, [composing, titleDrafts, noteDrafts, runMutation, closeComposer]);
 
-  // ── term editing (inline, on the right; SAVE-ON-BLUR, then auto-evaluate) ─────
-
-  const [termSaveStates, setTermSaveStates] = useState<Readonly<Record<string, SaveState>>>({});
-  /** The definition the wiki last accepted per term (trimmed) — only real changes commit. */
-  const termLastSaved = useRef(new Map<string, string>());
-  const termDraftsRef = useRef(termDrafts);
-  const criticReadyRef = useRef(criticReady);
-  useEffect(() => {
-    termDraftsRef.current = termDrafts;
-  }, [termDrafts]);
-  useEffect(() => {
-    criticReadyRef.current = criticReady;
-  }, [criticReady]);
-  /** Commit a term's definition (if dirty) — fired on editor BLUR, never mid-typing —
-   *  then AUTO-EVALUATE the settled text. */
-  const flushTermSave = useCallback(
-    async (termId: string): Promise<void> => {
-      const markdown = (termDraftsRef.current[termId] ?? "").trim();
-      if (markdown === "" || termLastSaved.current.get(termId) === markdown) return;
-      // A stale in-flight evaluation is about text that no longer exists.
-      cancelEval(termId);
-      setTermSaveStates((s) => ({ ...s, [termId]: { state: "saving" } }));
-      try {
-        const h = await getHost();
-        await h.mutate(workspaceId, pageId, "defineTerm", { termId, markdown });
-        termLastSaved.current.set(termId, markdown);
-        setTermSaveStates((s) => ({ ...s, [termId]: { state: "saved" } }));
-        if (criticReadyRef.current) enqueueEval(termId, markdown);
-      } catch (e) {
-        setTermSaveStates((s) => ({ ...s, [termId]: { state: "error", message: errText(e) } }));
-      }
-    },
-    [workspaceId, pageId, cancelEval, enqueueEval],
-  );
-
-  // Best effort: leaving the studio commits the definition still open in the editor.
-  const expandedTermRef = useRef(expandedTerm);
-  useEffect(() => {
-    expandedTermRef.current = expandedTerm;
-  }, [expandedTerm]);
-  useEffect(() => {
-    return () => {
-      const open = expandedTermRef.current;
-      if (open !== null) void flushTermSave(open);
-    };
-  }, [flushTermSave]);
-
-  /** A term's stored definition reached its editor: the autosave baseline. */
-  const onTermSeeded = useCallback((termId: string, text: string) => {
-    if (!termLastSaved.current.has(termId)) termLastSaved.current.set(termId, text.trim());
-    setTermDrafts((d) => (d[termId] !== undefined ? d : { ...d, [termId]: text }));
-  }, []);
-
-  // A deleted term leaves no save baseline or status behind.
-  useEffect(() => {
-    if (glossary.loading || glossary.error !== null) return;
-    for (const termId of [...termLastSaved.current.keys()]) {
-      if (!glossary.elements.some((e) => e.id === termId)) termLastSaved.current.delete(termId);
-    }
-    const kept = pruneBySection(termSaveStates, glossary.elements);
-    if (Object.keys(kept).length !== Object.keys(termSaveStates).length) setTermSaveStates(kept);
-  }, [glossary, termSaveStates]);
-
-  const removeTerm = useCallback(
-    async (termId: string) => {
-      cancelEval(termId);
-      const ok = await runMutation("unmarkTerm", { termId });
-      if (ok) {
-        setExpandedTerm((prev) => (prev === termId ? null : prev));
-        setConfirmRemoveId((prev) => (prev === termId ? null : prev));
-      }
-    },
-    [cancelEval, runMutation],
-  );
-
   // ── note structure ────────────────────────────────────────────────────────────
 
   const onMove = useCallback(
@@ -1385,11 +851,7 @@ export function StudyStudio({
 
   const hidden = useMemo(() => hiddenByCollapse(notes.elements, collapsed), [notes.elements, collapsed]);
   const marked = glossary.elements.filter((e) => e.status === "marked");
-  /** The list has exactly two groups, and only the human's accept moves a term between
-   *  them — defining a term or a verdict landing must never make a row jump. */
-  const working = glossary.elements.filter((e) => e.status !== "accepted");
   const accepted = glossary.elements.filter((e) => e.status === "accepted");
-  const evaluating = Object.keys(evalRuns).length > 0 || evalQueue.length > 0;
   const total = glossary.elements.length;
 
   /** Reference counts for every term in ONE scan of the notes — the same longest-first
@@ -1403,49 +865,9 @@ export function StudyStudio({
     return counts;
   }, [notesMarkdown, termRefs]);
 
-  /** Every term's definition text (from the page render's Glossary slice), so the filter
-   *  searches definitions without a fetch per term. Keyed by lowercased term. */
-  const glossaryDefs = useMemo(() => {
-    const map = new Map<string, string>();
-    if (pageMarkdown === null) return map;
-    // "last": note bodies keep authored H2s verbatim, so the REAL Glossary is the last.
-    const slice = sliceH2Section(pageMarkdown, "Glossary", "last");
-    if (slice === null) return map;
-    for (const e of glossaryEntries(slice)) map.set(e.term.trim().toLowerCase(), e.definition);
-    return map;
-  }, [pageMarkdown]);
-
-  const filterQuery = filterText.trim();
-  const filtering = filterQuery !== "";
-  /** Filter matches across ALL statuses, relevance-ordered: name matches first. */
-  const filteredTerms = useMemo(() => {
-    if (!filtering) return [];
-    const ranked: { el: SectionElementSummary; rank: number }[] = [];
-    for (const el of glossary.elements) {
-      const name = titleOf(el);
-      const rank = termFilterRank(filterQuery, name, glossaryDefs.get(name.trim().toLowerCase()) ?? "");
-      if (rank !== null) ranked.push({ el, rank });
-    }
-    ranked.sort((a, b) => a.rank - b.rank || titleOf(a.el).localeCompare(titleOf(b.el)));
-    return ranked.map((r) => r.el);
-  }, [filtering, filterQuery, glossary.elements, glossaryDefs]);
-  const filterHasExactMatch = glossary.elements.some((e) => titleOf(e).trim().toLowerCase() === filterQuery.toLowerCase());
-
-  /** Group ordering: stored alphabetical, or most-referenced first. */
-  const sortRows = useCallback(
-    (rows: readonly SectionElementSummary[]): readonly SectionElementSummary[] =>
-      sortMode === "alpha"
-        ? rows
-        : [...rows].sort(
-            (a, b) => (termCounts.get(b.id) ?? 0) - (termCounts.get(a.id) ?? 0) || titleOf(a).localeCompare(titleOf(b)),
-          ),
-    [sortMode, termCounts],
-  );
-
-  // An armed trash disarms when attention moves elsewhere.
-  useEffect(() => {
-    setConfirmRemoveId(null);
-  }, [expandedTerm, filterQuery]);
+  /** Definition text per term for the rail's filter. "last": note bodies keep authored
+   *  H2s verbatim, so the REAL Glossary heading is the last one. */
+  const glossaryDefs = useMemo(() => glossaryDefinitions(pageMarkdown, "last"), [pageMarkdown]);
 
   const mutationNotice =
     mutationError === null ? null : (
@@ -1456,70 +878,6 @@ export function StudyStudio({
         </button>
       </div>
     );
-
-  const termRow = (el: SectionElementSummary): React.JSX.Element => {
-    const running = evalRuns[el.id] !== undefined;
-    const queued = evalQueue.some((e) => e.termId === el.id);
-    const expanded = expandedTerm === el.id;
-    const count = termCounts.get(el.id) ?? 0;
-    const armed = confirmRemoveId === el.id;
-    return (
-      <li key={el.id} data-term-id={el.id} className={`study-term-item${expanded ? " is-expanded" : ""}`}>
-        <div className="study-term-head">
-          <button
-            type="button"
-            className={`study-term-row${expanded ? " is-selected" : ""}`}
-            aria-expanded={expanded}
-            onClick={() => setExpandedTerm((prev) => (prev === el.id ? null : el.id))}
-          >
-            <span className="study-term-name">{titleOf(el)}</span>
-            <span
-              className={`study-term-count${count === 0 ? " is-zero" : ""}`}
-              title={count === 0 ? "not found in your notes" : `${count} occurrence${count === 1 ? "" : "s"} in your notes`}
-            >
-              {count}×
-            </span>
-            {termBadge(el, running, queued)}
-          </button>
-          {capturing && (
-            <button
-              type="button"
-              className={`restate-tool study-term-trash${armed ? " is-danger" : ""}`}
-              aria-pressed={armed}
-              disabled={mutating}
-              title={armed ? `Click again to remove "${titleOf(el)}"` : "Remove this term"}
-              onClick={() => {
-                if (armed) void removeTerm(el.id);
-                else setConfirmRemoveId(el.id);
-              }}
-            >
-              🗑
-            </button>
-          )}
-        </div>
-        {expanded && (
-          <TermRowBody
-            workspaceId={workspaceId}
-            pageId={pageId}
-            el={el}
-            draft={termDrafts[el.id]}
-            onDraftChange={(text) => setTermDrafts((d) => ({ ...d, [el.id]: text }))}
-            onEditorBlur={() => void flushTermSave(el.id)}
-            onSeed={(text) => onTermSeeded(el.id, text)}
-            capturing={capturing}
-            saveState={termSaveStates[el.id]}
-            evalState={evals[el.id]}
-            running={running}
-            queued={queued}
-            startedAt={evalRuns[el.id]?.startedAt ?? null}
-            onCancelEval={() => cancelEval(el.id)}
-            onAccept={() => void runMutation("acceptTerm", { termId: el.id })}
-            onReopen={() => void runMutation("reopenTerm", { termId: el.id })}
-          />
-        )}
-      </li>
-    );
-  };
 
   const composer = (afterId: string | null): React.JSX.Element => (
     <NoteComposer
@@ -1703,144 +1061,44 @@ export function StudyStudio({
           </aside>
         ) : (
         <aside ref={railRef} className="restate-workbench" aria-label="Glossary">
-          <section className="restate-block study-rail">
-            {/* Pinned while the term list scrolls: the filter and the collapse control
-                stay reachable from anywhere in a long glossary. */}
-            <div className="study-rail-sticky">
-            <div className="restate-block-head-row">
-              <span className="study-rail-title">
-                <h2 className="restate-block-head">Glossary</h2>
-                <button
-                  type="button"
-                  className="study-rail-collapse"
-                  aria-label="Collapse the glossary panel"
-                  title="Collapse the glossary panel — ⌘-click a term to reopen it"
-                  onClick={() => toggleRail(true)}
-                >
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <path d="M3.5 3.5 8 8l-4.5 4.5M8.5 3.5 13 8l-4.5 4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </button>
-              </span>
-              <span className="study-rail-controls">
-                {total > 1 && (
-                  <div className="view-toggle" role="tablist" aria-label="Glossary order">
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={sortMode === "alpha"}
-                      className={`view-tab ${sortMode === "alpha" ? "active" : ""}`}
-                      title="Order alphabetically"
-                      onClick={() => setSortMode("alpha")}
-                    >
-                      A–Z
-                    </button>
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={sortMode === "refs"}
-                      className={`view-tab ${sortMode === "refs" ? "active" : ""}`}
-                      title="Order by how often the term appears in your notes"
-                      onClick={() => setSortMode("refs")}
-                    >
-                      Refs
-                    </button>
-                  </div>
-                )}
-              </span>
-            </div>
-            {(total > 0 || capturing) && (
-              <div className="study-filter">
-                <input
-                  type="text"
-                  value={filterText}
-                  placeholder="Filter terms…"
-                  aria-label="Filter glossary terms by name and definition"
-                  onChange={(e) => setFilterText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Escape") setFilterText("");
-                  }}
-                />
-                {filtering && (
-                  <button type="button" className="restate-cancel" title="Clear the filter" onClick={() => setFilterText("")}>
-                    ✕
-                  </button>
-                )}
-              </div>
-            )}
-            </div>
-            <div className="study-rail-body">
-            {capturing && !filtering && (
-              addingTerm ? (
-                <TermComposer
-                  terms={termRefs}
-                  busy={mutating}
-                  onAdd={(t) => void onMarkTerm(t)}
-                  onReveal={revealTerm}
-                  onClose={() => setAddingTerm(false)}
-                />
-              ) : (
-                <button
-                  type="button"
-                  className="restate-gap-btn study-add-term-open"
-                  disabled={mutating}
-                  title="Add a term to the glossary"
-                  onClick={() => setAddingTerm(true)}
-                >
-                  + Add term
-                </button>
-              )
-            )}
-            {glossary.loading && glossary.elements.length === 0 ? (
-              <p className="muted">Loading glossary…</p>
-            ) : glossary.elements.length === 0 && !filtering ? (
-              <p className="muted">
+          <GlossaryPane
+            workspaceId={workspaceId}
+            pageId={pageId}
+            glossary={glossary}
+            editable={capturing}
+            subject={pageTitle}
+            definitions={glossaryDefs}
+            expandedTerm={expandedTerm}
+            onExpandedTermChange={setExpandedTerm}
+            termDrafts={termDrafts}
+            onTermDraftsChange={setTermDrafts}
+            onMarkTerm={(t) => void onMarkTerm(t)}
+            onRevealTerm={revealTerm}
+            runMutation={runMutation}
+            mutating={mutating}
+            onEvaluatingChange={setEvaluating}
+            contextNotes={contextNotes}
+            termCounts={termCounts}
+            headerAction={
+              <button
+                type="button"
+                className="study-rail-collapse"
+                aria-label="Collapse the glossary panel"
+                title="Collapse the glossary panel — ⌘-click a term to reopen it"
+                onClick={() => toggleRail(true)}
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M3.5 3.5 8 8l-4.5 4.5M8.5 3.5 13 8l-4.5 4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            }
+            emptyHint={
+              <>
                 No terms yet. Hit <strong>+ Add term</strong> above, select text in a note, or click a suggested{" "}
                 <span className="study-chip study-chip-demo">+ term</span> chip.
-              </p>
-            ) : filtering ? (
-              <>
-                {filteredTerms.length > 0 ? (
-                  <ul className="study-term-list">{filteredTerms.map(termRow)}</ul>
-                ) : (
-                  <p className="muted">No term matches &ldquo;{filterQuery}&rdquo;.</p>
-                )}
-                {capturing && !filterHasExactMatch && (
-                  <button
-                    type="button"
-                    className="study-chip study-filter-mark"
-                    disabled={mutating}
-                    title={`Add "${filterQuery}" to the glossary`}
-                    onClick={() => {
-                      void onMarkTerm(filterQuery);
-                      setFilterText("");
-                    }}
-                  >
-                    + Mark &ldquo;{filterQuery}&rdquo; as a term
-                  </button>
-                )}
               </>
-            ) : (
-              <>
-                {working.length > 0 && (
-                  <>
-                    <h3 className="study-rail-head">Working ({working.length})</h3>
-                    <ul className="study-term-list">{sortRows(working).map(termRow)}</ul>
-                  </>
-                )}
-                {accepted.length > 0 && (
-                  <>
-                    <h3 className="study-rail-head">Accepted ({accepted.length})</h3>
-                    <ul className="study-term-list">{sortRows(accepted).map(termRow)}</ul>
-                  </>
-                )}
-              </>
-            )}
-            {criticGate !== null && health !== null && (
-              <p className="muted restate-health">Auto-evaluation unavailable: {criticGate}. Defining terms still works.</p>
-            )}
-            </div>
-          </section>
+            }
+          />
         </aside>
         )}
       </div>
