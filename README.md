@@ -1,8 +1,14 @@
 # Structured Wiki
 
+<img width="1424" height="653" alt="image" src="https://github.com/user-attachments/assets/d49beec9-c2be-44f3-b075-8e4af70fb597" />
+
 A TypeScript, **event-sourced, LLM-first structured wiki**. Pages aren't free text — they're **typed
 documents** (a "feature brief", an "implementation plan") that change only through **named, typed
-mutations** gated by a **finite-state machine**. A workspace is a graph of pages backed by a single
+mutations** gated by a **finite-state machine**.
+
+<img width="1180" height="613" alt="image" src="https://github.com/user-attachments/assets/e5afc8ef-f294-47ad-af73-1ca377d2d982" />
+
+A workspace is a graph of pages backed by a single
 append-only [Durable Stream](https://durablestreams.com/concepts); history is the source of truth, and
 every page renders **deterministically** to Markdown. Agents reach it over **MCP**.
 
