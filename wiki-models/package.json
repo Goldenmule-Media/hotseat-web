@@ -4,6 +4,7 @@
   "type": "module",
   "description": "Runtime-loadable page-type schema bundles for the wiki engine. Authored against wiki's public authoring API; loaded by reference (dynamic import) and hot-reloaded.",
   "exports": {
+    "./article": "./src/article/index.ts",
     "./feature": "./src/feature/index.ts",
     "./toc": "./src/toc/index.ts",
     "./architecture": "./src/architecture/index.ts",

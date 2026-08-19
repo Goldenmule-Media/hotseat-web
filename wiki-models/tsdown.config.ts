@@ -14,6 +14,7 @@ import { defineConfig } from "tsdown";
 export default defineConfig({
   // One named entry per bundle → `dist/feature.js`, `dist/toc.js`, etc.
   entry: {
+    article: "src/article/index.ts",
     feature: "src/feature/index.ts",
     toc: "src/toc/index.ts",
     architecture: "src/architecture/index.ts",
