@@ -46,6 +46,19 @@ export interface WikiServerConfig {
    */
   readonly logBuffer: number;
   /**
+   * Hard per-blob ceiling for the attachment store, in bytes. Enforced while the
+   * upload streams in, never by buffering first. Default 25 MiB — sized for
+   * documents rather than screenshots, since raising it later is an env change but a
+   * cap chosen for images silently rejects the first real PDF.
+   */
+  readonly blobMaxBytes: number;
+  /**
+   * Mime types the attachment store accepts: exact (`application/pdf`) or a
+   * `type/*` wildcard. The store itself is file-type-agnostic, so widening this is
+   * configuration rather than code.
+   */
+  readonly blobMimeAllow: readonly string[];
+  /**
    * Initial model bundles to load at boot (ADR-M6): comma-separated `id=specifier`
    * entries (a bare specifier derives its id from the file basename). Loaded after the
    * embedded `wiki-mcp` starts, so the engine gains its page types via dynamic import.
@@ -250,6 +263,14 @@ export function resolveConfig(
   // port + 2 so it never collides with the stream host (+0) or the control listener (+1).
   const mcpPort = toInt(pick("mcp-port", "WIKI_SERVER_MCP_PORT", String(port + 2)), "--mcp-port");
   const logBuffer = toInt(pick("log-buffer", "WIKI_SERVER_LOG_BUFFER", "1000"), "--log-buffer");
+  const blobMaxBytes = toInt(
+    pick("blob-max-bytes", "WIKI_SERVER_BLOB_MAX_BYTES", String(25 * 1024 * 1024)),
+    "--blob-max-bytes",
+  );
+  const blobMimeAllow = pick("blob-mime-allow", "WIKI_SERVER_BLOB_MIME_ALLOW", "image/*,application/pdf")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
   const models = parseModels(pick("models", "WIKI_SERVER_MODELS", ""));
   const modelsDir = flags["models-dir"] ?? env.WIKI_SERVER_MODELS_DIR;
 
@@ -301,6 +322,8 @@ export function resolveConfig(
     models,
     modelsDir,
     logBuffer,
+    blobMaxBytes,
+    blobMimeAllow,
     auth,
     ...(githubClientId !== undefined ? { githubClientId } : {}),
     ...(githubClientSecret !== undefined ? { githubClientSecret } : {}),
