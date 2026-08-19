@@ -10,7 +10,7 @@
 import { useEffect, useRef } from "react";
 import { Compartment, Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
-import { liveEditorBase, liveEditorTermsExtension, type EditorTermRef } from "../lib/md-live";
+import { imageUploadExtension, liveEditorBase, liveEditorTermsExtension, type EditorTermRef } from "../lib/md-live";
 
 export function MarkdownEditor({
   value,
@@ -21,6 +21,7 @@ export function MarkdownEditor({
   placeholder,
   autoFocus,
   submitOnEnter,
+  onUploadImage,
 }: {
   value: string;
   onChange: (text: string) => void;
@@ -33,6 +34,9 @@ export function MarkdownEditor({
   /** Enter blurs the editor (firing `onBlur` — i.e. submit); Shift-Enter still breaks a
    *  line. For short single-thought fields like a glossary definition. */
   submitOnEnter?: boolean;
+  /** Upload a pasted or dropped image and return its `attachment:<sha>` ref. Omitted =
+   *  the editor takes no files, and a paste falls through to CodeMirror's default. */
+  onUploadImage?: (file: File) => Promise<string>;
 }): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -41,9 +45,11 @@ export function MarkdownEditor({
   const onChangeRef = useRef(onChange);
   const onBlurRef = useRef(onBlur);
   const onTermClickRef = useRef(onTermClick);
+  const onUploadImageRef = useRef(onUploadImage);
   onChangeRef.current = onChange;
   onBlurRef.current = onBlur;
   onTermClickRef.current = onTermClick;
+  onUploadImageRef.current = onUploadImage;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -68,6 +74,9 @@ export function MarkdownEditor({
             ]
           : []),
         liveEditorBase(placeholder),
+        // Reads the ref, so an editor mounted before its uploader is ready still works —
+        // and one with no uploader lets the paste fall through untouched.
+        imageUploadExtension(() => onUploadImageRef.current),
         termsComp.current.of(liveEditorTermsExtension({ terms, onTermClick: (id) => onTermClickRef.current(id) })),
         EditorView.updateListener.of((u) => {
           if (u.docChanged) onChangeRef.current(u.state.doc.toString());

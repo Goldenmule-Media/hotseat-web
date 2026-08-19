@@ -213,6 +213,69 @@ export function liveEditorTermsExtension(config: LiveEditorConfig): Extension {
   return termHighlight(config.terms, config.onTermClick);
 }
 
+/**
+ * Paste or drop an image file to upload it and get a Markdown image back.
+ *
+ * A placeholder goes in immediately and is replaced when the upload resolves, so a slow
+ * network never blocks typing. The placeholder is matched by TEXT rather than by a
+ * remembered position, because the document may have been edited while the bytes were in
+ * flight and a stale offset would splice the ref into the middle of a word.
+ */
+export function imageUploadExtension(
+  /** Read per event so an editor mounted before its uploader exists still picks it up;
+   *  `undefined` means this editor takes no files and the paste falls through. */
+  uploader: () => ((file: File) => Promise<string>) | undefined,
+): Extension {
+  let seq = 0;
+
+  const insert = (view: EditorView, files: readonly File[]): boolean => {
+    const upload = uploader();
+    if (upload === undefined) return false;
+    const images = files.filter((f) => f.type.startsWith("image/"));
+    if (images.length === 0) return false;
+    for (const file of images) {
+      const token = `![uploading ${file.name}… #${++seq}]()`;
+      const at = view.state.selection.main;
+      view.dispatch({
+        changes: { from: at.from, to: at.to, insert: token },
+        selection: { anchor: at.from + token.length },
+      });
+      void upload(file)
+        .then((ref) => `![${file.name.replace(/\.[^.]+$/, "")}](${ref})`)
+        .catch(() => `![${file.name} — upload failed]()`)
+        .then((replacement) => {
+          const idx = view.state.doc.toString().indexOf(token);
+          if (idx === -1) return; // the user deleted the placeholder; nothing to replace
+          view.dispatch({ changes: { from: idx, to: idx + token.length, insert: replacement } });
+        });
+    }
+    return true;
+  };
+
+  return EditorView.domEventHandlers({
+    paste: (e, view) => {
+      const files = Array.from(e.clipboardData?.files ?? []);
+      if (!insert(view, files)) return false;
+      e.preventDefault();
+      return true;
+    },
+    drop: (e, view) => {
+      const files = Array.from(e.dataTransfer?.files ?? []);
+      if (!insert(view, files)) return false;
+      e.preventDefault();
+      return true;
+    },
+    dragover: (e) => {
+      // Without this the browser navigates to the dropped file instead of firing `drop`.
+      if (Array.from(e.dataTransfer?.types ?? []).includes("Files")) {
+        e.preventDefault();
+        return true;
+      }
+      return false;
+    },
+  });
+}
+
 /** The stable extension set for one live markdown editor. */
 export function liveEditorBase(placeholderText?: string): Extension {
   return [

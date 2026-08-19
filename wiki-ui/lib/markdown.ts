@@ -9,13 +9,20 @@
  *      disabled checkboxes, preserving the `as: checklist` look.
  */
 import { Marked } from "marked";
+import { parseAttachmentRef } from "wiki/attachments";
 import { isPageId, pageHref } from "./routes";
 
 export function renderMarkdown(md: string, workspaceId: string): string {
   const m = new Marked({ gfm: true, breaks: false });
   m.use({
     walkTokens(token) {
-      if (token.type === "link" && typeof token.href === "string" && isPageId(token.href)) {
+      if (token.type !== "link" || typeof token.href !== "string") return;
+      // An `attachment:<sha>` ref LOOKS like a page id to PAGE_ID_RE, so it has to be
+      // excluded first or a PDF link would navigate into the wiki instead of
+      // downloading. Attachment URLs (image and link alike) are resolved after render
+      // by resolveAttachmentsIn, which needs the ref intact to find them.
+      if (parseAttachmentRef(token.href) !== undefined) return;
+      if (isPageId(token.href)) {
         // Mutating the href before render preserves all default rendering (incl. GFM
         // task lists) while pointing intra-wiki links at the in-app route.
         token.href = pageHref(workspaceId, token.href);

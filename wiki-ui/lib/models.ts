@@ -6,6 +6,7 @@
  */
 import type { IPageType, IPageTypeDef } from "wiki";
 import adrPageTypes from "wiki-models/adr";
+import articlePageTypes from "wiki-models/article";
 import architecturePageTypes from "wiki-models/architecture";
 import bugPageTypes from "wiki-models/bug";
 import documentPageTypes from "wiki-models/document";
@@ -18,6 +19,7 @@ import tocPageTypes from "wiki-models/toc";
 
 export const pageTypes: readonly IPageType[] = [
   ...featurePageTypes,
+  ...articlePageTypes,
   ...tocPageTypes,
   ...architecturePageTypes,
   ...adrPageTypes,

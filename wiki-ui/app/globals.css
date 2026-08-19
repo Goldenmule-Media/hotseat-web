@@ -953,6 +953,16 @@ code {
 .markdown h1 {
   margin-top: 0;
 }
+/* Attachments: an uploaded screenshot is whatever size it was captured at, so it must be
+   constrained to the column rather than setting it. Height auto keeps the aspect ratio. */
+.markdown img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  display: block;
+  margin: 0.75rem 0;
+}
+
 .markdown pre {
   background: var(--code-bg);
   border: 1px solid var(--border);
@@ -3067,4 +3077,49 @@ button.restate-card-lead:hover {
 .tree-add:hover {
   color: var(--text);
   background: var(--accent-dim);
+}
+
+/* ── the Article Studio ───────────────────────────────────────────────────────
+   One readable column, in the order the work happens: source, notes, summary. */
+.article-studio .restate-workbench {
+  max-width: 820px;
+  margin: 0 auto;
+}
+
+.article-source {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.article-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1 1 16rem;
+}
+
+.article-field > span {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.article-field input {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.4rem 0.55rem;
+  font: inherit;
+}
+
+.article-note-actions {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.article-note:hover .article-note-actions,
+.article-note:focus-within .article-note-actions {
+  opacity: 1;
 }

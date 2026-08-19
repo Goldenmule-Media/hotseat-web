@@ -16,17 +16,20 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } fr
 import type { PageId, WorkspaceId } from "wiki";
 import { fsmOf } from "../lib/host-client";
 import { useLiveWorkspace, usePage, usePageMutations, useStructuralMutator } from "../lib/live";
+import { resolveAttachmentsIn } from "../lib/attachments";
 import { renderMarkdown } from "../lib/markdown";
 import { defOf, typesRenderingOwnChildren } from "../lib/models";
 import { pageHref } from "../lib/routes";
 import { clearScrollTarget, scrollToTerms, useScrollTarget } from "../lib/search-scroll";
 import { findNode } from "../lib/tree";
 import { isTerminalStatus } from "../lib/fsm-graph";
+import { ARTICLE_PAGE_TYPE } from "../lib/article-notes";
 import { GLOSSARY_PAGE_TYPE } from "../lib/glossary";
 import { RESTATE_PAGE_TYPE } from "../lib/restate";
 import { STUDY_PAGE_TYPE } from "../lib/study";
 import { isStudioView, preferredViewMode, rememberViewMode, type StudioView, type ViewMode } from "../lib/view-mode";
 import { FsmGraph } from "./FsmGraph";
+import { ArticleStudio } from "./ArticleStudio";
 import { GlossaryStudio } from "./GlossaryStudio";
 import { RestateStudio } from "./RestateStudio";
 import { StudyStudio } from "./StudyStudio";
@@ -37,12 +40,14 @@ const STUDIO_OF: Readonly<Record<string, StudioView>> = {
   [RESTATE_PAGE_TYPE]: "restate",
   [STUDY_PAGE_TYPE]: "study",
   [GLOSSARY_PAGE_TYPE]: "glossary",
+  [ARTICLE_PAGE_TYPE]: "article",
 };
 
 const STUDIO_LABEL: Readonly<Record<StudioView, string>> = {
   restate: "Restate",
   study: "Study",
   glossary: "Glossary",
+  article: "Notes",
 };
 
 export function PageView({
@@ -135,6 +140,16 @@ export function PageView({
     });
     return () => cancelAnimationFrame(raf);
   }, [scrollTarget, workspaceId, pageId, html, mode]);
+
+  // Attachment URLs can't be resolved at render time: a plain <img src> cannot send the
+  // bearer, and wiki-ui is a different origin from the server so a cookie is out. Fetch
+  // them here instead and swap in object URLs, once the rendered HTML is in the DOM.
+  useEffect(() => {
+    if (mode !== "content") return;
+    const el = articleRef.current;
+    if (el === null || html === "") return;
+    return resolveAttachmentsIn(el, workspaceId);
+  }, [html, workspaceId, mode]);
 
   // The page renders its own curated child list in the body (e.g. a TOC's "Contents"), so
   // suppress the generic child-pages strip rather than shadow it with a raw duplicate. This
@@ -321,6 +336,14 @@ export function PageView({
           pageId={pageId}
           status={currentStatus}
           pageTitle={headerTitle}
+          pageMarkdown={markdown}
+        />
+      ) : mode === "article" && studio === "article" ? (
+        <ArticleStudio
+          key={`${workspaceId}/${pageId}`}
+          workspaceId={workspaceId}
+          pageId={pageId}
+          status={currentStatus}
           pageMarkdown={markdown}
         />
       ) : loading && markdown === null ? (
