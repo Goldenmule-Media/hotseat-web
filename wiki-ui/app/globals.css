@@ -2888,6 +2888,18 @@ button.restate-card-lead:hover {
   border-color: var(--green);
 }
 
+/* ── standalone glossary studio (restatement-glossary pages) ──────────────────── */
+/* One column: no spec pane, so the lone workbench takes the row and centres itself at a
+   readable measure. It stays a FLEX row (inherited from .restate-studio) — the rail's
+   inner scroll hangs off that height chain — and keeps .study-studio for the rail's
+   sticky-header + inner-scroll rules. */
+.glossary-studio .restate-workbench {
+  width: 100%;
+  max-width: 820px;
+  margin: 0 auto;
+  padding-left: 0;
+}
+
 /* ── modal shell (create-page; the members/search modals predate it) ───────────── */
 .modal-overlay {
   position: fixed;

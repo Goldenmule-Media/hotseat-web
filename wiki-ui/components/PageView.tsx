@@ -22,13 +22,28 @@ import { pageHref } from "../lib/routes";
 import { clearScrollTarget, scrollToTerms, useScrollTarget } from "../lib/search-scroll";
 import { findNode } from "../lib/tree";
 import { isTerminalStatus } from "../lib/fsm-graph";
+import { GLOSSARY_PAGE_TYPE } from "../lib/glossary";
 import { RESTATE_PAGE_TYPE } from "../lib/restate";
 import { STUDY_PAGE_TYPE } from "../lib/study";
-import { preferredViewMode, rememberViewMode, type ViewMode } from "../lib/view-mode";
+import { isStudioView, preferredViewMode, rememberViewMode, type StudioView, type ViewMode } from "../lib/view-mode";
 import { FsmGraph } from "./FsmGraph";
+import { GlossaryStudio } from "./GlossaryStudio";
 import { RestateStudio } from "./RestateStudio";
 import { StudyStudio } from "./StudyStudio";
 import { SchemaInspector } from "./SchemaInspector";
+
+/** Page types with a studio, and the view tag each owns. */
+const STUDIO_OF: Readonly<Record<string, StudioView>> = {
+  [RESTATE_PAGE_TYPE]: "restate",
+  [STUDY_PAGE_TYPE]: "study",
+  [GLOSSARY_PAGE_TYPE]: "glossary",
+};
+
+const STUDIO_LABEL: Readonly<Record<StudioView, string>> = {
+  restate: "Restate",
+  study: "Study",
+  glossary: "Glossary",
+};
 
 export function PageView({
   workspaceId,
@@ -51,8 +66,7 @@ export function PageView({
   // Studio page types get their studio as the DEFAULT view (no ?view param): the studio
   // IS the type's reading surface; the raw markdown stays reachable behind an explicit
   // ?view=content. Each studio owns its ViewMode tag.
-  const studio: ViewMode | null =
-    pageType === RESTATE_PAGE_TYPE ? "restate" : pageType === STUDY_PAGE_TYPE ? "study" : null;
+  const studio: StudioView | null = pageType === undefined ? null : (STUDIO_OF[pageType] ?? null);
   const hasStudio = studio !== null;
 
   // The active view is the URL's source of truth, so a refresh or shared link reopens the
@@ -62,7 +76,7 @@ export function PageView({
   const mode: ViewMode =
     rawView === "model"
       ? "model"
-      : rawView === "restate" || rawView === "study"
+      : isStudioView(rawView)
         ? rawView === studio
           ? studio
           : "content"
@@ -218,7 +232,7 @@ export function PageView({
                     className={`view-tab ${mode === studio ? "active" : ""}`}
                     onClick={() => selectView(studio)}
                   >
-                    {studio === "restate" ? "Restate" : "Study"}
+                    {STUDIO_LABEL[studio]}
                   </button>
                 )}
                 <button
@@ -293,6 +307,15 @@ export function PageView({
         />
       ) : mode === "study" && studio === "study" ? (
         <StudyStudio
+          key={`${workspaceId}/${pageId}`}
+          workspaceId={workspaceId}
+          pageId={pageId}
+          status={currentStatus}
+          pageTitle={headerTitle}
+          pageMarkdown={markdown}
+        />
+      ) : mode === "glossary" && studio === "glossary" ? (
+        <GlossaryStudio
           key={`${workspaceId}/${pageId}`}
           workspaceId={workspaceId}
           pageId={pageId}

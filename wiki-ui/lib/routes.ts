@@ -4,7 +4,7 @@
  * but we still encode to be safe against reserved characters.
  */
 import type { PageId, WorkspaceId } from "wiki";
-import type { ViewMode } from "./view-mode";
+import { isStudioView, type ViewMode } from "./view-mode";
 
 /** A page id has the shape `<type>:<id>` (e.g. "feature-brief:mpyh…"). */
 export const PAGE_ID_RE = /^[a-z][a-z0-9-]*:[A-Za-z0-9._-]+$/;
@@ -23,5 +23,5 @@ export function pageHref(
   view?: ViewMode,
 ): string {
   const base = `/${encodeURIComponent(workspaceId)}/${encodeURIComponent(pageId)}`;
-  return view === "model" || view === "restate" || view === "study" ? `${base}?view=${view}` : base;
+  return view === "model" || isStudioView(view ?? null) ? `${base}?view=${view}` : base;
 }

@@ -7,7 +7,15 @@
  * preference (like a collapsed sidebar), not a per-page reset. PageView re-stamps the
  * remembered preference into a freshly-opened page's URL.
  */
-export type ViewMode = "content" | "model" | "restate" | "study";
+export type ViewMode = "content" | "model" | "restate" | "study" | "glossary";
+
+/** The view tags owned by a page-type studio (each is the default view for its type). */
+export const STUDIO_VIEWS = ["restate", "study", "glossary"] as const;
+export type StudioView = (typeof STUDIO_VIEWS)[number];
+
+export function isStudioView(view: string | null): view is StudioView {
+  return view !== null && (STUDIO_VIEWS as readonly string[]).includes(view);
+}
 
 let preferred: ViewMode = "content";
 
