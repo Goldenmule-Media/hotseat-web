@@ -5,6 +5,7 @@
   "description": "A TypeScript-only, embeddable, event-sourced structured wiki engine.",
   "exports": {
     ".": "./src/index.ts",
+    "./attachments": "./src/attachments.ts",
     "./admin": "./src/admin.ts",
     "./auth-client": "./src/auth-client.ts",
     "./authoring": "./src/authoring.ts",
