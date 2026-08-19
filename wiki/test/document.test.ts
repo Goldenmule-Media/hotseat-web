@@ -62,6 +62,8 @@ describe("document: bundle contract and FSM shape", () => {
         "addQuote",
         "addTable",
         "addDivider",
+        "addImage",
+        "setImage",
         "setParagraph",
         "setHeading",
         "setList",
@@ -306,6 +308,25 @@ describe("document: lists, quotes, tables, dividers", () => {
     expect(await bodyOf(ws, doc)).toBe(
       ["| Name | Value |", "| :--- | ---: |", "| a | `1` |", "| _b_ |  |"].join("\n"),
     );
+  });
+
+  it("addImage renders an image block, keeping an attachment ref verbatim (golden)", async () => {
+    const doc = await newDoc("Images");
+    const ref = `attachment:${"a".repeat(64)}`;
+    await addBlockTo(ws, doc, "addParagraph", { inlines: [{ text: "Before." }] });
+    const blockId = await addBlockTo(ws, doc, "addImage", { ref, alt: "A wiring diagram" });
+    await addBlockTo(ws, doc, "addImage", { ref: "https://example.com/cat.png", alt: "Cat", title: "A cat" });
+
+    const md = await ws.toMarkdown(doc);
+    // The ref survives untouched: resolving it to a URL is the consumer's job, so the
+    // engine's Markdown stays host-independent.
+    expect(md).toContain(`![A wiring diagram](${ref})`);
+    expect(md).toContain('![Cat](https://example.com/cat.png "A cat")');
+
+    // setImage edits in place, and refuses a block of another kind.
+    await ws.mutate(doc, "setImage", { blockId, ref, alt: "A revised diagram" });
+    expect(await ws.toMarkdown(doc)).toContain(`![A revised diagram](${ref})`);
+    await expect(ws.mutate(doc, "setImage", { blockId: "nope", ref, alt: "x" })).rejects.toBeDefined();
   });
 
   it("addDivider renders a horizontal rule between blocks (golden)", async () => {

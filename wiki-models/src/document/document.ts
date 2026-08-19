@@ -10,11 +10,11 @@
  *
  * Deliberately lifecycle-free (the `toc` precedent): a single `active` status with NO
  * transitions — always editable, no agency edges, no awaitsHuman elements; structural
- * `archivePage` handles removal. No image block kind exists in the engine vocabulary
- * (ADR-6): external images are representable as link-marked text until an `image` kind
- * lands under its own decision record. No underline mark either — underline is not in
- * the closed Mark vocabulary and has no native Markdown rendering; growing that
- * vocabulary takes a decision record.
+ * `archivePage` handles removal. Images are first-class: `addImage` places an `image`
+ * block whose ref is either an `attachment:<sha256>` in this wiki's own store or an
+ * ordinary URL. No underline mark, though — underline is not in the closed Mark
+ * vocabulary and has no native Markdown rendering; growing that vocabulary takes a
+ * decision record.
  */
 import type { BlockId, DeepReadonly, IBlock, IInline, Mark, PageId, PageState, SectionOp } from "wiki/authoring";
 import { definePageType, InvariantViolationError, z, zodSchema } from "wiki/authoring";
@@ -273,6 +273,53 @@ export const Document = definePageType({
       produces: (_page, args, ctx) => {
         const a = args as { index?: number };
         return addBody({ kind: "divider", id: ctx.newId() as BlockId }, a.index);
+      },
+    },
+    addImage: {
+      description:
+        "Append an image (pass `index` to insert at that position). `ref` is either " +
+        "`attachment:<sha256>` — bytes uploaded to this wiki's attachment store, which the event " +
+        "stream references but never carries — or an ordinary absolute URL. `alt` is the description " +
+        "a reader gets when the image cannot be shown, so write it as one; it is not a caption.",
+      args: zodSchema(
+        z.object({
+          ref: z.string().min(1),
+          alt: z.string(),
+          title: z.string().optional(),
+          index: optionalIndex,
+        }),
+      ),
+      result: addedBlockId,
+      target: BODY,
+      produces: (_page, args, ctx) => {
+        const a = args as { ref: string; alt: string; title?: string; index?: number };
+        return addBody(
+          {
+            kind: "image",
+            id: ctx.newId() as BlockId,
+            ref: a.ref,
+            alt: a.alt,
+            ...(a.title !== undefined && a.title.length > 0 ? { title: a.title } : {}),
+          },
+          a.index,
+        );
+      },
+    },
+    setImage: {
+      description:
+        "Replace an IMAGE's ref, alt and title in place (same block id, position unchanged); rejects any " +
+        "other block kind.",
+      args: zodSchema(z.object({ blockId: z.string(), ref: z.string().min(1), alt: z.string(), title: z.string().optional() })),
+      target: BODY,
+      produces: (page, args) => {
+        const a = args as { blockId: string; ref: string; alt: string; title?: string };
+        return replaceBody(page, "setImage", a.blockId, "image", (id) => ({
+          kind: "image",
+          id,
+          ref: a.ref,
+          alt: a.alt,
+          ...(a.title !== undefined && a.title.length > 0 ? { title: a.title } : {}),
+        }));
       },
     },
     setParagraph: {
