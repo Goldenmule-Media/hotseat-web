@@ -17,14 +17,12 @@
  * the entire integration.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import type { PageId, WorkspaceId } from "wiki";
 
 import { diffNotes, notesToDocument, NOTES_SECTION, READING, readSource, readSummary, splitNoteDocument } from "../lib/article-notes";
 import { uploadAttachment } from "../lib/attachments";
 import { usePageMutator, useSectionDocument } from "../lib/live";
 import { renderMarkdown } from "../lib/markdown";
-import { pageHref } from "../lib/routes";
 import { resolveAttachmentsIn } from "../lib/attachments";
 import { MarkdownEditor } from "./MarkdownEditor";
 
@@ -111,32 +109,13 @@ export function ArticleStudio({
     [],
   );
 
-  const noteCount = notes.notes.length;
-
   return (
     <>
-      <div className="restate-bar">
-        <p className="restate-progress">
-          {noteCount} note{noteCount === 1 ? "" : "s"}
-          {status !== READING && <span className="restate-bar-note"> · {status}</span>}
+      {notes.error !== null && (
+        <p className="restate-bar restate-load-error" role="alert">
+          Couldn&apos;t refresh: {notes.error}. Showing the last good read.
         </p>
-        {notes.error !== null && (
-          <p className="restate-load-error" role="alert">
-            Couldn&apos;t refresh: {notes.error}. Showing the last good read.
-          </p>
-        )}
-        <span className="restate-bar-note">
-          {reading ? (
-            <>
-              summarize from the <Link href={pageHref(workspaceId, pageId, "model")}>Model view</Link> when you&apos;re done
-            </>
-          ) : (
-            <>
-              reopen from the <Link href={pageHref(workspaceId, pageId, "model")}>Model view</Link> to keep taking notes
-            </>
-          )}
-        </span>
-      </div>
+      )}
 
       {mutationError !== null && (
         <div className="notice error study-mutation-notice">
