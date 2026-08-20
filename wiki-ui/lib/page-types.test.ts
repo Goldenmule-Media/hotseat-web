@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { IPageTypeDef } from "wiki";
-import { pageTypeOptions } from "./page-types";
+import { filterPageTypeOptions, pageTypeOptions } from "./page-types";
 
 /** A minimal def — only the fields pageTypeOptions reads are meaningful. */
 function def(partial: Partial<IPageTypeDef> & { type: string }): IPageTypeDef {
@@ -63,5 +63,35 @@ describe("pageTypeOptions", () => {
       def({ type: "shared", label: "Shared" }),
     ]);
     expect(opts.find((o) => o.type === "shared")!.autoCreatedBy).toBe("Alpha");
+  });
+});
+
+describe("filterPageTypeOptions", () => {
+  const opts = pageTypeOptions([
+    def({ type: "feature-brief", label: "Feature brief" }),
+    def({ type: "testing-plan", label: "Testing plan" }),
+    def({ type: "architecture", label: "Architecture" }),
+    def({ type: "study-notes", label: "Study notes" }),
+  ]);
+  const labels = (q: string): string[] => filterPageTypeOptions(opts, q).map((o) => o.label);
+
+  it("keeps the incoming order for a blank query", () => {
+    expect(labels("  ")).toEqual(opts.map((o) => o.label));
+  });
+
+  it("matches a fuzzy subsequence of the label", () => {
+    expect(labels("stdnt")).toEqual(["Study notes"]);
+  });
+
+  it("matches the type tag as well as the label", () => {
+    expect(labels("feature-b")).toEqual(["Feature brief"]);
+  });
+
+  it("ranks a contiguous prefix above a scattered match", () => {
+    expect(labels("te")[0]).toBe("Testing plan");
+  });
+
+  it("returns nothing when the characters are out of order", () => {
+    expect(labels("zzz")).toEqual([]);
   });
 });

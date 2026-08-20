@@ -2978,11 +2978,21 @@ button.restate-card-lead:hover {
   overflow-y: auto;
   padding-right: 4px;
 }
+.cp-filter {
+  width: 100%;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
 .cp-type {
   display: flex;
   gap: 8px;
-  align-items: flex-start;
-  padding: 8px 10px;
+  align-items: baseline;
+  padding: 6px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
   cursor: pointer;
@@ -2995,20 +3005,14 @@ button.restate-card-lead:hover {
   background: var(--accent-dim);
 }
 .cp-type input {
-  margin-top: 3px;
   flex: none;
-}
-.cp-type-body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
 }
 .cp-type-head {
   display: flex;
   align-items: baseline;
   gap: 8px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 .cp-type-label {
   font-size: 13px;
@@ -3018,13 +3022,9 @@ button.restate-card-lead:hover {
   font-size: 11px;
   color: var(--muted);
 }
-.cp-type-desc,
-.cp-type-auto {
+.cp-type-none {
+  margin: 4px 2px;
   font-size: 12px;
-  line-height: 1.4;
-}
-.cp-type-auto {
-  font-style: italic;
 }
 .cp-field {
   display: flex;

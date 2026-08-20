@@ -65,3 +65,47 @@ export function pageTypeOptions(defs: readonly IPageTypeDef[]): readonly PageTyp
     return autoA - autoB || a.label.localeCompare(b.label);
   });
 }
+
+/**
+ * Score a fuzzy (subsequence) match of `query` against `text`, or null when the query's
+ * characters don't appear in order. Lower is better: a contiguous, early, word-boundary run
+ * beats a scattered one.
+ */
+function fuzzyScore(text: string, query: string): number | null {
+  const hay = text.toLowerCase();
+  let score = 0;
+  let at = -1;
+  for (const ch of query) {
+    const found = hay.indexOf(ch, at + 1);
+    if (found === -1) return null;
+    const gap = at === -1 ? found : found - at - 1;
+    // A gap costs; landing after a separator (a new word) is nearly free.
+    if (gap > 0) score += hay[found - 1] === " " || hay[found - 1] === "-" ? 1 : 2 + gap;
+    at = found;
+  }
+  return score + at / 100;
+}
+
+/**
+ * The options whose label or tag fuzzily match `query`, best match first; a blank query keeps
+ * the incoming order untouched. Ties fall back to that order, so the primary/auto-created
+ * grouping from {@link pageTypeOptions} survives filtering.
+ */
+export function filterPageTypeOptions(
+  options: readonly PageTypeOption[],
+  query: string,
+): readonly PageTypeOption[] {
+  const q = query.trim().toLowerCase().replace(/\s+/g, " ");
+  if (q === "") return options;
+
+  const scored: { option: PageTypeOption; score: number; index: number }[] = [];
+  options.forEach((option, index) => {
+    const byLabel = fuzzyScore(option.label, q);
+    const byType = fuzzyScore(option.type, q);
+    const score =
+      byLabel === null ? byType : byType === null ? byLabel : Math.min(byLabel, byType);
+    if (score !== null) scored.push({ option, score, index });
+  });
+
+  return scored.sort((a, b) => a.score - b.score || a.index - b.index).map((s) => s.option);
+}

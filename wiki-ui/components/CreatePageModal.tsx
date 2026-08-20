@@ -18,7 +18,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { PageId, WorkspaceId } from "wiki";
 import { useLiveWorkspace, useStructuralMutator } from "../lib/live";
 import { pageTypes } from "../lib/models";
-import { pageTypeOptions } from "../lib/page-types";
+import { filterPageTypeOptions, pageTypeOptions } from "../lib/page-types";
 import { pageHref } from "../lib/routes";
 import { parentOptions } from "../lib/tree";
 import { ModalPortal } from "./ModalPortal";
@@ -42,6 +42,7 @@ export function CreatePageModal({
   const parents = useMemo(() => parentOptions(ws.tree), [ws.tree]);
 
   const titleRef = useRef<HTMLInputElement>(null);
+  const [filter, setFilter] = useState("");
   const [type, setType] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   // "" is the top level (parentId null) — a select can't carry null as a value.
@@ -52,6 +53,7 @@ export function CreatePageModal({
     if (type !== null) titleRef.current?.focus();
   }, [type]);
 
+  const shown = useMemo(() => filterPageTypeOptions(options, filter), [options, filter]);
   const selected = options.find((o) => o.type === type) ?? null;
   const canSubmit = type !== null && title.trim() !== "" && !pending;
 
@@ -92,9 +94,29 @@ export function CreatePageModal({
           <form className="cp-form" onSubmit={submit}>
             <fieldset className="cp-types" disabled={pending}>
               <legend className="cp-legend">Page type</legend>
+              <input
+                type="text"
+                className="cp-filter"
+                value={filter}
+                autoFocus
+                placeholder="Filter types…"
+                aria-label="Filter page types"
+                onChange={(e) => setFilter(e.target.value)}
+                onKeyDown={(e) => {
+                  // Enter picks the best match rather than submitting a type-less form.
+                  if (e.key !== "Enter") return;
+                  e.preventDefault();
+                  const first = shown[0];
+                  if (first !== undefined) setType(first.type);
+                }}
+              />
               <div className="cp-type-list">
-                {options.map((o) => (
-                  <label key={o.type} className={`cp-type${type === o.type ? " cp-type-on" : ""}`}>
+                {shown.map((o) => (
+                  <label
+                    key={o.type}
+                    className={`cp-type${type === o.type ? " cp-type-on" : ""}`}
+                    title={o.description}
+                  >
                     <input
                       type="radio"
                       name="page-type"
@@ -102,20 +124,13 @@ export function CreatePageModal({
                       checked={type === o.type}
                       onChange={() => setType(o.type)}
                     />
-                    <span className="cp-type-body">
-                      <span className="cp-type-head">
-                        <span className="cp-type-label">{o.label}</span>
-                        <code className="cp-type-tag">{o.type}</code>
-                      </span>
-                      {o.description !== undefined && <span className="muted cp-type-desc">{o.description}</span>}
-                      {o.autoCreatedBy !== undefined && (
-                        <span className="muted cp-type-auto">
-                          Usually created automatically with a {o.autoCreatedBy}.
-                        </span>
-                      )}
+                    <span className="cp-type-head">
+                      <span className="cp-type-label">{o.label}</span>
+                      <code className="cp-type-tag">{o.type}</code>
                     </span>
                   </label>
                 ))}
+                {shown.length === 0 && <p className="muted cp-type-none">No page type matches “{filter}”.</p>}
               </div>
             </fieldset>
 
