@@ -3,10 +3,9 @@
 /**
  * The Article Studio — the browser UI for `article-notes` pages.
  *
- * One column, in the order the work actually happens: the source (where the article
- * lives and when it is from), the notes taken while reading, and the summary written
- * afterwards. The rendered page orders them Source / Summary / Notes, because that is how
- * the document reads back; this is how it is written.
+ * One column: the source (where the article lives and when it is from), the summary, and
+ * then the notes it was drawn from — the same order the page renders in, because the
+ * summary is what you come back to read and the notes are what you scroll through.
  *
  * The notes are ONE live-preview editor, not a card per note. The model stores them as a
  * list — that is what makes a note addressable — but reading and writing them is a single
@@ -148,7 +147,7 @@ export function ArticleStudio({
         </div>
       )}
 
-      <div className="restate-studio study-studio article-studio">
+      <div className="restate-studio article-studio">
         <div className="restate-workbench">
           <section className="restate-block">
             <h2 className="restate-block-head">Source</h2>
@@ -182,6 +181,24 @@ export function ArticleStudio({
           </section>
 
           <section className="restate-block">
+            <h2 className="restate-block-head">Summary</h2>
+            <div className="article-doc article-doc-short">
+              <MarkdownEditor
+                value={summary ?? storedSummary}
+                onChange={setSummary}
+                onBlur={() => {
+                  if (summary !== null && summary !== storedSummary) void runMutation("writeSummary", { markdown: summary });
+                  setSummary(null);
+                }}
+                terms={[]}
+                onTermClick={() => {}}
+                placeholder="What you made of it, in your own words."
+                onUploadImage={upload}
+              />
+            </div>
+          </section>
+
+          <section className="restate-block">
             <h2 className="restate-block-head">Notes</h2>
             {reading ? (
               <div className="article-doc">
@@ -200,24 +217,6 @@ export function ArticleStudio({
             ) : (
               <RenderedBody markdown={storedNotes} workspaceId={workspaceId} />
             )}
-          </section>
-
-          <section className="restate-block">
-            <h2 className="restate-block-head">Summary</h2>
-            <div className="article-doc article-doc-short">
-              <MarkdownEditor
-                value={summary ?? storedSummary}
-                onChange={setSummary}
-                onBlur={() => {
-                  if (summary !== null && summary !== storedSummary) void runMutation("writeSummary", { markdown: summary });
-                  setSummary(null);
-                }}
-                terms={[]}
-                onTermClick={() => {}}
-                placeholder="What you made of it, in your own words."
-                onUploadImage={upload}
-              />
-            </div>
           </section>
         </div>
       </div>

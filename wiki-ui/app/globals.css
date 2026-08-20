@@ -3080,10 +3080,24 @@ button.restate-card-lead:hover {
 }
 
 /* ── the Article Studio ───────────────────────────────────────────────────────
-   One readable column, in the order the work happens: source, notes, summary. */
+   One readable column: source, summary, then the notes it was drawn from. */
 .article-studio .restate-workbench {
   max-width: 820px;
   margin: 0 auto;
+}
+
+/* The viewport-locked studio layout exists so two columns scroll independently. With one
+   column there is nothing to pin against, and making the centred column the only scroller
+   means a wheel anywhere beside it does nothing — so the page scrolls as a page. Relaxes
+   the .page-restate rules above at equal specificity, hence the position in this file. */
+@media (min-width: 981px) {
+  .content:has(.article-studio) {
+    height: auto;
+    overflow: visible;
+  }
+  .content:has(.article-studio) .restate-workbench {
+    overflow: visible;
+  }
 }
 
 /* A ROW of fields under the heading. It must set its own direction: .restate-block is a
