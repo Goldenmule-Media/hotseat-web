@@ -162,7 +162,7 @@ export function ArticleStudio({
               </p>
             )}
             {/* Not a field: the engine stamps the day the page was created. */}
-            {source.date !== "" && <p className="article-date">Read {source.date}</p>}
+            {source.date !== "" && <p className="article-date">{source.date}</p>}
           </section>
 
           <section className="restate-block">
