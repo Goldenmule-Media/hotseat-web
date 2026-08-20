@@ -3118,12 +3118,12 @@ button.restate-card-lead:hover {
   font: inherit;
 }
 
-.article-note-actions {
-  opacity: 0;
-  transition: opacity 120ms ease;
+/* Notes and summary are documents, not fields: the editor is the whole surface, with
+   page-like room to write into even when it is empty. */
+.article-doc {
+  min-height: 12rem;
 }
 
-.article-note:hover .article-note-actions,
-.article-note:focus-within .article-note-actions {
-  opacity: 1;
+.article-doc-short {
+  min-height: 5rem;
 }

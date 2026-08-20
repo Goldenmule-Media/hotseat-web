@@ -29,6 +29,7 @@ import {
   toWikiErrorDTO,
   type HostSearchOpts,
   type LoadError,
+  type RenderedElement,
   type SectionElementSummary,
   type SnapshotCallback,
   type WikiHostApi,
@@ -450,6 +451,25 @@ function makeApi(conn: PortConn): WikiHostApi {
         const h = await host.handle();
         const view = await h.page(page);
         return await view.renderElement(sectionKey, elementId);
+      } catch (e) {
+        throw toWikiErrorDTO(e);
+      }
+    },
+    async renderSectionElements(ws: WorkspaceId, page: PageId, sectionKey: string) {
+      const host = await ensureHost(ws);
+      try {
+        const h = await host.handle();
+        const view = await h.page(page);
+        const state = await view.state();
+        const section = state.sections.find((s) => s.key === sectionKey);
+        if (section === undefined) return [];
+        for (const field of Object.values(section.fields)) {
+          if (field.kind !== "list") continue;
+          const out: RenderedElement[] = [];
+          for (const el of field.elements) out.push({ id: el.id, markdown: await view.renderElement(sectionKey, el.id) });
+          return out;
+        }
+        return [];
       } catch (e) {
         throw toWikiErrorDTO(e);
       }

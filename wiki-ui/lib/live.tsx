@@ -25,10 +25,10 @@ import { notifyUnauthorized, serverBaseUrl } from "./auth";
 import { useAuth } from "./auth-context";
 import { getHost, UnsupportedBrowserError, type WikiHost } from "./host-client";
 import { ELEMENTS_PENDING, foldSectionElements, type SectionElements } from "./section-elements";
-import { classifyError, type LoadError, type WorkspaceSnapshot } from "./wiki-host-api";
+import { classifyError, type LoadError, type RenderedElement, type WorkspaceSnapshot } from "./wiki-host-api";
 
 // Re-exported so existing consumers (LiveIndicator, WorkspaceError) keep importing from here.
-export type { ConnectionState, LoadError, LoadErrorKind, SectionElementSummary } from "./wiki-host-api";
+export type { ConnectionState, LoadError, LoadErrorKind, RenderedElement, SectionElementSummary } from "./wiki-host-api";
 
 /** The tab's view of one workspace: its id plus the worker's authoritative snapshot. */
 export type LiveWorkspace = { readonly id: WorkspaceId } & WorkspaceSnapshot;
@@ -248,6 +248,43 @@ export function useElementMarkdown(
   }, [workspaceId, pageId, sectionKey, elementId, ws.lastEventAt]);
 
   return content;
+}
+
+export interface SectionDocument {
+  /** Every element of the section's list field, in order, rendered to Markdown. */
+  readonly notes: readonly RenderedElement[];
+  readonly loading: boolean;
+  readonly error: string | null;
+}
+
+const DOCUMENT_PENDING: SectionDocument = { notes: [], loading: true, error: null };
+
+/**
+ * A whole list section as ONE read, re-read on every commit — for a studio that edits the
+ * list as a single Markdown document rather than element by element.
+ */
+export function useSectionDocument(workspaceId: WorkspaceId, pageId: PageId, sectionKey: string): SectionDocument {
+  const ws = useLiveWorkspace(workspaceId);
+  const [state, setState] = useState<SectionDocument>(DOCUMENT_PENDING);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let cancelled = false;
+    getHost()
+      .then((h) => h.renderSectionElements(workspaceId, pageId, sectionKey))
+      .then((notes) => {
+        if (!cancelled) setState({ notes, loading: false, error: null });
+      })
+      .catch((e: unknown) => {
+        // Keep the last good read: a failed refresh must not blank an editor mid-edit.
+        if (!cancelled) setState((s) => ({ ...s, loading: false, error: classifyError(e).message }));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, pageId, sectionKey, ws.lastEventAt]);
+
+  return state;
 }
 
 export interface WorkspaceList {

@@ -8,6 +8,11 @@
  * afterwards. The rendered page orders them Source / Summary / Notes, because that is how
  * the document reads back; this is how it is written.
  *
+ * The notes are ONE live-preview editor, not a card per note. The model stores them as a
+ * list — that is what makes a note addressable — but reading and writing them is a single
+ * flowing document; lib/article-notes.ts maps between the two, so an ordinary edit becomes
+ * one `reviseNote` and the list never surfaces as chrome.
+ *
  * Notes take pasted images. That is the whole reason the attachment store exists, and it
  * costs nothing here: <MarkdownEditor> owns the paste handling, so passing an uploader is
  * the entire integration.
@@ -16,13 +21,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { PageId, WorkspaceId } from "wiki";
 
-import { NOTES_SECTION, READING, readSource, readSummary } from "../lib/article-notes";
+import { diffNotes, notesToDocument, NOTES_SECTION, READING, readSource, readSummary, splitNoteDocument } from "../lib/article-notes";
 import { uploadAttachment } from "../lib/attachments";
-import { usePageMutator, useSectionElements, useElementMarkdown } from "../lib/live";
+import { usePageMutator, useSectionDocument } from "../lib/live";
 import { renderMarkdown } from "../lib/markdown";
 import { pageHref } from "../lib/routes";
 import { resolveAttachmentsIn } from "../lib/attachments";
-import type { SectionElementSummary } from "../lib/wiki-host-api";
 import { MarkdownEditor } from "./MarkdownEditor";
 
 const AUTOSAVE_MS = 1000;
@@ -39,95 +43,6 @@ function RenderedBody({ markdown, workspaceId }: { markdown: string; workspaceId
   return <div ref={ref} className="markdown restate-preview" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
-function NoteCard({
-  workspaceId,
-  pageId,
-  el,
-  editable,
-  index,
-  count,
-  onSave,
-  onMove,
-  onRemove,
-  onUploadImage,
-}: {
-  workspaceId: WorkspaceId;
-  pageId: PageId;
-  el: SectionElementSummary;
-  editable: boolean;
-  index: number;
-  count: number;
-  onSave: (noteId: string, markdown: string) => void;
-  onMove: (noteId: string, toIndex: number) => void;
-  onRemove: (noteId: string) => void;
-  onUploadImage: (file: File) => Promise<string>;
-}): React.JSX.Element {
-  // A note's body is a `blocks` field, which has no plain-text form on the element
-  // summary — so the engine renders it and the editor seeds from that.
-  const { markdown, loading } = useElementMarkdown(workspaceId, pageId, NOTES_SECTION, el.id);
-  const [draft, setDraft] = useState<string | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const body = draft ?? markdown ?? "";
-
-  const schedule = useCallback(
-    (text: string) => {
-      setDraft(text);
-      if (timer.current !== null) clearTimeout(timer.current);
-      timer.current = setTimeout(() => onSave(el.id, text), AUTOSAVE_MS);
-    },
-    [el.id, onSave],
-  );
-
-  // A pending autosave must still land if the card unmounts (a reorder, a navigation).
-  useEffect(
-    () => () => {
-      if (timer.current !== null) clearTimeout(timer.current);
-    },
-    [],
-  );
-
-  if (loading && markdown === null) return <div className="restate-section article-note is-loading">Loading…</div>;
-
-  return (
-    <div className="restate-section article-note" data-el-id={el.id}>
-      {editable ? (
-        <MarkdownEditor
-          value={body}
-          onChange={schedule}
-          onBlur={() => {
-            if (timer.current !== null) clearTimeout(timer.current);
-            if (draft !== null) onSave(el.id, draft);
-          }}
-          terms={[]}
-          onTermClick={() => {}}
-          placeholder="A note, in your own words. Paste an image to attach it."
-          onUploadImage={onUploadImage}
-        />
-      ) : (
-        <RenderedBody markdown={body} workspaceId={workspaceId} />
-      )}
-      {editable && (
-        <div className="restate-actions article-note-actions">
-          <button type="button" className="tf-btn tf-btn-secondary" disabled={index === 0} onClick={() => onMove(el.id, index - 1)}>
-            ↑
-          </button>
-          <button
-            type="button"
-            className="tf-btn tf-btn-secondary"
-            disabled={index === count - 1}
-            onClick={() => onMove(el.id, index + 1)}
-          >
-            ↓
-          </button>
-          <button type="button" className="tf-btn tf-btn-danger" onClick={() => onRemove(el.id)}>
-            Delete
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 export function ArticleStudio({
   workspaceId,
   pageId,
@@ -140,41 +55,70 @@ export function ArticleStudio({
   /** The whole page's rendered Markdown (usePage) — the source rows and summary read from it. */
   pageMarkdown: string | null;
 }): React.JSX.Element {
-  const notes = useSectionElements(workspaceId, pageId, NOTES_SECTION);
-  const { run: runMutation, pending: mutating, error: mutationError, reset: resetMutation } = usePageMutator(workspaceId, pageId);
+  const notes = useSectionDocument(workspaceId, pageId, NOTES_SECTION);
+  const { run: runMutation, error: mutationError, reset: resetMutation } = usePageMutator(workspaceId, pageId);
 
   const reading = status === READING;
   const source = useMemo(() => readSource(pageMarkdown), [pageMarkdown]);
   const storedSummary = useMemo(() => readSummary(pageMarkdown), [pageMarkdown]);
+  const storedNotes = useMemo(() => notesToDocument(notes.notes), [notes.notes]);
 
   const [link, setLink] = useState<string | null>(null);
   const [date, setDate] = useState<string | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
-  const [composing, setComposing] = useState("");
+  const [draft, setDraft] = useState<string | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const upload = useCallback((file: File) => uploadAttachment(workspaceId, file), [workspaceId]);
 
-  const saveNote = useCallback(
-    (noteId: string, markdown: string) => {
-      if (markdown.trim() === "") return; // an empty body would fail the element's `required`
-      void runMutation("reviseNote", { noteId, markdown });
+  // Read at save time, never captured: a debounced save must diff against the list as it
+  // stands when it fires, not as it stood when the keystroke scheduled it.
+  const storedRef = useRef(notes.notes);
+  storedRef.current = notes.notes;
+
+  // The list is the storage, the document is the edit: re-split and diff, then run the
+  // commands in order (the host takes one at a time, so this is a short sequence).
+  const saveNotes = useCallback(
+    async (document: string) => {
+      for (const edit of diffNotes(storedRef.current, splitNoteDocument(document))) {
+        if (!(await runMutation(edit.command, edit.args))) return;
+      }
     },
     [runMutation],
   );
 
-  const addNote = useCallback(async () => {
-    const markdown = composing.trim();
-    if (markdown === "") return;
-    if (await runMutation("addNote", { markdown })) setComposing("");
-  }, [composing, runMutation]);
+  const scheduleNotes = useCallback(
+    (text: string) => {
+      setDraft(text);
+      if (timer.current !== null) clearTimeout(timer.current);
+      timer.current = setTimeout(() => void saveNotes(text), AUTOSAVE_MS);
+    },
+    [saveNotes],
+  );
 
-  const elements = notes.elements;
+  const flushNotes = useCallback(() => {
+    if (timer.current !== null) clearTimeout(timer.current);
+    if (draft === null) return;
+    const text = draft;
+    setDraft(null); // re-seed from the engine's own render once the write lands
+    void saveNotes(text);
+  }, [draft, saveNotes]);
+
+  // A pending autosave must not fire after the studio unmounts.
+  useEffect(
+    () => () => {
+      if (timer.current !== null) clearTimeout(timer.current);
+    },
+    [],
+  );
+
+  const noteCount = notes.notes.length;
 
   return (
     <>
       <div className="restate-bar">
         <p className="restate-progress">
-          {elements.length} note{elements.length === 1 ? "" : "s"}
+          {noteCount} note{noteCount === 1 ? "" : "s"}
           {status !== READING && <span className="restate-bar-note"> · {status}</span>}
         </p>
         {notes.error !== null && (
@@ -239,49 +183,28 @@ export function ArticleStudio({
 
           <section className="restate-block">
             <h2 className="restate-block-head">Notes</h2>
-            {elements.length === 0 && !notes.loading && <p className="restate-preview-empty">No notes yet.</p>}
-            {elements.map((el, i) => (
-              <NoteCard
-                key={el.id}
-                workspaceId={workspaceId}
-                pageId={pageId}
-                el={el}
-                editable={reading}
-                index={i}
-                count={elements.length}
-                onSave={saveNote}
-                onMove={(noteId, toIndex) => void runMutation("moveNote", { noteId, toIndex })}
-                onRemove={(noteId) => void runMutation("removeNote", { noteId })}
-                onUploadImage={upload}
-              />
-            ))}
-            {reading && (
-              <div className="restate-section article-compose">
+            {reading ? (
+              <div className="article-doc">
                 <MarkdownEditor
-                  value={composing}
-                  onChange={setComposing}
+                  value={draft ?? storedNotes}
+                  onChange={scheduleNotes}
+                  onBlur={flushNotes}
                   terms={[]}
                   onTermClick={() => {}}
-                  placeholder="A new note. Paste a screenshot to attach it."
+                  placeholder="Notes, in your own words. Paste an image to attach it."
                   onUploadImage={upload}
                 />
-                <div className="restate-actions">
-                  <button
-                    type="button"
-                    className="tf-btn tf-btn-primary"
-                    disabled={composing.trim() === "" || mutating}
-                    onClick={() => void addNote()}
-                  >
-                    Add note
-                  </button>
-                </div>
               </div>
+            ) : storedNotes === "" ? (
+              <p className="restate-preview-empty">No notes.</p>
+            ) : (
+              <RenderedBody markdown={storedNotes} workspaceId={workspaceId} />
             )}
           </section>
 
           <section className="restate-block">
             <h2 className="restate-block-head">Summary</h2>
-            <div className="restate-section">
+            <div className="article-doc article-doc-short">
               <MarkdownEditor
                 value={summary ?? storedSummary}
                 onChange={setSummary}

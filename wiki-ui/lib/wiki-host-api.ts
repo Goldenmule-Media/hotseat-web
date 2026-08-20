@@ -119,6 +119,12 @@ export interface HandshakeResult {
   readonly fsm: Record<string, FsmDescriptor>;
 }
 
+/** One list element rendered to Markdown, with the id that addresses it. */
+export interface RenderedElement {
+  readonly id: string;
+  readonly markdown: string;
+}
+
 /** One list element of a page section, summarized off the folded state in the worker —
  *  id + element FSM status + the `title` prose field when present, plus every scalar
  *  field verbatim (the model's own leaf data: a spec section's outline `depth` and slot
@@ -162,6 +168,9 @@ export interface WikiHostApi {
   describeMutations(ws: WorkspaceId, page: PageId): Promise<readonly IMutationDescriptor[]>;
   /** Render ONE list element to Markdown exactly as the full render presents it. */
   renderElement(ws: WorkspaceId, page: PageId, sectionKey: string, elementId: string): Promise<string>;
+  /** Every element of a section's list field, in order, rendered to Markdown — the whole
+   *  list as one read, for a studio that edits the list as a single document. */
+  renderSectionElements(ws: WorkspaceId, page: PageId, sectionKey: string): Promise<readonly RenderedElement[]>;
   /** The elements of a section's list field (first list field under `sectionKey`), read
    *  from the folded page state. Empty when the section (or a list field) is absent. */
   listSectionElements(ws: WorkspaceId, page: PageId, sectionKey: string): Promise<readonly SectionElementSummary[]>;

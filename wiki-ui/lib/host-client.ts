@@ -24,6 +24,7 @@ import { getToken, notifyUnauthorized } from "./auth";
 import {
   classifyError,
   type HostSearchOpts,
+  type RenderedElement,
   type SectionElementSummary,
   type SnapshotCallback,
   type WikiHostApi,
@@ -58,6 +59,7 @@ export interface WikiHost {
   toMarkdown(ws: WorkspaceId, page: PageId): Promise<string>;
   describeMutations(ws: WorkspaceId, page: PageId): Promise<readonly IMutationDescriptor[]>;
   renderElement(ws: WorkspaceId, page: PageId, sectionKey: string, elementId: string): Promise<string>;
+  renderSectionElements(ws: WorkspaceId, page: PageId, sectionKey: string): Promise<readonly RenderedElement[]>;
   listSectionElements(ws: WorkspaceId, page: PageId, sectionKey: string): Promise<readonly SectionElementSummary[]>;
   mutate(ws: WorkspaceId, page: PageId, command: string, args: Record<string, unknown>): Promise<void>;
   createPage(ws: WorkspaceId, type: string, title: string, parentId: PageId | null): Promise<PageId>;
@@ -157,6 +159,7 @@ async function connect(): Promise<WikiHost> {
     toMarkdown: (ws, page) => guard(remote.toMarkdown(ws, page)),
     describeMutations: (ws, page) => guard(remote.describeMutations(ws, page)),
     renderElement: (ws, page, sectionKey, elementId) => guard(remote.renderElement(ws, page, sectionKey, elementId)),
+    renderSectionElements: (ws, page, sectionKey) => guard(remote.renderSectionElements(ws, page, sectionKey)),
     listSectionElements: (ws, page, sectionKey) => guard(remote.listSectionElements(ws, page, sectionKey)),
     mutate: (ws, page, command, args) => guard(remote.mutate(ws, page, command, args)),
     createPage: (ws, type, title, parentId) => guard(remote.createPage(ws, type, title, parentId)),
