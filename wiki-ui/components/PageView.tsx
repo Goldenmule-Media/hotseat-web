@@ -60,6 +60,7 @@ export function PageView({
   const router = useRouter();
   // Brief "copied" feedback for the page-id link button.
   const [copied, setCopied] = useState(false);
+  const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const ws = useLiveWorkspace(workspaceId);
   const { markdown, loading, error, unknownType } = usePage(workspaceId, pageId);
   const { descriptors } = usePageMutations(workspaceId, pageId);
@@ -201,6 +202,24 @@ export function PageView({
   }
 
   const headerTitle = title ?? node?.title ?? null;
+
+  // Renaming edits the page's OWN title, not the rendered H1 a type may prefix. Enter
+  // commits and blurs, so the blur handler must not commit the same draft twice.
+  const renaming = useRef(false);
+  const commitTitle = async (): Promise<void> => {
+    if (renaming.current) return;
+    const next = (titleDraft ?? "").trim();
+    if (next === "" || next === node?.title) {
+      setTitleDraft(null);
+      return;
+    }
+    renaming.current = true;
+    try {
+      if (await structural.rename(pageId, next)) setTitleDraft(null);
+    } finally {
+      renaming.current = false;
+    }
+  };
   // A studio view opts out of the content column's reading max-width and pins the
   // header while its two columns scroll independently (globals.css, `.page-restate` —
   // both studios share the layout).
@@ -273,7 +292,37 @@ export function PageView({
           </div>
         </div>
         <div className="page-title-row">
-          {headerTitle !== null && <h1 className="page-title">{headerTitle}</h1>}
+          {titleDraft !== null ? (
+            <input
+              className="page-title page-title-input"
+              value={titleDraft}
+              autoFocus
+              disabled={structural.pending}
+              aria-label="Page title"
+              title="Enter or click away to rename, Escape to cancel"
+              onChange={(e) => setTitleDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void commitTitle();
+                if (e.key === "Escape") setTitleDraft(null);
+              }}
+              onBlur={() => void commitTitle()}
+            />
+          ) : (
+            headerTitle !== null && (
+              <h1
+                className="page-title"
+                role="button"
+                tabIndex={0}
+                title="Click to rename"
+                onClick={() => setTitleDraft(node?.title ?? headerTitle)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") setTitleDraft(node?.title ?? headerTitle);
+                }}
+              >
+                {headerTitle}
+              </h1>
+            )
+          )}
           <button
             type="button"
             className="page-id-copy"

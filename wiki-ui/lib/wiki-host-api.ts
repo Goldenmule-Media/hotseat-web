@@ -181,6 +181,8 @@ export interface WikiHostApi {
    *  handler reads only type/title/parentId, and a type may not gate a field on its own
    *  initial status (pages are born empty), so there is nothing else to collect. */
   createPage(ws: WorkspaceId, type: string, title: string, parentId: PageId | null): Promise<PageId>;
+  /** Rename a page — its own editable title, not the render's H1. */
+  setPageTitle(ws: WorkspaceId, page: PageId, title: string): Promise<void>;
   archivePage(ws: WorkspaceId, page: PageId): Promise<void>;
   unarchivePage(ws: WorkspaceId, page: PageId): Promise<void>;
   /** Rename the workspace (its display name; the id never changes). */

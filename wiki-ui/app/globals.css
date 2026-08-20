@@ -623,6 +623,31 @@ code {
   margin: 0;
   line-height: 1.2;
 }
+/* The title IS the rename affordance: click it to edit in place (like the workspace
+   name in the sidebar). The input inherits .page-title's type so nothing shifts. */
+h1.page-title {
+  cursor: text;
+  border-radius: 6px;
+}
+h1.page-title:hover {
+  background: var(--accent-dim);
+}
+.page-title-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 2em;
+  font-weight: bold;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 6px;
+}
+.page-title-input:focus {
+  outline: none;
+  border-color: var(--muted);
+}
 .page-id-copy {
   background: transparent;
   border: none;

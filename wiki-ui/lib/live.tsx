@@ -442,6 +442,8 @@ export interface StructuralMutator {
   /** Create a page (plus any `requiredChildren`, one atomic commit). Resolves the new page's
    *  id, or `null` when the engine rejected it (see {@link StructuralMutator.error}). */
   create: (type: string, title: string, parentId: PageId | null) => Promise<PageId | null>;
+  /** Rename a page — its own editable title, not the render's H1. Resolves `true` on commit. */
+  rename: (pageId: PageId, title: string) => Promise<boolean>;
   /** Archive a page — hides it (and its subtree) from default tree views. Resolves `true` on commit. */
   archive: (pageId: PageId) => Promise<boolean>;
   /** Unarchive a page — restores it to default tree views. */
@@ -452,7 +454,8 @@ export interface StructuralMutator {
 }
 
 /**
- * Structural writes for the sidebar (create / archive / unarchive). Like {@link usePageMutator},
+ * Structural writes for the sidebar and page header (create / rename / archive / unarchive).
+ * Like {@link usePageMutator},
  * these go to the worker; the committed event flows back through the tail and re-projects the
  * tree, so callers never refresh a view themselves.
  */
@@ -487,6 +490,10 @@ export function useStructuralMutator(workspaceId: WorkspaceId): StructuralMutato
     },
     [call, workspaceId],
   );
+  const rename = useCallback(
+    async (pageId: PageId, title: string) => (await call((h) => h.setPageTitle(workspaceId, pageId, title))).ok,
+    [call, workspaceId],
+  );
   const archive = useCallback(
     async (pageId: PageId) => (await call((h) => h.archivePage(workspaceId, pageId))).ok,
     [call, workspaceId],
@@ -496,5 +503,5 @@ export function useStructuralMutator(workspaceId: WorkspaceId): StructuralMutato
     [call, workspaceId],
   );
 
-  return { create, archive, unarchive, pending, error };
+  return { create, rename, archive, unarchive, pending, error };
 }

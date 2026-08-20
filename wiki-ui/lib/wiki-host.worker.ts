@@ -522,6 +522,15 @@ function makeApi(conn: PortConn): WikiHostApi {
         throw toWikiErrorDTO(e);
       }
     },
+    async setPageTitle(ws: WorkspaceId, page: PageId, title: string) {
+      const host = await ensureHost(ws);
+      try {
+        const h = await host.handle();
+        await h.setPageTitle(page, title);
+      } catch (e) {
+        throw toWikiErrorDTO(e);
+      }
+    },
     async archivePage(ws: WorkspaceId, page: PageId) {
       const host = await ensureHost(ws);
       try {
