@@ -1079,6 +1079,7 @@ function buildTree(state: IWorkspaceState, registry: Registry): ITreeNode {
       ...(display !== undefined && display !== node?.title ? { displayTitle: display } : {}),
       ...(node !== undefined ? { type: node.type, status: node.status } : {}),
       ...(node?.archived === true ? { archived: true } : {}),
+      ...(node?.pinned === true ? { pinned: true } : {}),
       ...(node?.updatedAt !== undefined ? { updatedAt: node.updatedAt } : {}),
       children: childIds.map(visit),
     };

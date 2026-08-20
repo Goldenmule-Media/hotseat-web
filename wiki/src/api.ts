@@ -459,6 +459,9 @@ export interface ITreeNode {
   readonly status?: string;
   /** Hidden from default views (orthogonal to `status`); present and true only when archived. */
   readonly archived?: boolean;
+  /** Auto-created with its parent and owned by it — cannot be reparented out. Present and
+   *  true only when pinned; lets a tree view refuse the move instead of attempting it. */
+  readonly pinned?: boolean;
   /** Last-mutated timestamp (ISO). For an archived page this is when it was archived — archived
    *  pages are frozen, so no later mutation moves it (lets views order by archival time). */
   readonly updatedAt?: string;

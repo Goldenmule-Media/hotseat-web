@@ -24,6 +24,9 @@ export interface ChildOrder {
   applyOrder: (parentKey: string, children: readonly ITreeNode[]) => ITreeNode[];
   /** Persist a new explicit order for `parentKey`'s children. */
   setOrder: (parentKey: string, orderedIds: readonly string[]) => void;
+  /** True when this parent already has a stored order — i.e. the canonical order a page
+   *  arriving from elsewhere lands in would be overridden by this view. */
+  hasOrder: (parentKey: string) => boolean;
 }
 
 function read(key: string): Orders {
@@ -90,5 +93,7 @@ export function useChildOrder(workspaceId: WorkspaceId): ChildOrder {
     [storageKey],
   );
 
-  return { applyOrder, setOrder };
+  const hasOrder = useCallback((parentKey: string) => (orders[parentKey]?.length ?? 0) > 0, [orders]);
+
+  return { applyOrder, setOrder, hasOrder };
 }

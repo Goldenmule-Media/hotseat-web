@@ -448,6 +448,9 @@ export interface StructuralMutator {
   archive: (pageId: PageId) => Promise<boolean>;
   /** Unarchive a page — restores it to default tree views. */
   unarchive: (pageId: PageId) => Promise<boolean>;
+  /** Move a page under a new parent (`null` = the workspace root), optionally at `position`
+   *  among its new siblings. Rejected by the engine for a cycle or a pinned page. */
+  reparent: (pageId: PageId, newParentId: PageId | null, position?: number) => Promise<boolean>;
   readonly pending: boolean;
   /** The engine's error message, formatted; `null` when clear. */
   readonly error: string | null;
@@ -503,5 +506,11 @@ export function useStructuralMutator(workspaceId: WorkspaceId): StructuralMutato
     [call, workspaceId],
   );
 
-  return { create, rename, archive, unarchive, pending, error };
+  const reparent = useCallback(
+    async (pageId: PageId, newParentId: PageId | null, position?: number) =>
+      (await call((h) => h.reparentPage(workspaceId, pageId, newParentId, position))).ok,
+    [call, workspaceId],
+  );
+
+  return { create, rename, archive, unarchive, reparent, pending, error };
 }

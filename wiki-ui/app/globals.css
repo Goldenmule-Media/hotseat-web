@@ -417,9 +417,33 @@ code {
   opacity: 0.5;
   cursor: grabbing;
 }
-/* insertion line above the drop target — inset shadow avoids any layout shift */
-.tree-row.drag-over {
-  box-shadow: inset 0 2px 0 var(--text);
+/* The three drop bands: an insertion line for a sibling drop, an outline for a drop INTO the
+   row. Inset shadows so nothing shifts under the pointer mid-drag. */
+.tree-row.drop-before {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+.tree-row.drop-after {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.tree-row.drop-inside {
+  background: var(--accent-dim);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+/* "Out of every parent" — the one drop target that can't be expressed as a row band. Present
+   only while a drag is in flight. */
+.tree-root-drop {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+}
+.tree-root-drop.drop-inside {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--text);
 }
 .tree-error {
   color: #f87171;

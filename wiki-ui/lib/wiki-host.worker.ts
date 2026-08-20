@@ -549,6 +549,15 @@ function makeApi(conn: PortConn): WikiHostApi {
         throw toWikiErrorDTO(e);
       }
     },
+    async reparentPage(ws: WorkspaceId, page: PageId, newParentId: PageId | null, position?: number) {
+      const host = await ensureHost(ws);
+      try {
+        const h = await host.handle();
+        await h.reparent(page, newParentId, position);
+      } catch (e) {
+        throw toWikiErrorDTO(e);
+      }
+    },
     async renameWorkspace(ws: WorkspaceId, name: string) {
       const host = await ensureHost(ws);
       try {

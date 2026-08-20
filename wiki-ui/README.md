@@ -45,6 +45,13 @@ It consumes `wiki` and `wiki-models` as source via `transpilePackages`.
 - **Navigation** is the page tree (`handle.tree()`) plus a child-pages strip from
   structured data — the engine renders child/reference entries as plain titles, so
   navigation is driven by ids, not by parsing the body.
+- **Drag-and-drop reparenting (the other write path).** Sidebar rows are draggable, and a row
+  is three drop bands (`lib/tree-drag.ts`): its outer quarters place the dragged page as a
+  sibling before/after it, its middle half makes it a child of it, and a "Move to top level"
+  strip appears mid-drag. A sibling drop within one parent stays a UI-only rearrangement
+  (`useChildOrder`, localStorage); anything that changes the parent commits `handle.reparent`,
+  so it reaches every client. Moves the engine would refuse — into the page's own subtree, or a
+  pinned page out of its owner (`ITreeNode.pinned`) — offer no drop affordance at all.
 - **Full-text search.** The engine's search index runs **in the browser**, backed by a
   PGlite database persisted to IndexedDB (`lib/search-db.ts`, wired via `createWiki`'s
   `search` option). Opening a workspace folds *and* indexes it, so `handle.search(...)`

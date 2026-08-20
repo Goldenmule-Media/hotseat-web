@@ -185,6 +185,9 @@ export interface WikiHostApi {
   setPageTitle(ws: WorkspaceId, page: PageId, title: string): Promise<void>;
   archivePage(ws: WorkspaceId, page: PageId): Promise<void>;
   unarchivePage(ws: WorkspaceId, page: PageId): Promise<void>;
+  /** Move a page under a new parent (`null` = the workspace root), optionally at a given
+   *  index among its new siblings. */
+  reparentPage(ws: WorkspaceId, page: PageId, newParentId: PageId | null, position?: number): Promise<void>;
   /** Rename the workspace (its display name; the id never changes). */
   renameWorkspace(ws: WorkspaceId, name: string): Promise<void>;
 

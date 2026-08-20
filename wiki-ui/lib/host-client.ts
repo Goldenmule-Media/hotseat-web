@@ -66,6 +66,7 @@ export interface WikiHost {
   setPageTitle(ws: WorkspaceId, page: PageId, title: string): Promise<void>;
   archivePage(ws: WorkspaceId, page: PageId): Promise<void>;
   unarchivePage(ws: WorkspaceId, page: PageId): Promise<void>;
+  reparentPage(ws: WorkspaceId, page: PageId, newParentId: PageId | null, position?: number): Promise<void>;
   renameWorkspace(ws: WorkspaceId, name: string): Promise<void>;
   subscribe(ws: WorkspaceId, onSnapshot: SnapshotCallback): Promise<() => void>;
 }
@@ -167,6 +168,7 @@ async function connect(): Promise<WikiHost> {
     setPageTitle: (ws, page, title) => guard(remote.setPageTitle(ws, page, title)),
     archivePage: (ws, page) => guard(remote.archivePage(ws, page)),
     unarchivePage: (ws, page) => guard(remote.unarchivePage(ws, page)),
+    reparentPage: (ws, page, newParentId, position) => guard(remote.reparentPage(ws, page, newParentId, position)),
     renameWorkspace: (ws, name) => guard(remote.renameWorkspace(ws, name)),
     subscribe: async (ws, onSnapshot) => {
       // Comlink.proxy lets the worker invoke this tab-side callback across the port.

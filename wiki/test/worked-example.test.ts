@@ -130,6 +130,9 @@ describe("worked example: plan → build → ship a feature", () => {
       { type: "testing-plan", status: "draft" },
       { type: "feature-spec", status: "drafting" },
     ]);
+    // Ownership is on the tree too, so a tree view can refuse a move it knows will be rejected.
+    expect(briefNode?.pinned).toBeUndefined();
+    expect(briefNode?.children.map((c) => c.pinned)).toEqual([true, true, true]);
   });
 
   it("fills the brief (summary / components / constraints / Q&A) and links a reference", async () => {

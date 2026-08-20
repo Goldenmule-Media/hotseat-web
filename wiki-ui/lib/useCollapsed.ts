@@ -21,6 +21,8 @@ export interface CollapsedState {
   isCollapsed: (id: string) => boolean;
   /** Flip `id` between collapsed and expanded, persisting the result. */
   toggle: (id: string) => void;
+  /** Expand `id` (no-op when already expanded) — used to reveal a drag's destination. */
+  expand: (id: string) => void;
 }
 
 function read(key: string): ReadonlySet<string> {
@@ -65,7 +67,20 @@ export function useCollapsed(workspaceId: WorkspaceId): CollapsedState {
     [storageKey],
   );
 
+  const expand = useCallback(
+    (id: string) => {
+      setCollapsed((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        write(storageKey, next);
+        return next;
+      });
+    },
+    [storageKey],
+  );
+
   const isCollapsed = useCallback((id: string) => collapsed.has(id), [collapsed]);
 
-  return { isCollapsed, toggle };
+  return { isCollapsed, toggle, expand };
 }
