@@ -41,8 +41,13 @@ Run from the repo root unless noted. There is **no linter/formatter** — `typec
 
 `<pkg>` ∈ `wiki` · `wiki-models` · `wiki-mcp` · `wiki-server` · `wiki-mirror`. **`wiki-ui` is NOT covered by the root
 scripts** — it has its own `node_modules`/lockfile and `next build`/`vitest`; run `npm install` / `npm run
-typecheck` / `npm run build` / `npm run dev` **inside `wiki-ui/`** (see "wiki-ui (the browser)" below).
+typecheck` **inside `wiki-ui/`** (see "wiki-ui (the browser)" below).
 Don't run `npm install` at the root (already done).
+
+> **NEVER run `npm run build` (or `next build`) in `wiki-ui/`.** The user keeps `next dev` running against
+> that same `.next/` directory, and a build overwrites it out from under the dev server and kills it.
+> `npm run typecheck` (and `npm test`) in `wiki-ui/` is the gate for UI work — that is sufficient, and it
+> is all you need. This applies to the root `npm run build` too whenever the UI dev server is up.
 
 ## Architecture: five packages + a browser UI
 
@@ -229,6 +234,9 @@ its own. Full surface: [`architecture/wiki-server.md`](docs/hotseat-wiki/archite
 npm run start -w wiki-server -- --models wiki-models/feature   # a server (from the repo root)
 cd wiki-ui && npm install && npm run dev                       # http://localhost:3000
 ```
+
+**Verify UI work with `npm run typecheck` + `npm test` in `wiki-ui/`, never `npm run build`** — see the
+warning under Commands: a build clobbers the running dev server's `.next/`.
 
 Point it at the server with `NEXT_PUBLIC_WIKI_STREAM_BASE_URL` (default `http://127.0.0.1:4437`) and
 `NEXT_PUBLIC_WIKI_NAMESPACE` (must match the server's `WIKI_MCP_NAMESPACE`); because the engine runs
