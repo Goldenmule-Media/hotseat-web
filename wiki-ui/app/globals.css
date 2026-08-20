@@ -395,6 +395,11 @@ code {
   color: var(--muted);
   white-space: nowrap;
 }
+/* A status the MODEL calls done (an article summarized): finished, but still open to edits —
+   so it reads as a quiet tick, not the solid chip a sealed page gets. */
+.tree-status.tree-status-done {
+  color: var(--green);
+}
 /* Terminal (sealed/final) status: a solid chip so finished pages stand out in the tree. */
 .tree-status.tree-status-terminal {
   color: var(--text);
@@ -749,6 +754,12 @@ h1.page-title:hover {
   color: var(--text);
   background: var(--accent-dim);
   border-color: var(--accent);
+}
+/* Finished per the model, still editable — a tick and a green edge, not the sealed chip. */
+.page-status-badge.page-done-badge {
+  color: var(--green);
+  border-color: var(--green);
+  background: transparent;
 }
 .page-archive-error {
   color: #f87171;

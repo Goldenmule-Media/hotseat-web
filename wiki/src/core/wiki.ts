@@ -292,6 +292,7 @@ class Wiki implements IWiki {
         to: tr.toState,
         ...(tr.meta !== undefined ? { meta: tr.meta } : {}),
       })),
+      ...(def.doneStatuses !== undefined ? { done: [...def.doneStatuses] } : {}),
     };
   }
 

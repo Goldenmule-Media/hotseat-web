@@ -12,6 +12,10 @@
  * flowing document; lib/article-notes.ts maps between the two, so an ordinary edit becomes
  * one `reviseNote` and the list never surfaces as chrome.
  *
+ * Nothing here is ever read-only. Leaving the summary marks the article finished
+ * (`summarize`), which is a SIGNAL — the sidebar and the header badge tick — not a seal:
+ * every surface stays editable in `summarized`, and editing on is how you reopen nothing.
+ *
  * Notes take pasted images. That is the whole reason the attachment store exists, and it
  * costs nothing here: <MarkdownEditor> owns the paste handling, so passing an uploader is
  * the entire integration.
@@ -22,23 +26,9 @@ import type { PageId, WorkspaceId } from "wiki";
 import { diffNotes, notesToDocument, NOTES_SECTION, READING, readSource, readSummary, splitNoteDocument } from "../lib/article-notes";
 import { uploadAttachment } from "../lib/attachments";
 import { usePageMutator, useSectionDocument } from "../lib/live";
-import { renderMarkdown } from "../lib/markdown";
-import { resolveAttachmentsIn } from "../lib/attachments";
 import { MarkdownEditor } from "./MarkdownEditor";
 
 const AUTOSAVE_MS = 1000;
-
-/** Rendered Markdown with its attachment URLs resolved — a note's images, in read mode. */
-function RenderedBody({ markdown, workspaceId }: { markdown: string; workspaceId: WorkspaceId }): React.JSX.Element {
-  const ref = useRef<HTMLDivElement | null>(null);
-  const html = useMemo(() => renderMarkdown(markdown, workspaceId), [markdown, workspaceId]);
-  useEffect(() => {
-    const el = ref.current;
-    if (el === null) return;
-    return resolveAttachmentsIn(el, workspaceId);
-  }, [html, workspaceId]);
-  return <div ref={ref} className="markdown restate-preview" dangerouslySetInnerHTML={{ __html: html }} />;
-}
 
 export function ArticleStudio({
   workspaceId,
@@ -67,6 +57,20 @@ export function ArticleStudio({
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const upload = useCallback((file: File) => uploadAttachment(workspaceId, file), [workspaceId]);
+
+  /**
+   * Leaving the summary saves it AND marks the article finished — writing what you made of
+   * it IS finishing it, so there is no separate button. `summarize` seals nothing (notes and
+   * summary stay editable), and it is only attempted once its preconditions hold, so an
+   * unlinked or empty draft just saves quietly instead of raising the engine's refusal.
+   */
+  const finishSummary = useCallback(async () => {
+    const text = summary;
+    setSummary(null);
+    if (text !== null && text !== storedSummary && !(await runMutation("writeSummary", { markdown: text }))) return;
+    const written = (text ?? storedSummary).trim();
+    if (reading && written !== "" && source.link !== "") await runMutation("summarize", {});
+  }, [summary, storedSummary, reading, source.link, runMutation]);
 
   // Read at save time, never captured: a debounced save must diff against the list as it
   // stands when it fires, not as it stood when the keystroke scheduled it.
@@ -171,10 +175,7 @@ export function ArticleStudio({
               <MarkdownEditor
                 value={summary ?? storedSummary}
                 onChange={setSummary}
-                onBlur={() => {
-                  if (summary !== null && summary !== storedSummary) void runMutation("writeSummary", { markdown: summary });
-                  setSummary(null);
-                }}
+                onBlur={() => void finishSummary()}
                 terms={[]}
                 onTermClick={() => {}}
                 placeholder="What you made of it, in your own words."
@@ -185,23 +186,17 @@ export function ArticleStudio({
 
           <section className="restate-block">
             <h2 className="restate-block-head">Notes</h2>
-            {reading ? (
-              <div className="article-doc">
-                <MarkdownEditor
-                  value={draft ?? storedNotes}
-                  onChange={scheduleNotes}
-                  onBlur={flushNotes}
-                  terms={[]}
-                  onTermClick={() => {}}
-                  placeholder="Notes, in your own words. Paste an image to attach it."
-                  onUploadImage={upload}
-                />
-              </div>
-            ) : storedNotes === "" ? (
-              <p className="restate-preview-empty">No notes.</p>
-            ) : (
-              <RenderedBody markdown={storedNotes} workspaceId={workspaceId} />
-            )}
+            <div className="article-doc">
+              <MarkdownEditor
+                value={draft ?? storedNotes}
+                onChange={scheduleNotes}
+                onBlur={flushNotes}
+                terms={[]}
+                onTermClick={() => {}}
+                placeholder="Notes, in your own words. Paste an image to attach it."
+                onUploadImage={upload}
+              />
+            </div>
           </section>
         </div>
       </div>

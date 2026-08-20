@@ -113,16 +113,22 @@ describe("article-notes: authoring and render", () => {
     await expect(ws.mutate(page, "reviseNote", { noteId: "nope", markdown: "x" })).rejects.toThrow(/not found/);
   });
 
-  it("closes notes to writing once summarized, and reopens them", async () => {
+  it("summarizing signals done without sealing anything — and the type says so", async () => {
     const page = await newPage();
     await ws.mutate(page, "setLink", { link: LINK });
     await ws.mutate(page, "writeSummary", { markdown: "Done." });
     await ws.mutate(page, "summarize", {});
 
-    // notes.mutableIn is ["reading"] only: a summarized page's notes are settled.
-    await expect(ws.mutate(page, "addNote", { markdown: "Late thought." })).rejects.toBeDefined();
-    await ws.mutate(page, "reopen", {});
+    // Finished, not frozen: a late thought still lands, and the summary still rewrites.
     await expect(ws.mutate(page, "addNote", { markdown: "Late thought." })).resolves.toBeDefined();
+    await expect(ws.mutate(page, "writeSummary", { markdown: "Rethought." })).resolves.toBeDefined();
+    expect(await (await ws.page(page)).status()).toBe("summarized");
+
+    // `summarized` is the model's DONE classifier — what a sidebar reads to mark it.
+    expect(harness.wiki.fsmOf("article-notes").done).toEqual(["summarized"]);
+
+    await ws.mutate(page, "reopen", {});
+    expect(await (await ws.page(page)).status()).toBe("reading");
   });
 
   it("renders byte-identically from equal content", async () => {

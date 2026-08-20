@@ -188,6 +188,13 @@ export class Registry {
     };
     for (const [key, sd] of Object.entries(def.sections)) lintGate(key, sd);
 
+    // A "done" status the FSM never declares is a classifier nothing can ever match.
+    for (const status of def.doneStatuses ?? []) {
+      if (!statuses.has(status)) {
+        issues.push({ path: ["doneStatuses"], message: `status "${status}" is not declared by the FSM` });
+      }
+    }
+
     // (2) An element-FSM state mentioned by a transition but unreachable from the
     // element's initial status can never be entered — and any gate keyed on it (e.g. a
     // ship gate requiring every case `passed`) would be unsatisfiable.

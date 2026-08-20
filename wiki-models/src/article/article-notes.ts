@@ -22,7 +22,8 @@ import { listOf } from "../shared/page-state";
 
 const empty = z.object({});
 
-/** Editable while reading AND after summarizing: a bad link is worth fixing later. */
+/** Every section stays editable after summarizing: finishing an article is a SIGNAL, not a
+ *  seal — a note is still worth adding, a link still worth fixing. */
 const editable = ["reading", "summarized"] as const;
 
 const notesOf = (page: DeepReadonly<PageState>): readonly DeepReadonly<IItem>[] => listOf(page, "notes", "items");
@@ -63,14 +64,18 @@ export const ArticleNotes = definePageType({
     "image: pass `![alt](attachment:<id>)` for an uploaded file, or an ordinary image URL.\n\n" +
     "The article's date is the day the page was created — the engine stamps it, so there is nothing to " +
     "author and nothing that can drift.\n\n" +
-    "`summarize` is a human gate. The engine refuses it until the link and the summary are authored, and " +
-    "names whichever is missing. `reopen` returns the page to `reading`.",
+    "`summarize` marks the article finished. The engine refuses it until the link and the summary are " +
+    "authored, and names whichever is missing. Nothing freezes: notes and summary stay editable, and " +
+    "`reopen` returns the page to `reading`.",
   version: 1,
   initialStatus: "reading",
   statusTransitions: [
     t("reading", "summarize", "summarized", { agency: "human" }),
     t("summarized", "reopen", "reading", { agency: "human" }),
   ],
+  // `summarized` says the article is FINISHED, not sealed: notes and summary stay editable
+  // there (see `editable` below), and the classifier is what a sidebar marks it with.
+  doneStatuses: ["summarized"],
   sections: {
     source: {
       name: "Source",
@@ -92,7 +97,7 @@ export const ArticleNotes = definePageType({
     notes: {
       name: "Notes",
       required: true,
-      mutableIn: ["reading"],
+      mutableIn: [...editable],
       fields: { items: { kind: "list", element: "note", ordered: true } },
     },
     summary: {
@@ -202,7 +207,7 @@ export const ArticleNotes = definePageType({
       transition: { level: "page", event: "summarize" },
     },
     reopen: {
-      description: "Return a summarized page to `reading` to capture more notes.",
+      description: "Mark a summarized article unfinished again.",
       args: zodSchema(empty),
       transition: { level: "page", event: "reopen" },
     },

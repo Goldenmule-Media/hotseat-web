@@ -697,6 +697,8 @@ export interface FsmDescriptor {
   readonly states: readonly string[];
   /** Every declared transition (the directed, labeled edges). */
   readonly transitions: readonly FsmTransition[];
+  /** Mirrors {@link IPageTypeDef.doneStatuses} — the statuses the model calls finished. */
+  readonly done?: readonly string[];
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1204,6 +1206,14 @@ export interface IPageTypeDef<Status extends string = string> {
   readonly initialStatus: Status;
   /** Lifecycle FSM ONLY. */
   readonly statusTransitions: readonly ITransition<Status, string>[];
+  /**
+   * Statuses in which the page's work is DONE — the model's own "finished" classifier,
+   * read generically by hosts (a sidebar marking a finished page, a header chip). Distinct
+   * from terminal: a done status may still have outgoing edges (an article's `summarized`
+   * reopens), and a terminal status is not necessarily done (`rejected` ends the line).
+   * Absent = the type never claims completion.
+   */
+  readonly doneStatuses?: readonly Status[];
   /** Edges that fire THEMSELVES — see {@link AutoTransition}. */
   readonly autoTransitions?: readonly AutoTransition[];
   readonly sections: Readonly<Record<string, SectionDecl>>;

@@ -173,6 +173,8 @@ export function PageView({
   // The header always shows the current status; a terminal (sealed/final) status gets the
   // distinct filled treatment on top of the always-present chip.
   const isTerminal = fsm !== null && currentStatus !== "" && isTerminalStatus(fsm, currentStatus);
+  // The model's own "finished" classifier — see lib/terminal.ts.
+  const isDone = fsm?.done?.includes(currentStatus) === true;
 
   // Keep rewritten intra-wiki links as in-app navigations instead of full reloads.
   function onClick(e: MouseEvent<HTMLDivElement>): void {
@@ -233,9 +235,16 @@ export function PageView({
             {pageType !== undefined && <span className="page-type-chip">{pageType}</span>}
             {currentStatus !== "" && (
               <span
-                className={`page-status-badge${isTerminal ? " page-terminal-badge" : ""}`}
-                title={isTerminal ? "Terminal status — no further transitions" : "Current status"}
+                className={`page-status-badge${isTerminal ? " page-terminal-badge" : ""}${isDone ? " page-done-badge" : ""}`}
+                title={
+                  isDone
+                    ? "Finished — still editable"
+                    : isTerminal
+                      ? "Terminal status — no further transitions"
+                      : "Current status"
+                }
               >
+                {isDone && <span aria-hidden="true">✓ </span>}
                 {currentStatus}
               </span>
             )}

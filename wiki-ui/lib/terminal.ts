@@ -22,3 +22,14 @@ export function isTerminalNodeStatus(type: string | undefined, status: string | 
   const fsm = fsmOf(type);
   return fsm !== null && isTerminalStatus(fsm, status);
 }
+
+/**
+ * True when the MODEL calls `status` finished (`doneStatuses`). Nothing here knows which
+ * statuses those are — an article's `summarized`, a brief's `shipped` — the type declares it
+ * and this reads it, the same seam as `agency` on an edge. Same tolerance as above.
+ */
+export function isDoneNodeStatus(type: string | undefined, status: string | undefined): boolean {
+  if (type === undefined || status === undefined) return false;
+  if (!fsmReady()) return false;
+  return fsmOf(type)?.done?.includes(status) === true;
+}

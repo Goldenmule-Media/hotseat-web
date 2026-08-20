@@ -17,15 +17,21 @@ import { useChildOrder, type ChildOrder } from "../lib/useChildOrder";
 import { useCollapsed, type CollapsedState } from "../lib/useCollapsed";
 import { useShowArchived } from "../lib/useShowArchived";
 import { useStructuralMutator } from "../lib/live";
-import { isTerminalNodeStatus } from "../lib/terminal";
+import { isDoneNodeStatus, isTerminalNodeStatus } from "../lib/terminal";
 import { CreatePageModal } from "./CreatePageModal";
 
 /** The status chip next to a sidebar title — visually distinct when the status is terminal
- *  (sealed/final), so finished pages read differently at a glance. */
+ *  (sealed/final) or one the model calls DONE, so finished pages read differently at a glance. */
 function StatusChip({ node }: { node: ITreeNode }): React.JSX.Element | null {
   if (node.status === undefined) return null;
   const terminal = isTerminalNodeStatus(node.type, node.status);
-  return <span className={`tree-status${terminal ? " tree-status-terminal" : ""}`}>{node.status}</span>;
+  const done = isDoneNodeStatus(node.type, node.status);
+  return (
+    <span className={`tree-status${terminal ? " tree-status-terminal" : ""}${done ? " tree-status-done" : ""}`}>
+      {done && <span aria-hidden="true">✓ </span>}
+      {node.status}
+    </span>
+  );
 }
 
 type DragState = { id: string; parentKey: string } | null;
