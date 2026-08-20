@@ -55,7 +55,7 @@ export const RestatementGlossary = definePageType({
     },
   },
   render: {
-    title: "Glossary: {title}",
+    title: "{title}",
     sections: [glossaryRenderSection()],
   },
 });

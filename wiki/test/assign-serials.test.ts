@@ -101,14 +101,16 @@ describe("assignSerials — immutability through the workspace handle", () => {
       const toc = (await ws.createPage("toc", { title: "Decision Records", parentId: null })).value;
       const a = (await ws.createPage("decision-record", { title: "first", parentId: toc })).value;
       const b = (await ws.createPage("decision-record", { title: "second", parentId: toc })).value;
-      const h1 = async (id: PageId): Promise<string> => (await ws.toMarkdown(id)).split("\n", 1)[0];
-      expect(await h1(a)).toBe("# ADR-1: first");
-      expect(await h1(b)).toBe("# ADR-2: second");
+      // The number renders in the Metadata block (the title is the raw, editable one).
+      const numbered = async (id: PageId): Promise<string> =>
+        /\*\*Number:\*\* (ADR-\d+)/.exec(await ws.toMarkdown(id))?.[1] ?? "";
+      expect(await numbered(a)).toBe("ADR-1");
+      expect(await numbered(b)).toBe("ADR-2");
 
       await ws.assignSerials(); // every serial is already set → must change nothing
 
-      expect(await h1(a)).toBe("# ADR-1: first");
-      expect(await h1(b)).toBe("# ADR-2: second");
+      expect(await numbered(a)).toBe("ADR-1");
+      expect(await numbered(b)).toBe("ADR-2");
     } finally {
       await harness.stop();
     }

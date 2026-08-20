@@ -30,7 +30,7 @@ describe("termRefsOf", () => {
 });
 
 describe("glossaryDefinitions", () => {
-  const standalone = ["# Glossary: Systems", "", "## Glossary", "", "### Lease", "", "A lock that expires.", ""].join("\n");
+  const standalone = ["# Systems", "", "## Glossary", "", "### Lease", "", "A lock that expires.", ""].join("\n");
 
   it("maps lowercased term to definition", () => {
     const defs = glossaryDefinitions(standalone, "first");
@@ -68,7 +68,7 @@ describe("glossaryDefinitions", () => {
 
   it('"first" is right for a standalone glossary, where a DEFINITION may carry a ## heading', () => {
     const withHeading = [
-      "# Glossary: Systems",
+      "# Systems",
       "",
       "## Glossary",
       "",

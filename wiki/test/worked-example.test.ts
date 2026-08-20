@@ -302,7 +302,7 @@ describe("worked example: plan → build → ship a feature", () => {
     // BETWEEN blocks (and a single trailing newline). The H1 and the status badge
     // are their own blocks; each `## section` block bundles its heading + body.
     const blocks = [
-      "# Feature: Bulk export",
+      "# Bulk export",
       "**Status:** shipped",
       "## Summary\nLet users export their workspace as CSV/JSON.",
       "## Components affected\n- web-app\n- cli",

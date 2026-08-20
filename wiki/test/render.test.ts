@@ -89,7 +89,7 @@ async function buildBuildingBrief(
   return { brief, plan, testPlan, token };
 }
 
-const EXPECTED_BRIEF = `# Feature: Bulk export
+const EXPECTED_BRIEF = `# Bulk export
 
 **Status:** building
 

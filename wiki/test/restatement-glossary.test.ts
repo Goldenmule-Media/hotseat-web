@@ -192,7 +192,7 @@ describe("restatement-glossary model", () => {
     const md = await (await ws.page(page)).toMarkdown();
     expect(await (await ws.page(page)).toMarkdown()).toBe(md);
 
-    expect(md).toContain("# Glossary: Render");
+    expect(md).toContain("# Render");
     expect(md).toContain("## Glossary");
     expect(md).toContain("### Write-ahead log");
     expect(md).toContain("Record the intent before doing the work.");

@@ -214,7 +214,7 @@ export const BugReport = definePageType({
     reopen: { args: zodSchema(empty), transition: { level: "page", event: "reopen" } },
   },
   render: {
-    title: "Bug: {title}",
+    title: "{title}",
     sections: [
       { derived: "report-rows", heading: "Report", placeholder: "_No report metadata._" },
       { section: "summary", heading: "Summary", field: "body", as: "block", placeholder: "_None._" },

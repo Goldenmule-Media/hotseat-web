@@ -125,7 +125,7 @@ describe("bug-report: lifecycle, completeness gate, atomic close, render", () =>
 
     const md = await ws.toMarkdown(bug);
     expect(await ws.toMarkdown(bug)).toBe(md); // byte-identical re-render (determinism)
-    expect(md).toMatch(/^# Bug: emitter skips archive\n/);
+    expect(md).toMatch(/^# emitter skips archive\n/);
     expect(block(md, "Report")).toBe(
       "- **Component:** wiki-mcp\n- **Platform:** macOS 15\n- **Version:** 0.1.0",
     );

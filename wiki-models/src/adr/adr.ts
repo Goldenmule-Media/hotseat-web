@@ -5,7 +5,7 @@
  * from a decision to the one that revises it, and only a PER-FILE id (so `wiki-mcp` and
  * `wiki-models` could both ship an "ADR-M7"). Here every decision is one page in one global
  * "ADRs" workspace, and IDENTITY is the stable global page id. A human-friendly `ADR-N` label
- * is an engine-assigned `serial` field (`meta.number`) surfaced in the rendered title — a
+ * is an engine-assigned `serial` field (`meta.number`) surfaced in the Metadata block — a
  * display handle, never identity, so it can't collide or be hand-edited out of sequence.
  *
  * Shape (Michael Nygard's template + a little metadata):
@@ -150,9 +150,13 @@ const namesSuccessor: Precondition = (page, related) => {
 const metaRows: DerivedList = (page) => {
   const meta = fieldsOf(page, "meta");
   const rows: DerivedItem[] = [];
+  const number = scalarOf(meta, "number");
   const date = scalarOf(meta, "date");
   const scope = scalarOf(meta, "scope");
   const deciders = deciderNames(page);
+  // The serial used to ride on the rendered title; it lives here now, so a record still
+  // states its own ADR-N without every sidebar row repeating the type's name.
+  if (number !== "" && number !== "0") rows.push({ id: "number", text: `**Number:** ADR-${number}` });
   if (date.length > 0) rows.push({ id: "date", text: `**Date:** ${date}` });
   if (scope.length > 0) rows.push({ id: "scope", text: `**Scope:** ${scope}` });
   if (deciders.length > 0) rows.push({ id: "deciders", text: `**Deciders:** ${deciders.join(", ")}` });
@@ -216,7 +220,7 @@ export const DecisionRecord = definePageType({
       required: true,
       mutableIn: editable,
       fields: {
-        number: { kind: "serial" }, // ADR-N — engine-assigned at create, immutable; shown via render.title
+        number: { kind: "serial" }, // ADR-N — engine-assigned at create, immutable; shown in Metadata
         date: { kind: "scalar", required: true }, // ISO date string — STORED, never new Date()
         scope: { kind: "scalar" }, // e.g. "wiki-mcp" — for filtering/grouping
         deciders: { kind: "list", element: "decider", ordered: true },
@@ -332,7 +336,7 @@ export const DecisionRecord = definePageType({
     },
   },
   render: {
-    title: "ADR-{meta.number}: {title}",
+    title: "{title}",
     graphSections: false, // refs ARE the relations; the engine's link-based References section would be empty
     sections: [
       { derived: "meta-rows", heading: "Metadata", placeholder: "_No metadata._" },

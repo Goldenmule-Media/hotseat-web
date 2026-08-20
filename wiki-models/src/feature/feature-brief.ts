@@ -246,7 +246,7 @@ export const FeatureBrief = definePageType({
     abandon: { args: zodSchema(empty), transition: { level: "page", event: "abandon" } },
   },
   render: {
-    title: "Feature: {title}",
+    title: "{title}",
     graphSections: false,
     sections: [
       { section: "summary", heading: "Summary", field: "body", as: "block", placeholder: "_None._" },

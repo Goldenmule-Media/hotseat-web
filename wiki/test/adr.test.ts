@@ -59,7 +59,7 @@ describe("decision-record: lifecycle, render, and metadata", () => {
     await harness.stop();
   });
 
-  it("renders Nygard sections + a metadata block deterministically; title prefixed 'ADR-N:'", async () => {
+  it("renders Nygard sections + a metadata block deterministically, the ADR number among them", async () => {
     const adr = await makeAdr(ws, container, "use event sourcing", {
       scope: "wiki",
     });
@@ -67,11 +67,11 @@ describe("decision-record: lifecycle, render, and metadata", () => {
     await ws.mutate(adr, "addDecider", { name: "Ada" });
     const md = await ws.toMarkdown(adr);
     expect(await ws.toMarkdown(adr)).toBe(md); // byte-identical re-render (determinism)
-    // The H1 is the render.title template: an engine-assigned ADR number + the raw title.
-    expect(md).toMatch(/^# ADR-\d+: use event sourcing\n/);
+    // The H1 is the raw title: nothing decorates it. The engine-assigned number is metadata.
+    expect(md).toMatch(/^# use event sourcing\n/);
     expect(statusOf(md)).toBe("proposed");
-    expect(block(md, "Metadata")).toBe(
-      "- **Date:** 2026-06-05\n- **Scope:** wiki\n- **Deciders:** Ben, Ada",
+    expect(block(md, "Metadata")).toMatch(
+      /^- \*\*Number:\*\* ADR-\d+\n- \*\*Date:\*\* 2026-06-05\n- \*\*Scope:\*\* wiki\n- \*\*Deciders:\*\* Ben, Ada$/,
     );
     expect(block(md, "Context")).toBe("Why use event sourcing.");
     expect(block(md, "Decision")).toBe("We will use event sourcing.");
@@ -175,7 +175,7 @@ describe("decision-record: lifecycle, render, and metadata", () => {
     expect(String(mcp)).not.toBe(String(models));
     // Identity is the page id; the ADR number is a per-workspace sequence, so the two records
     // carry DISTINCT, monotonically-increasing numbers — the old per-file "ADR-M7" clash is gone.
-    const numOf = (md: string): number => Number(/^# ADR-(\d+):/.exec(md)?.[1]);
+    const numOf = (md: string): number => Number(/\*\*Number:\*\* ADR-(\d+)/.exec(md)?.[1]);
     const nMcp = numOf(await ws.toMarkdown(mcp));
     const nModels = numOf(await ws.toMarkdown(models));
     expect(Number.isInteger(nMcp)).toBe(true);
@@ -251,37 +251,40 @@ describe("decision-record: the engine-assigned ADR `serial` number", () => {
     return undefined;
   };
   const titleH1 = (md: string): string => md.slice(2, md.indexOf("\n"));
+  const numbered = (md: string): string => /\*\*Number:\*\* (ADR-\d+)/.exec(md)?.[1] ?? "";
 
-  it("mints 1, 2, 3 in creation order, scoped per-type-per-workspace, and surfaces it in the title + tree", async () => {
+  it("mints 1, 2, 3 in creation order, scoped per-type-per-workspace, and renders it as metadata", async () => {
     const a = (await ws.createPage("decision-record", { title: "first", parentId: container })).value;
     const b = (await ws.createPage("decision-record", { title: "second", parentId: container })).value;
     const c = (await ws.createPage("decision-record", { title: "third", parentId: container })).value;
 
-    expect(titleH1(await ws.toMarkdown(a))).toBe("ADR-1: first");
-    expect(titleH1(await ws.toMarkdown(b))).toBe("ADR-2: second");
-    expect(titleH1(await ws.toMarkdown(c))).toBe("ADR-3: third");
+    expect(numbered(await ws.toMarkdown(a))).toBe("ADR-1");
+    expect(numbered(await ws.toMarkdown(b))).toBe("ADR-2");
+    expect(numbered(await ws.toMarkdown(c))).toBe("ADR-3");
 
-    // The tree carries the templated displayTitle (what the sidebar renders); the raw title is
-    // the un-numbered, editable value.
+    // Titles are undecorated everywhere: the H1 and the tree carry the raw, editable title,
+    // so no `displayTitle` is even minted for the sidebar to prefer.
+    expect(titleH1(await ws.toMarkdown(b))).toBe("second");
     const tree = await ws.tree();
-    expect(find(tree, b)?.displayTitle).toBe("ADR-2: second");
+    expect(find(tree, b)?.displayTitle).toBeUndefined();
     expect(find(tree, b)?.title).toBe("second");
   });
 
   it("is immutable across rename — the number is independent of the (editable) title", async () => {
     const a = (await ws.createPage("decision-record", { title: "rename me", parentId: container })).value;
-    const before = titleH1(await ws.toMarkdown(a));
+    const before = numbered(await ws.toMarkdown(a));
     await ws.setPageTitle(a, "renamed");
     // Same ADR number, new description — the serial is not part of, or recomputed from, the title.
-    expect(titleH1(await ws.toMarkdown(a))).toBe(before.replace(": rename me", ": renamed"));
+    expect(numbered(await ws.toMarkdown(a))).toBe(before);
+    expect(titleH1(await ws.toMarkdown(a))).toBe("renamed");
   });
 
   it("never reuses a number — an archived ADR keeps its slot, so the next mint skips past it", async () => {
     const x = (await ws.createPage("decision-record", { title: "to archive", parentId: container })).value;
-    const archivedNum = Number(/^ADR-(\d+):/.exec(titleH1(await ws.toMarkdown(x)))?.[1]);
+    const archivedNum = Number(numbered(await ws.toMarkdown(x)).slice(4));
     await ws.archivePage(x);
     const y = (await ws.createPage("decision-record", { title: "after archive", parentId: container })).value;
-    const nextNum = Number(/^ADR-(\d+):/.exec(titleH1(await ws.toMarkdown(y)))?.[1]);
+    const nextNum = Number(numbered(await ws.toMarkdown(y)).slice(4));
     expect(nextNum).toBeGreaterThan(archivedNum); // the archived record still occupies its number
   });
 });

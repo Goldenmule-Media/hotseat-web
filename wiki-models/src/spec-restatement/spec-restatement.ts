@@ -1071,7 +1071,7 @@ export const SpecRestatement = definePageType({
     },
   },
   render: {
-    title: "Spec: {title}",
+    title: "{title}",
     graphSections: false,
     sections: [
       {

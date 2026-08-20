@@ -730,7 +730,7 @@ describe("spec-restatement model", () => {
     const md = await ws.toMarkdown(p);
     const expected =
       [
-        "# Spec: Render demo",
+        "# Render demo",
         "**Status:** drafting",
         "## Sections\n" +
           [

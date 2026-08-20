@@ -202,7 +202,7 @@ describe("severityFromHeading", () => {
 // ── sliceH2Section ─────────────────────────────────────────────────────────────
 
 describe("sliceH2Section", () => {
-  const page = "# Spec: T\n\n## Sections\n\n### Overview\n\nThe summary line.\n\n### A\n\nBody.\n\n## Review\n\n_Not reviewed._";
+  const page = "# T\n\n## Sections\n\n### Overview\n\nThe summary line.\n\n### A\n\nBody.\n\n## Review\n\n_Not reviewed._";
 
   it("returns the body of the named H2 section, stopping at the next H2", () => {
     expect(sliceH2Section(page, "Review")).toBe("_Not reviewed._");
@@ -219,7 +219,7 @@ describe("sliceH2Section", () => {
 
   // Section bodies preserve authored H2s and render BEFORE the real "## Review" heading.
   const shadowed =
-    "# Spec: T\n\n## Sections\n\n### A\n\nBody.\n\n## Review\n\nA literal heading INSIDE a section body.\n\n## Review\n\nThe real recorded summary.";
+    "# T\n\n## Sections\n\n### A\n\nBody.\n\n## Review\n\nA literal heading INSIDE a section body.\n\n## Review\n\nThe real recorded summary.";
 
   it('occurrence "last" skips a literal "## Review" authored inside a section body', () => {
     expect(sliceH2Section(shadowed, "Review")).toBe("A literal heading INSIDE a section body.");
