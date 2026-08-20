@@ -61,7 +61,7 @@ export function ArticleStudio({
   const storedNotes = useMemo(() => notesToDocument(notes.notes), [notes.notes]);
 
   const [link, setLink] = useState<string | null>(null);
-  const [date, setDate] = useState<string | null>(null);
+  const [editingLink, setEditingLink] = useState(false);
   const [summary, setSummary] = useState<string | null>(null);
   const [draft, setDraft] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -128,35 +128,41 @@ export function ArticleStudio({
 
       <div className="restate-studio article-studio">
         <div className="restate-workbench">
-          <section className="restate-block">
-            <h2 className="restate-block-head">Source</h2>
-            <div className="article-source-fields">
-              <label className="article-field">
-                <span>Link</span>
-                <input
-                  type="url"
-                  value={link ?? source.link}
-                  placeholder="https://…"
-                  onChange={(e) => setLink(e.target.value)}
-                  onBlur={() => {
-                    if (link !== null && link !== source.link) void runMutation("setLink", { link });
+          <section className="article-source">
+            {editingLink || source.link === "" ? (
+              <input
+                type="url"
+                className="article-link-input"
+                value={link ?? source.link}
+                autoFocus={editingLink}
+                placeholder="https://… — where the article lives"
+                aria-label="Article link"
+                onChange={(e) => setLink(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") e.currentTarget.blur();
+                  if (e.key === "Escape") {
                     setLink(null);
-                  }}
-                />
-              </label>
-              <label className="article-field">
-                <span>Date</span>
-                <input
-                  type="date"
-                  value={date ?? source.date}
-                  onChange={(e) => setDate(e.target.value)}
-                  onBlur={() => {
-                    if (date !== null && date !== source.date) void runMutation("setDate", { date });
-                    setDate(null);
-                  }}
-                />
-              </label>
-            </div>
+                    setEditingLink(false);
+                  }
+                }}
+                onBlur={() => {
+                  if (link !== null && link !== source.link) void runMutation("setLink", { link });
+                  setLink(null);
+                  setEditingLink(false);
+                }}
+              />
+            ) : (
+              <p className="article-link-row">
+                <a className="article-link" href={source.link} target="_blank" rel="noreferrer noopener">
+                  {source.link}
+                </a>
+                <button type="button" className="article-link-edit" onClick={() => setEditingLink(true)}>
+                  edit
+                </button>
+              </p>
+            )}
+            {/* Not a field: the engine stamps the day the page was created. */}
+            {source.date !== "" && <p className="article-date">Read {source.date}</p>}
           </section>
 
           <section className="restate-block">

@@ -3125,36 +3125,68 @@ button.restate-card-lead:hover {
   }
 }
 
-/* A ROW of fields under the heading. It must set its own direction: .restate-block is a
-   flex COLUMN, where `flex: 1 1 16rem` on a field would claim 16rem of HEIGHT each and
-   push the notes off the screen. */
-.article-source-fields {
-  display: flex;
-  flex-direction: row;
-  gap: 1rem;
-  flex-wrap: wrap;
-  align-items: flex-end;
-}
-
-.article-field {
+/* The source is the article itself, not a form: it reads as a byline under the page title —
+   the link first and prominent, the date under it. No card, no field labels. */
+.article-source {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  flex: 1 1 16rem;
+  gap: 2px;
+  margin-bottom: 4px;
 }
 
-.article-field > span {
-  font-size: 0.8rem;
+.article-link-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  min-width: 0;
+}
+
+.article-link {
+  color: var(--accent);
+  font-size: 15px;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.article-link:hover {
+  text-decoration: underline;
+}
+
+.article-link-edit {
+  flex: none;
+  background: transparent;
+  border: none;
+  padding: 0;
   color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.article-link-edit:hover {
+  color: var(--text);
 }
 
-.article-field input {
-  background: var(--bg);
+.article-link-input {
+  width: 100%;
+  font: inherit;
+  font-size: 15px;
   color: var(--text);
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 0.4rem 0.55rem;
-  font: inherit;
+  padding: 4px 8px;
+}
+.article-link-input:focus {
+  outline: none;
+  border-color: var(--muted);
+}
+
+.article-date {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 /* Notes and summary are documents, not fields: the editor is the whole surface, with

@@ -11,8 +11,8 @@
  * one sitting, so a note here is just a chunk of Markdown with no title and no depth.
  * Sharing a shape between the two would distort both.
  *
- * Completeness is declarative: `requiredIn: ["summarized"]` on the link, the date and
- * the summary is the whole gate. The engine refuses `summarize` until they are
+ * Completeness is declarative: `requiredIn: ["summarized"]` on the link and the summary
+ * is the whole gate. The engine refuses `summarize` until they are
  * authored and names the missing `section.field` paths itself, so there are no
  * hand-rolled preconditions here.
  */
@@ -33,17 +33,19 @@ function noteAt(page: DeepReadonly<PageState>, noteId: string): number {
   return index;
 }
 
-/** The Source section as rendered rows — one section rather than two near-empty ones. */
+/**
+ * The Source section as rendered rows. The DATE is not a field: it is the day the page was
+ * created, which the engine already stamps on every page — one less thing to author, and one
+ * less thing that can disagree with reality. Still deterministic: `createdAt` is stored state,
+ * not a clock read at render time.
+ */
 function sourceRows(page: DeepReadonly<PageState>): readonly { id: string; text: string }[] {
   const fields = page.sections.find((s) => s.key === "source")?.fields ?? {};
-  const value = (key: string): string => {
-    const f = fields[key];
-    return f !== undefined && f.kind === "scalar" ? String(f.value) : "";
-  };
+  const linkField = fields["link"];
+  const link = linkField !== undefined && linkField.kind === "scalar" ? String(linkField.value) : "";
   const rows: { id: string; text: string }[] = [];
-  const link = value("link");
-  const date = value("date");
   if (link.length > 0) rows.push({ id: "link", text: `**Link:** ${link}` });
+  const date = page.createdAt.slice(0, 10);
   if (date.length > 0) rows.push({ id: "date", text: `**Date:** ${date}` });
   return rows;
 }
@@ -59,8 +61,10 @@ export const ArticleNotes = definePageType({
     "The NOTES and the SUMMARY are the human's own words. Capture or revise them only when the human " +
     "asks, and NEVER draft study content on their behalf. A note is arbitrary Markdown, so it may be an " +
     "image: pass `![alt](attachment:<id>)` for an uploaded file, or an ordinary image URL.\n\n" +
-    "`summarize` is a human gate. The engine refuses it until the link, the date and the summary are " +
-    "authored, and names whichever is missing. `reopen` returns the page to `reading`.",
+    "The article's date is the day the page was created — the engine stamps it, so there is nothing to " +
+    "author and nothing that can drift.\n\n" +
+    "`summarize` is a human gate. The engine refuses it until the link and the summary are authored, and " +
+    "names whichever is missing. `reopen` returns the page to `reading`.",
   version: 1,
   initialStatus: "reading",
   statusTransitions: [
@@ -73,18 +77,11 @@ export const ArticleNotes = definePageType({
       required: true,
       mutableIn: [...editable],
       fields: {
-        // An ISO date STRING, supplied by the caller. Never new Date(): a renderer and
-        // a reducer must be pure, and a stored date is what makes the render stable.
         // `requiredIn` — not `required` — is the gate. The two are orthogonal: `required`
         // means "present in the materialized set", and a required section already
-        // materializes its scalars as "". Marking these `required` as well would make the
+        // materializes its scalars as "". Marking it `required` as well would make the
         // engine validate that empty placeholder against the schema below and reject it
         // on the page's very first write.
-        date: {
-          kind: "scalar",
-          requiredIn: ["summarized"],
-          schema: zodSchema(z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "expected an ISO date, e.g. 2026-08-19")),
-        },
         link: {
           kind: "scalar",
           requiredIn: ["summarized"],
@@ -112,12 +109,6 @@ export const ArticleNotes = definePageType({
   sectionSet: { mode: "closed" },
   derived: { "source-rows": sourceRows },
   commands: {
-    setDate: {
-      description: "Record the article's date as an ISO `YYYY-MM-DD` string.",
-      args: zodSchema(z.object({ date: z.string() })),
-      target: { section: "source", field: "date" },
-      set: { date: arg("date") },
-    },
     setLink: {
       description: "Record the article's URL.",
       args: zodSchema(z.object({ link: z.string() })),
@@ -206,9 +197,7 @@ export const ArticleNotes = definePageType({
       ],
     },
     summarize: {
-      description:
-        "Human sign-off: the article is read and summarized. Refused until the link, the date and the " +
-        "summary are all authored.",
+      description: "Human sign-off: the article is read and summarized. Refused until the link and the summary are authored.",
       args: zodSchema(empty),
       transition: { level: "page", event: "summarize" },
     },

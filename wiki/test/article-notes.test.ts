@@ -3,8 +3,8 @@
  * the deterministic Markdown, and the `summarize` gate.
  *
  * The gate is the point of the type. It is DECLARATIVE — `requiredIn: ["summarized"]`
- * on the link, the date and the summary — so the test asserts not just that summarize
- * is refused, but that the refusal names what is missing.
+ * on the link and the summary — so the test asserts not just that summarize is refused,
+ * but that the refusal names what is missing.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -13,7 +13,6 @@ import articlePageTypes, { ArticleNotes } from "wiki-models/article";
 import { createTestWiki, type ITestWiki } from "../src/testing";
 
 const LINK = "https://example.com/an-article";
-const DATE = "2026-08-19";
 const REF = `attachment:${"a".repeat(64)}`;
 
 describe("article-notes: bundle contract", () => {
@@ -48,7 +47,9 @@ describe("article-notes: authoring and render", () => {
   it("renders placeholders on a fresh page, titled by the article's own title", async () => {
     const md = await ws.toMarkdown(await newPage());
     expect(md).toContain("# The Shape of Data 0");
-    expect(md).toContain("_No source recorded._");
+    // The source starts with the creation date alone — the only part nobody authors.
+    expect(md).toMatch(/## Source\n- \*\*Date:\*\* \d{4}-\d{2}-\d{2}\n/);
+    expect(md).not.toContain("**Link:**");
     expect(md).toContain("_No notes yet._");
     expect(md).toContain("_Not summarized yet._");
   });
@@ -56,7 +57,6 @@ describe("article-notes: authoring and render", () => {
   it("captures a source, notes (Markdown and images) and a summary, then summarizes", async () => {
     const page = await newPage();
     await ws.mutate(page, "setLink", { link: LINK });
-    await ws.mutate(page, "setDate", { date: DATE });
     await ws.mutate(page, "addNote", { markdown: "The premise is that shape precedes meaning." });
     await ws.mutate(page, "addNote", { markdown: `![Figure 2](${REF})` });
     await ws.mutate(page, "addNote", { markdown: "> A quote worth keeping.\n\nAnd a reaction to it." });
@@ -65,7 +65,8 @@ describe("article-notes: authoring and render", () => {
 
     const md = await ws.toMarkdown(page);
     expect(md).toContain(`**Link:** ${LINK}`);
-    expect(md).toContain(`**Date:** ${DATE}`);
+    // The date is the day the page was created — stamped by the engine, never authored.
+    expect(md).toMatch(/\*\*Date:\*\* \d{4}-\d{2}-\d{2}/);
     expect(md).toContain("Worth rereading.");
     // Notes stack as top-level blocks: no synthesized heading, no ordinal, and the
     // image ref survives verbatim for a consumer to resolve.
@@ -77,12 +78,11 @@ describe("article-notes: authoring and render", () => {
     expect(await (await ws.page(page)).status()).toBe("summarized");
   });
 
-  it("refuses summarize while the link, date or summary is unauthored, naming what is missing", async () => {
+  it("refuses summarize while the link or summary is unauthored, naming what is missing", async () => {
     const page = await newPage();
-    await expect(ws.mutate(page, "summarize", {})).rejects.toThrow(/source\.link|source\.date|summary\.body/);
+    await expect(ws.mutate(page, "summarize", {})).rejects.toThrow(/source\.link|summary\.body/);
 
     await ws.mutate(page, "setLink", { link: LINK });
-    await ws.mutate(page, "setDate", { date: DATE });
     // Everything but the summary — still refused, and the reason now names only it.
     await expect(ws.mutate(page, "summarize", {})).rejects.toThrow(/summary\.body/);
 
@@ -90,9 +90,8 @@ describe("article-notes: authoring and render", () => {
     await expect(ws.mutate(page, "summarize", {})).resolves.toBeDefined();
   });
 
-  it("validates the date and the link at the schema, not by convention", async () => {
+  it("validates the link at the schema, not by convention", async () => {
     const page = await newPage();
-    await expect(ws.mutate(page, "setDate", { date: "19 August 2026" })).rejects.toBeDefined();
     await expect(ws.mutate(page, "setLink", { link: "not a url" })).rejects.toBeDefined();
   });
 
@@ -117,7 +116,6 @@ describe("article-notes: authoring and render", () => {
   it("closes notes to writing once summarized, and reopens them", async () => {
     const page = await newPage();
     await ws.mutate(page, "setLink", { link: LINK });
-    await ws.mutate(page, "setDate", { date: DATE });
     await ws.mutate(page, "writeSummary", { markdown: "Done." });
     await ws.mutate(page, "summarize", {});
 
@@ -133,8 +131,7 @@ describe("article-notes: authoring and render", () => {
     const build = async (title: string): Promise<string> => {
       const page = (await ws.createPage("article-notes", { title, parentId: null })).value;
       await ws.mutate(page, "setLink", { link: LINK });
-      await ws.mutate(page, "setDate", { date: DATE });
-      await ws.mutate(page, "addNote", { markdown: `![Fig](${REF})` });
+        await ws.mutate(page, "addNote", { markdown: `![Fig](${REF})` });
       await ws.mutate(page, "writeSummary", { markdown: "Same." });
       const md = await ws.toMarkdown(page);
       return md.slice(md.indexOf("\n"));
