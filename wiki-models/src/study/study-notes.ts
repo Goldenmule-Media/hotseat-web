@@ -285,7 +285,7 @@ export const StudyNotes = definePageType({
     },
   },
   render: {
-    title: "Notes: {title}",
+    title: "{title}",
     sections: [
       {
         section: "notes",

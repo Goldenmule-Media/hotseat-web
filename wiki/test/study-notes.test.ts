@@ -271,7 +271,7 @@ describe("study-notes model", () => {
     const again = await (await ws.page(page)).toMarkdown();
     expect(again).toBe(md);
 
-    expect(md).toContain("# Notes: Render");
+    expect(md).toContain("# Render");
     expect(md).toContain("## Notes");
     expect(md).toContain("### Transformers");
     expect(md).toContain("#### Attention");

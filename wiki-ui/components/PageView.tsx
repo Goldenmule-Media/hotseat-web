@@ -200,10 +200,7 @@ export function PageView({
     );
   }
 
-  // The page's OWN title, not the render's H1: a type's `render.title` may prefix it
-  // ("Article notes: …") for the Markdown document, and that prefix only repeats the type
-  // chip sitting beside this header.
-  const headerTitle = node?.title ?? title ?? null;
+  const headerTitle = title ?? node?.title ?? null;
   // A studio view opts out of the content column's reading max-width and pins the
   // header while its two columns scroll independently (globals.css, `.page-restate` —
   // both studios share the layout).

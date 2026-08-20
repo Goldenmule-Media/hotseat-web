@@ -47,7 +47,7 @@ describe("article-notes: authoring and render", () => {
 
   it("renders placeholders on a fresh page, titled by the article's own title", async () => {
     const md = await ws.toMarkdown(await newPage());
-    expect(md).toContain("# Article notes: The Shape of Data 0");
+    expect(md).toContain("# The Shape of Data 0");
     expect(md).toContain("_No source recorded._");
     expect(md).toContain("_No notes yet._");
     expect(md).toContain("_Not summarized yet._");

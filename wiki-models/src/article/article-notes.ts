@@ -219,7 +219,7 @@ export const ArticleNotes = definePageType({
     },
   },
   render: {
-    title: "Article notes: {title}",
+    title: "{title}",
     sections: [
       { derived: "source-rows", heading: "Source", placeholder: "_No source recorded._" },
       { section: "summary", heading: "Summary", field: "body", as: "blocks", placeholder: "_Not summarized yet._" },

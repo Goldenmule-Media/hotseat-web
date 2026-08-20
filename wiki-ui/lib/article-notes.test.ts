@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { diffNotes, notesToDocument, readSource, readSummary, splitNoteDocument } from "./article-notes";
 
 const page = [
-  "# Article notes: The Shape of Data",
+  "# The Shape of Data",
   "",
   "**Status:** reading",
   "",
@@ -30,7 +30,7 @@ describe("readSource", () => {
   });
 
   it("returns empty strings for a page with nothing recorded yet", () => {
-    const fresh = ["# Article notes: New", "", "## Source", "_No source recorded._", "", "## Notes", "_No notes yet._"].join("\n");
+    const fresh = ["# New", "", "## Source", "_No source recorded._", "", "## Notes", "_No notes yet._"].join("\n");
     expect(readSource(fresh)).toEqual({ link: "", date: "" });
     expect(readSource(null)).toEqual({ link: "", date: "" });
   });
@@ -42,7 +42,7 @@ describe("readSummary", () => {
   });
 
   it("treats the unauthored placeholder as empty, not as content", () => {
-    const fresh = ["# Article notes: New", "", "## Summary", "_Not summarized yet._", "", "## Notes", "x"].join("\n");
+    const fresh = ["# New", "", "## Summary", "_Not summarized yet._", "", "## Notes", "x"].join("\n");
     expect(readSummary(fresh)).toBe("");
     expect(readSummary(null)).toBe("");
   });
