@@ -206,37 +206,39 @@ export function ArticleStudio({
 
       <div className="restate-studio study-studio article-studio">
         <div className="restate-workbench">
-          <section className="restate-block article-source">
-            <h2>Source</h2>
-            <label className="article-field">
-              <span>Link</span>
-              <input
-                type="url"
-                value={link ?? source.link}
-                placeholder="https://…"
-                onChange={(e) => setLink(e.target.value)}
-                onBlur={() => {
-                  if (link !== null && link !== source.link) void runMutation("setLink", { link });
-                  setLink(null);
-                }}
-              />
-            </label>
-            <label className="article-field">
-              <span>Date</span>
-              <input
-                type="date"
-                value={date ?? source.date}
-                onChange={(e) => setDate(e.target.value)}
-                onBlur={() => {
-                  if (date !== null && date !== source.date) void runMutation("setDate", { date });
-                  setDate(null);
-                }}
-              />
-            </label>
+          <section className="restate-block">
+            <h2 className="restate-block-head">Source</h2>
+            <div className="article-source-fields">
+              <label className="article-field">
+                <span>Link</span>
+                <input
+                  type="url"
+                  value={link ?? source.link}
+                  placeholder="https://…"
+                  onChange={(e) => setLink(e.target.value)}
+                  onBlur={() => {
+                    if (link !== null && link !== source.link) void runMutation("setLink", { link });
+                    setLink(null);
+                  }}
+                />
+              </label>
+              <label className="article-field">
+                <span>Date</span>
+                <input
+                  type="date"
+                  value={date ?? source.date}
+                  onChange={(e) => setDate(e.target.value)}
+                  onBlur={() => {
+                    if (date !== null && date !== source.date) void runMutation("setDate", { date });
+                    setDate(null);
+                  }}
+                />
+              </label>
+            </div>
           </section>
 
           <section className="restate-block">
-            <h2>Notes</h2>
+            <h2 className="restate-block-head">Notes</h2>
             {elements.length === 0 && !notes.loading && <p className="restate-preview-empty">No notes yet.</p>}
             {elements.map((el, i) => (
               <NoteCard
@@ -278,7 +280,7 @@ export function ArticleStudio({
           </section>
 
           <section className="restate-block">
-            <h2>Summary</h2>
+            <h2 className="restate-block-head">Summary</h2>
             <div className="restate-section">
               <MarkdownEditor
                 value={summary ?? storedSummary}

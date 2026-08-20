@@ -3086,8 +3086,12 @@ button.restate-card-lead:hover {
   margin: 0 auto;
 }
 
-.article-source {
+/* A ROW of fields under the heading. It must set its own direction: .restate-block is a
+   flex COLUMN, where `flex: 1 1 16rem` on a field would claim 16rem of HEIGHT each and
+   push the notes off the screen. */
+.article-source-fields {
   display: flex;
+  flex-direction: row;
   gap: 1rem;
   flex-wrap: wrap;
   align-items: flex-end;
