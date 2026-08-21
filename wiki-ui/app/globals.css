@@ -3237,6 +3237,27 @@ button.restate-card-lead:hover {
   .content:has(.article-studio) .restate-workbench {
     overflow: visible;
   }
+  /* The notes are the long thing here, so they take the rest of the viewport and scroll
+     INSIDE it: the byline and the summary stay put above them, and the box never grows
+     with the writing. It still keeps a floor, so a long summary pushes the studio into
+     its own scroll rather than crushing the notes. */
+  .article-notes-block {
+    flex: 1;
+    min-height: 12rem;
+    display: flex;
+    flex-direction: column;
+  }
+  .article-notes-block .article-doc,
+  .article-notes-block .study-cm {
+    flex: 1;
+    min-height: 0;
+  }
+  .article-notes-block .cm-editor {
+    height: 100%;
+  }
+  .article-notes-block .cm-scroller {
+    overflow-y: auto;
+  }
 }
 
 /* The source is the article itself, not a form: it reads as a byline under the page title —

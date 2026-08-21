@@ -211,7 +211,7 @@ export function ArticleStudio({
             </section>
           )}
 
-          <section className="restate-block">
+          <section className="restate-block article-notes-block">
             <h2 className="restate-block-head">Notes</h2>
             <div className="article-doc">
               <MarkdownEditor
