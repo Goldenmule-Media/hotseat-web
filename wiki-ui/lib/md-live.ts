@@ -11,7 +11,8 @@
  * Two decoration plugins:
  *  - {@link livePreview}: walks the visible syntax tree; formatting-mark nodes are
  *    replaced (hidden) unless a selection range touches their enclosing construct;
- *    inactive bullet-list markers render as a • widget.
+ *    inactive bullet-list markers render as a • widget; nested list lines are indented
+ *    by their nesting depth.
  *  - {@link termHighlight}: underlines glossary-term occurrences by status (same
  *    classes as the rendered view); mod-click on one reports the term id.
  */
@@ -21,7 +22,7 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirro
 import { EditorState, type Extension, type Range } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, keymap, placeholder, ViewPlugin, type ViewUpdate, WidgetType } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
-import type { SyntaxNodeRef } from "@lezer/common";
+import type { SyntaxNode, SyntaxNodeRef } from "@lezer/common";
 import { findTermMatches } from "./study";
 
 // ── typography: the source styled as its rendered self ──────────────────────────
@@ -70,6 +71,32 @@ class BulletWidget extends WidgetType {
 
 const BULLET = new BulletWidget();
 
+/**
+ * A nested list's only indentation in the source is two spaces per level, which in a
+ * proportional font is a few pixels — invisible. Each level past the first gets a real
+ * pad, so depth reads at a glance and wrapped lines hang under their own bullet.
+ */
+const INDENT_STEP_EM = 1.5;
+const MAX_INDENT_LEVELS = 8;
+
+const indentLine: Decoration[] = [];
+function indentDecoration(level: number): Decoration {
+  const cached = indentLine[level];
+  if (cached !== undefined) return cached;
+  const deco = Decoration.line({ attributes: { style: `padding-left:${level * INDENT_STEP_EM}em` } });
+  indentLine[level] = deco;
+  return deco;
+}
+
+/** How many lists enclose this position: 0 = not in a list, 1 = a top-level item. */
+function listDepthAt(state: EditorState, pos: number): number {
+  let depth = 0;
+  for (let n: SyntaxNode | null = syntaxTree(state).resolveInner(pos, 1); n !== null; n = n.parent) {
+    if (n.name === "BulletList" || n.name === "OrderedList") depth++;
+  }
+  return depth;
+}
+
 function selectionTouches(state: EditorState, from: number, to: number): boolean {
   return state.selection.ranges.some((r) => r.to >= from && r.from <= to);
 }
@@ -87,6 +114,13 @@ function buildLiveDecorations(view: EditorView): DecorationSet {
   const state = view.state;
   const doc = state.doc;
   for (const { from, to } of view.visibleRanges) {
+    for (let pos = from; pos <= to; ) {
+      const line = doc.lineAt(pos);
+      const textStart = line.from + (line.text.length - line.text.trimStart().length);
+      const depth = Math.min(listDepthAt(state, textStart), MAX_INDENT_LEVELS);
+      if (depth > 1) decos.push(indentDecoration(depth - 1).range(line.from));
+      pos = line.to + 1;
+    }
     syntaxTree(state).iterate({
       from,
       to,
