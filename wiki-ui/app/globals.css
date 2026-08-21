@@ -3266,6 +3266,22 @@ button.restate-card-lead:hover {
   }
 }
 
+/* The lit line reaches the card's edges, not the text's: in typewriter mode the editor is
+   pulled out to the card's padding and the text is padded back to exactly where it was
+   (18px = .restate-block's horizontal padding). */
+.article-notes-block.is-typewriter .study-cm {
+  margin-left: -18px;
+  margin-right: -18px;
+}
+.article-notes-block.is-typewriter .cm-content {
+  padding-left: 18px;
+  padding-right: 18px;
+}
+/* Edge to edge — a rounded end would gap against the card's own edge. */
+.article-notes-block.is-typewriter .cm-editor .cm-typewriter-line {
+  border-radius: 0;
+}
+
 /* Narrow layouts scroll the PAGE, so the notes box has no height of its own — and a
    typewriter needs one to hold the caret in the middle of. Switching it on gives the box
    a window; switching it off hands the writing back to the page. */
