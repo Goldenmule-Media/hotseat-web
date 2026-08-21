@@ -276,6 +276,66 @@ export function imageUploadExtension(
   });
 }
 
+// ── typewriter scrolling ────────────────────────────────────────────────────────
+
+/**
+ * Keep the caret on the middle line and move the text under it, the way a typewriter's
+ * carriage stays put while the paper travels: a new line pushes what came before it up
+ * rather than marching the cursor toward the bottom edge.
+ *
+ * It takes two pieces. Half an editor of padding at each end is what lets the FIRST and
+ * LAST lines reach the middle at all (measured, not a guess, so there is no dead space
+ * beyond the end), and a re-centre on every edit or cursor move keeps them there. Only
+ * while focused — an external commit arriving over the tail must never yank the view.
+ */
+function typewriterPadding(): Extension {
+  return ViewPlugin.fromClass(
+    class {
+      private pad = -1;
+      constructor(private readonly view: EditorView) {
+        this.measure();
+      }
+      update(u: ViewUpdate): void {
+        if (u.geometryChanged) this.measure();
+      }
+      measure(): void {
+        this.view.requestMeasure({
+          read: (v) => v.scrollDOM.clientHeight,
+          write: (height, v) => {
+            const pad = Math.max(0, Math.round(height / 2 - 16));
+            if (pad === this.pad) return; // writing it back would re-trigger the measure
+            this.pad = pad;
+            v.contentDOM.style.paddingTop = `${pad}px`;
+            v.contentDOM.style.paddingBottom = `${pad}px`;
+          },
+        });
+      }
+      destroy(): void {
+        this.view.contentDOM.style.paddingTop = "";
+        this.view.contentDOM.style.paddingBottom = "";
+      }
+    },
+  );
+}
+
+const keepCaretCentred = EditorView.updateListener.of((u: ViewUpdate) => {
+  if (!u.docChanged && !u.selectionSet) return;
+  if (!u.view.hasFocus) return;
+  const view = u.view;
+  // Out of the update that triggered it — a view may not be dispatched into mid-update — and
+  // reading the caret at dispatch time, so a fast typist's later keystroke wins. A scroll
+  // effect changes neither the doc nor the selection, so this cannot feed itself.
+  queueMicrotask(() => {
+    if (!view.dom.isConnected) return;
+    view.dispatch({ effects: EditorView.scrollIntoView(view.state.selection.main.head, { y: "center" }) });
+  });
+});
+
+/** Typewriter scrolling, as a swappable slice of the setup (see {@link typewriterPadding}). */
+export function typewriterExtension(): Extension {
+  return [typewriterPadding(), keepCaretCentred];
+}
+
 /** The stable extension set for one live markdown editor. */
 export function liveEditorBase(placeholderText?: string): Extension {
   return [

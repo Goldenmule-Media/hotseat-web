@@ -26,6 +26,7 @@ import type { PageId, WorkspaceId } from "wiki";
 import { diffNotes, notesToDocument, NOTES_SECTION, READING, readSource, readSummary, splitNoteDocument } from "../lib/article-notes";
 import { uploadAttachment } from "../lib/attachments";
 import { usePageMutator, useSectionDocument } from "../lib/live";
+import { useTypewriter } from "../lib/useTypewriter";
 import { MarkdownEditor } from "./MarkdownEditor";
 
 const AUTOSAVE_MS = 1000;
@@ -43,6 +44,7 @@ export function ArticleStudio({
   pageMarkdown: string | null;
 }): React.JSX.Element {
   const notes = useSectionDocument(workspaceId, pageId, NOTES_SECTION);
+  const typewriter = useTypewriter();
   const { run: runMutation, error: mutationError, reset: resetMutation } = usePageMutator(workspaceId, pageId);
 
   const reading = status === READING;
@@ -212,12 +214,24 @@ export function ArticleStudio({
           )}
 
           <section className="restate-block article-notes-block">
-            <h2 className="restate-block-head">Notes</h2>
+            <div className="restate-block-head-row">
+              <h2 className="restate-block-head">Notes</h2>
+              <button
+                type="button"
+                className={`article-typewriter${typewriter.on ? " is-on" : ""}`}
+                aria-pressed={typewriter.on}
+                title="Typewriter: keep the line you are writing in the middle of the box"
+                onClick={typewriter.toggle}
+              >
+                Typewriter
+              </button>
+            </div>
             <div className="article-doc">
               <MarkdownEditor
                 value={draft ?? storedNotes}
                 onChange={scheduleNotes}
                 onBlur={flushNotes}
+                typewriter={typewriter.on}
                 terms={[]}
                 onTermClick={() => {}}
                 placeholder="Notes, in your own words. Paste an image to attach it."

@@ -3246,14 +3246,20 @@ button.restate-card-lead:hover {
     min-height: 12rem;
     display: flex;
     flex-direction: column;
+    overflow: hidden; /* the editor inside scrolls; nothing paints past the card */
   }
+  /* Each wrapper has to be a flex column of its own, or the height stops here and the
+     editor grows out of the card instead of scrolling inside it. */
   .article-notes-block .article-doc,
   .article-notes-block .study-cm {
     flex: 1;
     min-height: 0;
+    display: flex;
+    flex-direction: column;
   }
   .article-notes-block .cm-editor {
-    height: 100%;
+    flex: 1;
+    min-height: 0;
   }
   .article-notes-block .cm-scroller {
     overflow-y: auto;
@@ -3351,6 +3357,29 @@ button.restate-card-lead:hover {
 .article-summarize-goal {
   color: var(--muted);
   font-size: 13px;
+}
+
+/* The typewriter switch sits on the Notes header row: a word, lit when it is on. */
+.article-typewriter {
+  flex: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  cursor: pointer;
+}
+.article-typewriter:hover {
+  color: var(--text);
+}
+.article-typewriter.is-on {
+  color: var(--text);
+  background: var(--accent-dim);
+  border-color: var(--border);
 }
 
 /* Notes and summary are documents, not fields: the editor is the whole surface, with

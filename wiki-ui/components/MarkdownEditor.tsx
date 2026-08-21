@@ -10,7 +10,13 @@
 import { useEffect, useRef } from "react";
 import { Compartment, Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
-import { imageUploadExtension, liveEditorBase, liveEditorTermsExtension, type EditorTermRef } from "../lib/md-live";
+import {
+  imageUploadExtension,
+  liveEditorBase,
+  liveEditorTermsExtension,
+  typewriterExtension,
+  type EditorTermRef,
+} from "../lib/md-live";
 
 export function MarkdownEditor({
   value,
@@ -21,6 +27,7 @@ export function MarkdownEditor({
   placeholder,
   autoFocus,
   submitOnEnter,
+  typewriter,
   onUploadImage,
 }: {
   value: string;
@@ -31,6 +38,9 @@ export function MarkdownEditor({
   onTermClick: (termId: string) => void;
   placeholder?: string;
   autoFocus?: boolean;
+  /** Keep the caret on the middle line and scroll the text under it. Swappable live, so
+   *  the toggle takes effect on the open editor without remounting it. */
+  typewriter?: boolean;
   /** Enter blurs the editor (firing `onBlur` — i.e. submit); Shift-Enter still breaks a
    *  line. For short single-thought fields like a glossary definition. */
   submitOnEnter?: boolean;
@@ -41,6 +51,7 @@ export function MarkdownEditor({
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const termsComp = useRef(new Compartment());
+  const typewriterComp = useRef(new Compartment());
   // The latest callbacks, readable from stable CM closures.
   const onChangeRef = useRef(onChange);
   const onBlurRef = useRef(onBlur);
@@ -78,6 +89,7 @@ export function MarkdownEditor({
         // and one with no uploader lets the paste fall through untouched.
         imageUploadExtension(() => onUploadImageRef.current),
         termsComp.current.of(liveEditorTermsExtension({ terms, onTermClick: (id) => onTermClickRef.current(id) })),
+        typewriterComp.current.of(typewriter === true ? typewriterExtension() : []),
         EditorView.updateListener.of((u) => {
           if (u.docChanged) onChangeRef.current(u.state.doc.toString());
           if (u.focusChanged && !u.view.hasFocus) onBlurRef.current?.();
@@ -103,6 +115,15 @@ export function MarkdownEditor({
       view.dispatch({ changes: { from: 0, to: current.length, insert: value } });
     }
   }, [value]);
+
+  // Typewriter mode toggled: swap that slice in place (an empty extension when off).
+  useEffect(() => {
+    const view = viewRef.current;
+    if (view === null) return;
+    view.dispatch({
+      effects: typewriterComp.current.reconfigure(typewriter === true ? typewriterExtension() : []),
+    });
+  }, [typewriter]);
 
   // The glossary changed: swap the term-highlight extension in place.
   useEffect(() => {
