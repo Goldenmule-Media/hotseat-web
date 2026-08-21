@@ -20,7 +20,7 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { defaultHighlightStyle, syntaxHighlighting, syntaxTree, HighlightStyle } from "@codemirror/language";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { EditorState, type Extension, type Range } from "@codemirror/state";
-import { Decoration, type DecorationSet, EditorView, keymap, placeholder, ViewPlugin, type ViewUpdate, WidgetType } from "@codemirror/view";
+import { Decoration, type DecorationSet, EditorView, keymap, layer, placeholder, RectangleMarker, ViewPlugin, type ViewUpdate, WidgetType } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import type { SyntaxNode, SyntaxNodeRef } from "@lezer/common";
 import { findTermMatches } from "./study";
@@ -390,33 +390,33 @@ const keepCaretCentred = EditorView.updateListener.of((u: ViewUpdate) => {
   });
 });
 
-const platenLine = Decoration.line({ class: "cm-typewriter-line" });
-
 /**
  * The line the caret is on, lit behind the text. Held still in the middle of the box while
  * the words move under it, the caret alone is a thin thing to keep your eye on — this is
  * the platen the carriage sits against, and it says "here" at a glance.
+ *
+ * A drawn band rather than a decoration on the line, because it marks the row you are
+ * writing ON: a line decoration would light every row a long sentence wrapped onto, and
+ * the band has to be one row tall wherever the caret is. Shown only while focused — an
+ * editor nobody is in is not where anyone is looking.
  */
-const highlightCaretLine = ViewPlugin.fromClass(
-  class {
-    decorations: DecorationSet;
-    constructor(view: EditorView) {
-      this.decorations = caretLineDeco(view.state);
-    }
-    update(u: ViewUpdate): void {
-      if (u.docChanged || u.selectionSet) this.decorations = caretLineDeco(u.state);
-    }
+const platenLayer = layer({
+  above: false,
+  class: "cm-typewriter-layer",
+  update: (u) => u.docChanged || u.selectionSet || u.focusChanged || u.geometryChanged || u.viewportChanged,
+  markers: (view) => {
+    if (!view.hasFocus) return [];
+    const caret = view.coordsAtPos(view.state.selection.main.head);
+    if (caret === null) return [];
+    // Marker coordinates are document-relative: the scroller's origin, un-scrolled.
+    const scroller = view.scrollDOM;
+    const origin = scroller.getBoundingClientRect().top - scroller.scrollTop;
+    return [new RectangleMarker("cm-typewriter-line", 0, caret.top - origin, scroller.clientWidth, caret.bottom - caret.top)];
   },
-  { decorations: (v) => v.decorations },
-);
-
-function caretLineDeco(state: EditorState): DecorationSet {
-  return Decoration.set([platenLine.range(state.doc.lineAt(state.selection.main.head).from)]);
-}
+});
 
 const platenTheme = EditorView.theme({
-  // Only while focused: an unfocused editor is not where anyone is looking.
-  "&.cm-focused .cm-typewriter-line": {
+  ".cm-typewriter-line": {
     background: "color-mix(in srgb, var(--accent) 13%, transparent)",
     boxShadow: "inset 2px 0 0 color-mix(in srgb, var(--accent) 55%, transparent)",
   },
@@ -424,7 +424,7 @@ const platenTheme = EditorView.theme({
 
 /** Typewriter scrolling, as a swappable slice of the setup (see {@link typewriterPadding}). */
 export function typewriterExtension(): Extension {
-  return [typewriterPadding(), keepCaretCentred, highlightCaretLine, platenTheme];
+  return [typewriterPadding(), keepCaretCentred, platenLayer, platenTheme];
 }
 
 /** The stable extension set for one live markdown editor. */
