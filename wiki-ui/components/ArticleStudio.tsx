@@ -223,7 +223,7 @@ export function ArticleStudio({
             </section>
           )}
 
-          <section className="restate-block article-notes-block">
+          <section className={`restate-block article-notes-block${typewriter.on ? " is-typewriter" : ""}`}>
             <div className="restate-block-head-row">
               <h2 className="restate-block-head">Notes</h2>
               <button

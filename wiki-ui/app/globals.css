@@ -3266,6 +3266,18 @@ button.restate-card-lead:hover {
   }
 }
 
+/* Narrow layouts scroll the PAGE, so the notes box has no height of its own — and a
+   typewriter needs one to hold the caret in the middle of. Switching it on gives the box
+   a window; switching it off hands the writing back to the page. */
+@media (max-width: 980px) {
+  .article-notes-block.is-typewriter .cm-scroller {
+    height: 60svh;
+    min-height: 14rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+
 /* The source is the article itself, not a form: it reads as a byline under the page title —
    the link first and prominent, the date under it. No card, no field labels. */
 .article-source {

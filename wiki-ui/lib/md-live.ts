@@ -312,6 +312,11 @@ export function imageUploadExtension(
 
 // ── typewriter scrolling ────────────────────────────────────────────────────────
 
+/** A scroller that CLIPS has a height of its own; one that doesn't IS its content. */
+function clips(scroller: HTMLElement): boolean {
+  return window.getComputedStyle(scroller).overflowY !== "visible";
+}
+
 /**
  * Keep the caret on the middle line and move the text under it, the way a typewriter's
  * carriage stays put while the paper travels: a new line pushes what came before it up
@@ -321,6 +326,10 @@ export function imageUploadExtension(
  * LAST lines reach the middle at all (measured, not a guess, so there is no dead space
  * beyond the end), and a re-centre on every edit or cursor move keeps them there. Only
  * while focused — an external commit arriving over the tail must never yank the view.
+ *
+ * Both pieces need a box that CLIPS. Where the editor grows with its text instead and the
+ * page does the scrolling, padding would feed its own measurement, so both stand down and
+ * the layout is expected to give the editor a window (globals.css, `.is-typewriter`).
  */
 function typewriterPadding(): Extension {
   return ViewPlugin.fromClass(
@@ -334,13 +343,13 @@ function typewriterPadding(): Extension {
       }
       measure(): void {
         this.view.requestMeasure({
-          read: (v) => v.scrollDOM.clientHeight,
+          read: (v) => (clips(v.scrollDOM) ? v.scrollDOM.clientHeight : 0),
           write: (height, v) => {
-            const pad = Math.max(0, Math.round(height / 2 - 16));
+            const pad = height === 0 ? 0 : Math.max(0, Math.round(height / 2 - 16));
             if (pad === this.pad) return; // writing it back would re-trigger the measure
             this.pad = pad;
-            v.contentDOM.style.paddingTop = `${pad}px`;
-            v.contentDOM.style.paddingBottom = `${pad}px`;
+            v.contentDOM.style.paddingTop = pad === 0 ? "" : `${pad}px`;
+            v.contentDOM.style.paddingBottom = pad === 0 ? "" : `${pad}px`;
           },
         });
       }
@@ -352,16 +361,30 @@ function typewriterPadding(): Extension {
   );
 }
 
+/**
+ * The caret's line, centred in the editor's own scroller and NOWHERE else. CodeMirror's
+ * `scrollIntoView` walks up the DOM and applies the strategy to every scrollable ancestor,
+ * so a centred caret would drag the studio — and the page under it — along on each
+ * keystroke. Scrolling the one box by hand keeps the carriage local to the paper.
+ */
 const keepCaretCentred = EditorView.updateListener.of((u: ViewUpdate) => {
   if (!u.docChanged && !u.selectionSet) return;
   if (!u.view.hasFocus) return;
-  const view = u.view;
-  // Out of the update that triggered it — a view may not be dispatched into mid-update — and
-  // reading the caret at dispatch time, so a fast typist's later keystroke wins. A scroll
-  // effect changes neither the doc nor the selection, so this cannot feed itself.
-  queueMicrotask(() => {
-    if (!view.dom.isConnected) return;
-    view.dispatch({ effects: EditorView.scrollIntoView(view.state.selection.main.head, { y: "center" }) });
+  // In the measure cycle, so the read sees the updated layout, and reading the caret then
+  // rather than now, so a fast typist's later keystroke wins. Setting scrollTop changes
+  // neither the doc nor the selection, so this cannot feed itself.
+  u.view.requestMeasure<number | null>({
+    read: (v) => {
+      const scroller = v.scrollDOM;
+      if (!clips(scroller)) return null; // page-scrolled: not ours to move
+      const caret = v.coordsAtPos(v.state.selection.main.head);
+      if (caret === null) return null;
+      const top = scroller.getBoundingClientRect().top + scroller.clientTop;
+      return scroller.scrollTop + (caret.top + caret.bottom) / 2 - (top + scroller.clientHeight / 2);
+    },
+    write: (target, v) => {
+      if (target !== null) v.scrollDOM.scrollTop = target; // the browser clamps the ends
+    },
   });
 });
 

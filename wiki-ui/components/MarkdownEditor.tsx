@@ -130,8 +130,8 @@ export function MarkdownEditor({
   }, [typewriter]);
 
   // Someone asked for the cursor back (see `focusSignal`): end of the document, in view.
-  // Whether that lands in the middle or at the bottom is typewriter mode's business — the
-  // re-centring listener sees this selection change and takes it from here.
+  // In typewriter mode the ask is only to REVEAL it — the re-centring listener sees this
+  // selection change and puts it on the middle line, without the outer page joining in.
   useEffect(() => {
     const view = viewRef.current;
     if (view === null || focusSignal === undefined || focusSignal === 0) return;
@@ -139,7 +139,7 @@ export function MarkdownEditor({
     view.focus();
     view.dispatch({
       selection: { anchor: end },
-      effects: EditorView.scrollIntoView(end, { y: typewriter === true ? "center" : "end" }),
+      effects: EditorView.scrollIntoView(end, { y: typewriter === true ? "nearest" : "end" }),
     });
     // The signal is the trigger; `typewriter` is read, not watched.
     // eslint-disable-next-line react-hooks/exhaustive-deps
