@@ -69,6 +69,9 @@ export interface WikiHost {
   reparentPage(ws: WorkspaceId, page: PageId, newParentId: PageId | null, position?: number): Promise<void>;
   renameWorkspace(ws: WorkspaceId, name: string): Promise<void>;
   subscribe(ws: WorkspaceId, onSnapshot: SnapshotCallback): Promise<() => void>;
+  /** Close the shared worker so the next page load starts a fresh one (new code, cold
+   *  engine). Fire-and-forget by design: the worker dies before it can reply. */
+  restart(): void;
 }
 
 /** Heartbeat cadence — must stay well under the worker's PING_TIMEOUT_MS so a live tab is
@@ -216,6 +219,13 @@ async function connect(): Promise<WikiHost> {
     unarchivePage: (ws, page) => guard(remote.unarchivePage(ws, page)),
     reparentPage: (ws, page, newParentId, position) => guard(remote.reparentPage(ws, page, newParentId, position)),
     renameWorkspace: (ws, name) => guard(remote.renameWorkspace(ws, name)),
+    restart: () => {
+      // Not awaited: the worker closes as it answers, so the promise may never settle.
+      void remote.restart().catch(() => {});
+      // This tab's connection dies with the worker — force a fresh one.
+      hostP = null;
+      remoteRef = null;
+    },
     subscribe: async (ws, onSnapshot) => {
       // Comlink.proxy lets the worker invoke this tab-side callback across the port.
       const cb = Comlink.proxy(onSnapshot);

@@ -209,6 +209,12 @@ export interface WikiHostApi {
    *  ALREADY dropped re-admits it and asks the tab to register its subscriptions again
    *  (see {@link PingResult.resubscribe}). */
   ping(): Promise<PingResult>;
+
+  /** Tear the worker down and CLOSE it, so the next connection starts a brand-new one —
+   *  the in-app equivalent of terminating it from chrome://inspect#workers. The reply may
+   *  never arrive (the global scope goes away), so callers fire it and reload rather than
+   *  awaiting; every other open tab holds a dead port until it reloads too. */
+  restart(): Promise<void>;
 }
 
 // ── error DTO (crosses the port as plain data) ──────────────────────────────────

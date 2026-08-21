@@ -45,7 +45,7 @@ import {
 interface ConnectEvent extends Event {
   readonly ports: ReadonlyArray<MessagePort>;
 }
-const scope = self as unknown as { onconnect: ((e: ConnectEvent) => void) | null };
+const scope = self as unknown as { onconnect: ((e: ConnectEvent) => void) | null; close(): void };
 
 // ── auth token (worker-scoped, tab-supplied) ────────────────────────────────────
 // ONE token for the whole worker — every tab of one browser profile shares the same
@@ -588,6 +588,18 @@ function makeApi(conn: PortConn): WikiHostApi {
         }
       }
     },
+    async restart() {
+      // The engine + PGlite are torn down first, then the scope itself goes away on the next
+      // macrotask — after this reply has been posted, and after any tab-visible teardown. A
+      // browser that has already handed out ports keeps them; they die with the worker, which
+      // is the point: the next `new SharedWorker(...)` gets a fresh instance (fresh code).
+      shutdownIdle();
+      const done = teardownP;
+      setTimeout(() => {
+        void Promise.resolve(done).finally(() => scope.close());
+      }, 0);
+    },
+
     async ping() {
       conn.lastSeen = Date.now();
       if (ports.has(conn)) return { resubscribe: false };
