@@ -53,10 +53,17 @@ export function ArticleStudio({
   const [link, setLink] = useState<string | null>(null);
   const [editingLink, setEditingLink] = useState(false);
   const [summary, setSummary] = useState<string | null>(null);
+  /** Opens the summary editor on a page that has none yet — see {@link summaryOpen}. */
+  const [writingSummary, setWritingSummary] = useState(false);
   const [draft, setDraft] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const upload = useCallback((file: File) => uploadAttachment(workspaceId, file), [workspaceId]);
+
+  /* An empty summary is not an empty field: an unwritten summary is the one thing this page
+     is FOR, so it says so in a line you can read and scroll straight past, rather than an
+     editor sitting open over the notes. Writing one opens the editor for good. */
+  const summaryOpen = storedSummary.trim() !== "" || writingSummary;
 
   /**
    * Leaving the summary saves it AND marks the article finished — writing what you made of
@@ -71,6 +78,14 @@ export function ArticleStudio({
     const written = (text ?? storedSummary).trim();
     if (reading && written !== "" && source.link !== "") await runMutation("summarize", {});
   }, [summary, storedSummary, reading, source.link, runMutation]);
+
+  /** Blur out of the summary: save (and finish), then fold an untouched editor back to the
+   *  invitation — an empty field left open is exactly what the button replaced. */
+  const leaveSummary = useCallback(async () => {
+    const empty = (summary ?? storedSummary).trim() === "";
+    await finishSummary();
+    if (empty) setWritingSummary(false);
+  }, [summary, storedSummary, finishSummary]);
 
   // Read at save time, never captured: a debounced save must diff against the list as it
   // stands when it fires, not as it stood when the keystroke scheduled it.
@@ -169,20 +184,32 @@ export function ArticleStudio({
             {source.date !== "" && <p className="article-date">{source.date}</p>}
           </section>
 
-          <section className="restate-block">
-            <h2 className="restate-block-head">Summary</h2>
-            <div className="article-doc article-doc-short">
-              <MarkdownEditor
-                value={summary ?? storedSummary}
-                onChange={setSummary}
-                onBlur={() => void finishSummary()}
-                terms={[]}
-                onTermClick={() => {}}
-                placeholder="What you made of it, in your own words."
-                onUploadImage={upload}
-              />
-            </div>
-          </section>
+          {summaryOpen ? (
+            <section className="restate-block">
+              <h2 className="restate-block-head">Summary</h2>
+              <div className="article-doc article-doc-short">
+                <MarkdownEditor
+                  value={summary ?? storedSummary}
+                  onChange={setSummary}
+                  onBlur={() => void leaveSummary()}
+                  autoFocus={writingSummary}
+                  terms={[]}
+                  onTermClick={() => {}}
+                  placeholder="What you made of it, in your own words."
+                  onUploadImage={upload}
+                />
+              </div>
+            </section>
+          ) : (
+            <section className="article-summarize">
+              <button type="button" className="article-summarize-btn" onClick={() => setWritingSummary(true)}>
+                Summarize
+              </button>
+              <span className="article-summarize-goal">
+                You are done with this article when you can say what you made of it.
+              </span>
+            </section>
+          )}
 
           <section className="restate-block">
             <h2 className="restate-block-head">Notes</h2>

@@ -2830,6 +2830,7 @@ button.restate-card-lead:hover {
 }
 .study-mutation-notice {
   margin-bottom: 12px;
+  flex: none; /* pinned with the header in the viewport-locked studios — only the columns scroll */
 }
 /* Accordion term rows: the expanded body hangs off its row. */
 .study-term-item {
@@ -3223,14 +3224,15 @@ button.restate-card-lead:hover {
   margin: 0 auto;
 }
 
-/* The viewport-locked studio layout exists so two columns scroll independently. With one
-   column there is nothing to pin against, and making the centred column the only scroller
-   means a wheel anywhere beside it does nothing — so the page scrolls as a page. Relaxes
+/* One column, but the same viewport lock as the two-column studios: the page header stays
+   put while the article scrolls under it. The SCROLLER is the full-width studio, not the
+   centred column inside it, so a wheel anywhere in the content area still scrolls. Relaxes
    the .page-restate rules above at equal specificity, hence the position in this file. */
 @media (min-width: 981px) {
-  .content:has(.article-studio) {
-    height: auto;
-    overflow: visible;
+  .article-studio {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-bottom: 24px;
   }
   .content:has(.article-studio) .restate-workbench {
     overflow: visible;
@@ -3299,6 +3301,35 @@ button.restate-card-lead:hover {
   margin: 0;
   color: var(--muted);
   font-size: 12px;
+}
+
+/* The unwritten summary: a line naming what this page is for, and the button that starts
+   it. One row, no card — the point is that it is as easy to scroll past as it is to take up. */
+.article-summarize {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.article-summarize-btn {
+  flex: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--accent-dim);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+.article-summarize-btn:hover {
+  border-color: var(--accent);
+}
+.article-summarize-goal {
+  color: var(--muted);
+  font-size: 13px;
 }
 
 /* Notes and summary are documents, not fields: the editor is the whole surface, with
