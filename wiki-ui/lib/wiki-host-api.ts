@@ -119,6 +119,15 @@ export interface HandshakeResult {
   readonly fsm: Record<string, FsmDescriptor>;
 }
 
+/** What a heartbeat tells a tab about its own connection. */
+export interface PingResult {
+  /** True when this port had been reaped — a hidden tab's throttled timers can stretch the
+   *  heartbeat past the worker's timeout — and has just been re-admitted. Its subscriptions
+   *  were dropped with it, so the tab must register them again or it never sees another
+   *  snapshot (it would keep working through RPCs, silently stale). */
+  readonly resubscribe: boolean;
+}
+
 /** One list element rendered to Markdown, with the id that addresses it. */
 export interface RenderedElement {
   readonly id: string;
@@ -196,8 +205,10 @@ export interface WikiHostApi {
   subscribe(ws: WorkspaceId, onSnapshot: SnapshotCallback): Promise<number>;
   unsubscribe(ws: WorkspaceId, subId: number): Promise<void>;
   /** Heartbeat: lets the worker reap a port's subscriptions when its tab goes silent
-   *  (SharedWorker has no reliable port-closed event). */
-  ping(): Promise<void>;
+   *  (SharedWorker has no reliable port-closed event). A ping from a port the reaper has
+   *  ALREADY dropped re-admits it and asks the tab to register its subscriptions again
+   *  (see {@link PingResult.resubscribe}). */
+  ping(): Promise<PingResult>;
 }
 
 // ── error DTO (crosses the port as plain data) ──────────────────────────────────

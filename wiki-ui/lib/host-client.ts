@@ -72,8 +72,19 @@ export interface WikiHost {
 }
 
 /** Heartbeat cadence — must stay well under the worker's PING_TIMEOUT_MS so a live tab is
- *  never reaped. */
+ *  never reaped. A hidden tab's timers are throttled well past that, so the heartbeat also
+ *  heals a reaped port ({@link PingResult.resubscribe}) rather than relying on cadence alone. */
 const PING_INTERVAL_MS = 10_000;
+
+/** One live snapshot subscription, remembered so a heartbeat that finds this port reaped can
+ *  register it again on the worker's fresh state. */
+interface ActiveSub {
+  readonly ws: WorkspaceId;
+  /** The Comlink-proxied callback — re-usable across re-subscribes. */
+  readonly cb: SnapshotCallback & Comlink.ProxyMarked;
+  subId: number;
+  cancelled: boolean;
+}
 
 // Immutable FSM descriptors pushed at handshake; `fsmOf` reads this synchronously in render.
 const fsmCache = new Map<string, FsmDescriptor>();
@@ -147,10 +158,45 @@ async function connect(): Promise<WikiHost> {
   fsmReadyFlag = true;
 
   // One heartbeat per tab (not per workspace): the worker reaps THIS port's subscriptions if
-  // the pings stop (tab closed), and closes the engine when the last port goes silent.
-  const ping = (): void => void remote.ping().catch(() => {});
-  setInterval(ping, PING_INTERVAL_MS);
-  ping();
+  // the pings stop (tab closed), and closes the engine when the last port goes silent. A tab
+  // that was only HIDDEN can be reaped too (throttled/frozen timers), so a ping that finds the
+  // port re-admitted registers every subscription again — otherwise the tab stays silently
+  // stale: its RPCs keep working while no snapshot ever arrives again.
+  const subs = new Set<ActiveSub>();
+  let resubscribeNeeded = false;
+
+  const resubscribeAll = async (): Promise<void> => {
+    for (const sub of [...subs]) {
+      try {
+        const subId = await remote.subscribe(sub.ws, sub.cb);
+        if (sub.cancelled) {
+          void remote.unsubscribe(sub.ws, subId).catch(() => {});
+          continue;
+        }
+        sub.subId = subId;
+      } catch {
+        return; // leave the flag set — the next heartbeat retries
+      }
+    }
+    resubscribeNeeded = false;
+  };
+
+  const ping = async (): Promise<void> => {
+    try {
+      const { resubscribe } = await remote.ping();
+      if (resubscribe) resubscribeNeeded = true;
+      if (resubscribeNeeded) await resubscribeAll();
+    } catch {
+      /* the next heartbeat retries */
+    }
+  };
+  setInterval(() => void ping(), PING_INTERVAL_MS);
+  void ping();
+  // A hidden tab's heartbeat is throttled (or stopped outright); ping the moment it comes
+  // back so a reaped port heals on the same frame the user looks at it.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") void ping();
+  });
 
   return {
     listWorkspaces: () => guard(remote.listWorkspaces()),
@@ -172,8 +218,15 @@ async function connect(): Promise<WikiHost> {
     renameWorkspace: (ws, name) => guard(remote.renameWorkspace(ws, name)),
     subscribe: async (ws, onSnapshot) => {
       // Comlink.proxy lets the worker invoke this tab-side callback across the port.
-      const subId = await guard(remote.subscribe(ws, Comlink.proxy(onSnapshot)));
-      return () => void remote.unsubscribe(ws, subId).catch(() => {});
+      const cb = Comlink.proxy(onSnapshot);
+      const sub: ActiveSub = { ws, cb, subId: -1, cancelled: false };
+      sub.subId = await guard(remote.subscribe(ws, cb));
+      subs.add(sub);
+      return () => {
+        sub.cancelled = true;
+        subs.delete(sub);
+        void remote.unsubscribe(ws, sub.subId).catch(() => {});
+      };
     },
   };
 }

@@ -17,7 +17,9 @@
  *
  * Lifecycle: a heartbeat reaper drops a port's subscriptions when its tab goes silent (no
  * reliable port-closed event); when the LAST port disconnects the engine is closed and the
- * boot is reset, so a freshly-opened tab cold-starts the host.
+ * boot is reset, so a freshly-opened tab cold-starts the host. Silence is not proof of death,
+ * though — a hidden tab's timers are throttled — so a ping from a reaped port re-admits it and
+ * tells the tab to re-subscribe.
  */
 import * as Comlink from "comlink";
 import { createWiki, type IEventEnvelope, type IWiki, type IWorkspaceHandle, type Unsubscribe } from "wiki";
@@ -315,7 +317,10 @@ async function primeSearchIndex(): Promise<void> {
 
 // ── per-port connection + heartbeat reaper ──────────────────────────────────────
 
-const PING_TIMEOUT_MS = 30_000;
+// A hidden tab's timers are throttled (Chrome winds a 10s interval down to ~1/min, and a
+// frozen tab stops pinging altogether), so the timeout must clear that cadence by a wide
+// margin — reaping a live tab costs it every future snapshot until it re-subscribes.
+const PING_TIMEOUT_MS = 90_000;
 const REAP_INTERVAL_MS = 15_000;
 
 class PortConn {
@@ -585,6 +590,12 @@ function makeApi(conn: PortConn): WikiHostApi {
     },
     async ping() {
       conn.lastSeen = Date.now();
+      if (ports.has(conn)) return { resubscribe: false };
+      // The reaper dropped a tab that was merely throttled/frozen. Re-admit it — but its
+      // subscriptions went with it, so the tab must register them again; without that it
+      // would keep issuing RPCs against a workspace it no longer hears from.
+      ports.add(conn);
+      return { resubscribe: true };
     },
   };
 }
