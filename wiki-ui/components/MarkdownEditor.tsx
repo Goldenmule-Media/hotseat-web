@@ -28,6 +28,7 @@ export function MarkdownEditor({
   autoFocus,
   submitOnEnter,
   typewriter,
+  focusSignal,
   onUploadImage,
 }: {
   value: string;
@@ -41,6 +42,9 @@ export function MarkdownEditor({
   /** Keep the caret on the middle line and scroll the text under it. Swappable live, so
    *  the toggle takes effect on the open editor without remounting it. */
   typewriter?: boolean;
+  /** Bump this to hand the editor the cursor: focused, at the end of the document, scrolled
+   *  to. For a control that exists to put you back in the writing (the typewriter switch). */
+  focusSignal?: number;
   /** Enter blurs the editor (firing `onBlur` — i.e. submit); Shift-Enter still breaks a
    *  line. For short single-thought fields like a glossary definition. */
   submitOnEnter?: boolean;
@@ -124,6 +128,22 @@ export function MarkdownEditor({
       effects: typewriterComp.current.reconfigure(typewriter === true ? typewriterExtension() : []),
     });
   }, [typewriter]);
+
+  // Someone asked for the cursor back (see `focusSignal`): end of the document, in view.
+  // Whether that lands in the middle or at the bottom is typewriter mode's business — the
+  // re-centring listener sees this selection change and takes it from here.
+  useEffect(() => {
+    const view = viewRef.current;
+    if (view === null || focusSignal === undefined || focusSignal === 0) return;
+    const end = view.state.doc.length;
+    view.focus();
+    view.dispatch({
+      selection: { anchor: end },
+      effects: EditorView.scrollIntoView(end, { y: typewriter === true ? "center" : "end" }),
+    });
+    // The signal is the trigger; `typewriter` is read, not watched.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusSignal]);
 
   // The glossary changed: swap the term-highlight extension in place.
   useEffect(() => {

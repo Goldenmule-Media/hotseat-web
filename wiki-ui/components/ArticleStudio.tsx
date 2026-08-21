@@ -45,6 +45,8 @@ export function ArticleStudio({
 }): React.JSX.Element {
   const notes = useSectionDocument(workspaceId, pageId, NOTES_SECTION);
   const typewriter = useTypewriter();
+  /** Bumped by the typewriter switch to hand the cursor back to the notes. */
+  const [focusNotes, setFocusNotes] = useState(0);
   const { run: runMutation, error: mutationError, reset: resetMutation } = usePageMutator(workspaceId, pageId);
 
   const reading = status === READING;
@@ -221,7 +223,10 @@ export function ArticleStudio({
                 className={`article-typewriter${typewriter.on ? " is-on" : ""}`}
                 aria-pressed={typewriter.on}
                 title="Typewriter: keep the line you are writing in the middle of the box"
-                onClick={typewriter.toggle}
+                onClick={() => {
+                  typewriter.toggle();
+                  setFocusNotes((n) => n + 1);
+                }}
               >
                 Typewriter
               </button>
@@ -232,6 +237,7 @@ export function ArticleStudio({
                 onChange={scheduleNotes}
                 onBlur={flushNotes}
                 typewriter={typewriter.on}
+                focusSignal={focusNotes}
                 terms={[]}
                 onTermClick={() => {}}
                 placeholder="Notes, in your own words. Paste an image to attach it."
