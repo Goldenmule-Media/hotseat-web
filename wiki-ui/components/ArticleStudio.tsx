@@ -99,10 +99,11 @@ export function ArticleStudio({
   // The list is the storage, the document is the edit: re-split and diff, then run the
   // commands in order (the host takes one at a time, so this is a short sequence).
   const saveNotes = useCallback(
-    async (document: string) => {
+    async (document: string): Promise<boolean> => {
       for (const edit of diffNotes(storedRef.current, splitNoteDocument(document))) {
-        if (!(await runMutation(edit.command, edit.args))) return;
+        if (!(await runMutation(edit.command, edit.args))) return false;
       }
+      return true;
     },
     [runMutation],
   );
@@ -111,7 +112,14 @@ export function ArticleStudio({
     (text: string) => {
       setDraft(text);
       if (timer.current !== null) clearTimeout(timer.current);
-      timer.current = setTimeout(() => void saveNotes(text), AUTOSAVE_MS);
+      timer.current = setTimeout(() => {
+        // Drop the local draft once it IS the saved state (and no newer keystroke has
+        // replaced it): a draft outranks the engine's own text, so a window that typed
+        // once would otherwise stop showing what anyone else writes until it was blurred.
+        void saveNotes(text).then((ok) => {
+          if (ok) setDraft((d) => (d === text ? null : d));
+        });
+      }, AUTOSAVE_MS);
     },
     [saveNotes],
   );
