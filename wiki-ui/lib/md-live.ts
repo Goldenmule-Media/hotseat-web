@@ -388,9 +388,43 @@ const keepCaretCentred = EditorView.updateListener.of((u: ViewUpdate) => {
   });
 });
 
+const platenLine = Decoration.line({ class: "cm-typewriter-line" });
+
+/**
+ * The line the caret is on, lit behind the text. Held still in the middle of the box while
+ * the words move under it, the caret alone is a thin thing to keep your eye on — this is
+ * the platen the carriage sits against, and it says "here" at a glance.
+ */
+const highlightCaretLine = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+    constructor(view: EditorView) {
+      this.decorations = caretLineDeco(view.state);
+    }
+    update(u: ViewUpdate): void {
+      if (u.docChanged || u.selectionSet) this.decorations = caretLineDeco(u.state);
+    }
+  },
+  { decorations: (v) => v.decorations },
+);
+
+function caretLineDeco(state: EditorState): DecorationSet {
+  return Decoration.set([platenLine.range(state.doc.lineAt(state.selection.main.head).from)]);
+}
+
+const platenTheme = EditorView.theme({
+  // Only while focused: an unfocused editor is not where anyone is looking. A wash that
+  // fades out rather than a block of colour, so it never reads as a selection.
+  "&.cm-focused .cm-typewriter-line": {
+    background: "linear-gradient(90deg, color-mix(in srgb, var(--accent) 13%, transparent), transparent 92%)",
+    boxShadow: "inset 2px 0 0 color-mix(in srgb, var(--accent) 55%, transparent)",
+    borderRadius: "3px",
+  },
+});
+
 /** Typewriter scrolling, as a swappable slice of the setup (see {@link typewriterPadding}). */
 export function typewriterExtension(): Extension {
-  return [typewriterPadding(), keepCaretCentred];
+  return [typewriterPadding(), keepCaretCentred, highlightCaretLine, platenTheme];
 }
 
 /** The stable extension set for one live markdown editor. */
