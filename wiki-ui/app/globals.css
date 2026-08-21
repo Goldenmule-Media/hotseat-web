@@ -223,7 +223,17 @@ code {
   top: 0;
   align-self: start;
   height: 100vh;
+  /* Column so the tree takes the slack and the foot stays pinned to the bottom. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* The tree is the only scroller; min-height:0 lets it shrink inside the flex column. */
+.sidebar > .tree-nav {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  padding-bottom: 16px;
 }
 /* Collapsed sidebar: the tree gives way to a slim rail carrying only the expand chevron. */
 .shell.sidebar-collapsed {
@@ -1519,7 +1529,8 @@ h1.page-title:hover {
   min-width: 0;
 }
 .sidebar-foot {
-  margin-top: 16px;
+  margin-top: auto;
+  flex-shrink: 0;
   border-top: 1px solid var(--border);
   padding-top: 12px;
   display: flex;
