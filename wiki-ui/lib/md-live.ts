@@ -83,7 +83,7 @@ const indentLine: Decoration[] = [];
 function indentDecoration(level: number): Decoration {
   const cached = indentLine[level];
   if (cached !== undefined) return cached;
-  const deco = Decoration.line({ attributes: { style: `padding-left:${level * INDENT_STEP_EM}em` } });
+  const deco = Decoration.line({ attributes: { style: `--md-indent:${level * INDENT_STEP_EM}em` } });
   indentLine[level] = deco;
   return deco;
 }
@@ -227,7 +227,9 @@ const editorTheme = EditorView.theme({
     padding: "0",
     lineHeight: "1.55",
   },
-  ".cm-line": { padding: "0" },
+  // The indent is a variable, not a padding, so a line can be inset AND indented (the
+  // typewriter's full-bleed line adds its own inset to this).
+  ".cm-line": { padding: "0 0 0 var(--md-indent, 0px)" },
   ".cm-cursor": { borderLeftColor: "var(--text)" },
   ".cm-selectionBackground": { backgroundColor: "var(--accent-dim) !important" },
   ".cm-md-bullet": { color: "var(--muted)" },
@@ -413,12 +415,10 @@ function caretLineDeco(state: EditorState): DecorationSet {
 }
 
 const platenTheme = EditorView.theme({
-  // Only while focused: an unfocused editor is not where anyone is looking. A wash that
-  // fades out rather than a block of colour, so it never reads as a selection.
+  // Only while focused: an unfocused editor is not where anyone is looking.
   "&.cm-focused .cm-typewriter-line": {
-    background: "linear-gradient(90deg, color-mix(in srgb, var(--accent) 13%, transparent), transparent 92%)",
+    background: "color-mix(in srgb, var(--accent) 13%, transparent)",
     boxShadow: "inset 2px 0 0 color-mix(in srgb, var(--accent) 55%, transparent)",
-    borderRadius: "3px",
   },
 });
 
