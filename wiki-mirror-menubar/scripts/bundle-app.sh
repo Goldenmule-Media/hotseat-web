@@ -6,8 +6,9 @@
 # MenuBarExtra both read Info.plist, and SMAppService needs a bundle identifier. Ad-hoc signing
 # is enough for a locally built app: nothing quarantines what you compiled yourself.
 #
-#   ./scripts/bundle-app.sh             # build into build/WikiMirror.app
-#   ./scripts/bundle-app.sh --install   # …and copy it to /Applications, then launch it
+#   ./scripts/bundle-app.sh              # build into build/WikiMirror.app
+#   ./scripts/bundle-app.sh --install    # …and copy it to /Applications, then launch it
+#   ./scripts/bundle-app.sh --universal  # arm64 + x86_64, for a build other Macs will run
 #
 set -euo pipefail
 
@@ -15,13 +16,24 @@ APP_NAME="WikiMirror"
 BUNDLE_ID="com.thegoldenmule.wiki-mirror-menubar"
 VERSION="0.1.0"
 INSTALL=0
-[ "${1:-}" = "--install" ] && INSTALL=1
+UNIVERSAL=0
+for arg in "$@"; do
+  case "$arg" in
+    --install) INSTALL=1 ;;
+    --universal) UNIVERSAL=1 ;;
+    *) echo "unknown argument \"$arg\"" >&2; exit 1 ;;
+  esac
+done
 
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 OUT="build/$APP_NAME.app"
 
-swift build -c release
-BINARY="$(swift build -c release --show-bin-path)/WikiMirrorMenuBar"
+# A machine-local build targets this Mac; a release build has to run on Intel too.
+ARCH_FLAGS=()
+[ "$UNIVERSAL" = "1" ] && ARCH_FLAGS=(--arch arm64 --arch x86_64)
+
+swift build -c release ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"}
+BINARY="$(swift build -c release ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"} --show-bin-path)/WikiMirrorMenuBar"
 [ -x "$BINARY" ] || { echo "no binary at $BINARY" >&2; exit 1; }
 
 rm -rf "$OUT"
@@ -53,7 +65,7 @@ codesign --force --sign - --identifier "$BUNDLE_ID" "$OUT" >/dev/null 2>&1 || {
   echo "warning: ad-hoc codesign failed; the app will still run locally" >&2
 }
 
-echo "built $PWD/$OUT"
+echo "built $PWD/$OUT ($(file -b "$OUT/Contents/MacOS/$APP_NAME" | sed 's/Mach-O //'))"
 
 if [ "$INSTALL" = "1" ]; then
   DEST="/Applications/$APP_NAME.app"

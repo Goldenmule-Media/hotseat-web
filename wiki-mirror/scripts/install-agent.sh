@@ -175,8 +175,27 @@ mkdir -p "$LOG_DIR" "$HOME/Library/LaunchAgents"
 printf '%s\n' "$PLIST_XML" > "$PLIST"
 plutil -lint "$PLIST" >/dev/null || die "generated an invalid plist at $PLIST"
 
+# `bootout` returns before launchd has finished tearing the job down, and bootstrapping into a
+# job that still exists fails with the famously unhelpful "Input/output error" (EIO). Wait for it
+# to actually be gone, then retry the bootstrap a few times anyway.
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
-launchctl bootstrap "$DOMAIN" "$PLIST"
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1 || break
+  sleep 0.5
+done
+
+bootstrapped=0
+for attempt in 1 2 3 4 5; do
+  if launchctl bootstrap "$DOMAIN" "$PLIST" 2>/dev/null; then
+    bootstrapped=1
+    break
+  fi
+  [ "$attempt" = "5" ] || sleep 1
+done
+if [ "$bootstrapped" != "1" ]; then
+  # Surface launchd's own message on the last try rather than a bare exit code.
+  launchctl bootstrap "$DOMAIN" "$PLIST" || die "launchd refused to load $PLIST (see the message above)"
+fi
 launchctl enable "$DOMAIN/$LABEL" 2>/dev/null || true
 
 cat <<EOF

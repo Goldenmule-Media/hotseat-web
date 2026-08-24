@@ -41,6 +41,7 @@ Run from the repo root unless noted. There is **no linter/formatter** — `typec
 | Run server + UI | `npm run dev` (root — `npm start` plus `next dev` inside `wiki-ui/`; UI needs its own `npm install` first) |
 | Run the mirror in a terminal | `npm run start:mirror` (root) — debugging only; stop the service first, they fight over :4440 |
 | Build the portable mirror | `npm run bundle -w wiki-mirror` → `wiki-mirror/build/` |
+| Build a macOS release | `./scripts/make-release.sh` (add `--publish` for a GitHub release) |
 
 `<pkg>` ∈ `wiki` · `wiki-models` · `wiki-mcp` · `wiki-server` · `wiki-mirror`. **`wiki-ui` is NOT covered by the root
 scripts** — it has its own `node_modules`/lockfile and `next build`/`vitest`; run `npm install` / `npm run
@@ -234,6 +235,12 @@ its own. Full surface: [`architecture/wiki-server.md`](docs/hotseat-wiki/archite
   MenuBarExtra console for it (its own SwiftPM build, not a workspace member, like `wiki-ui`): it polls
   `/_mirror/status`, edits the config file, and drives `launchctl` — it never owns the process, so quitting it
   doesn't stop mirroring. **The config is read once at startup: restart the agent after editing it.**
+- **Installing on a Mac that has no checkout.** `./scripts/make-release.sh` builds ONE tarball —
+  the universal-binary app, the portable mirror, and an `install.sh` — that installs both on any
+  macOS 14+ machine with Node 20+ and nothing else (no repo, no npm, no Xcode). The app is ad-hoc
+  signed rather than notarized, so the installer clears the download quarantine on the files it
+  installs; without that macOS refuses to open it at all. `--publish` attaches the tarball to a
+  GitHub release (**the repo is public — that publishes it to the world**).
 - **When the docs stop moving, the mirror is telling you why.** `curl localhost:4440/_mirror/status` reports
   `auth` (an expired `~/.wiki` grant is the usual culprit — `wiki-mirror login`, or the app's Sign in…),
   `server` (host reachable / 401), and per workspace `connected` + `lastReconcileError` + `nextRetryAt`. A
