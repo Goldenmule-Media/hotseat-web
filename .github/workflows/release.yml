@@ -1,0 +1,91 @@
+name: Release
+
+# A release happens when the VERSION changes, not on every push: the tag is derived from
+# `wiki-mirror/package.json`, and pushing the same version twice would try to re-create a tag that
+# already exists. Narrowing the trigger to that file keeps a docs-only commit from starting a
+# macOS runner it has no use for; the tag check below is what actually decides.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "wiki-mirror/package.json"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+
+permissions:
+  # Creating the release and its tag.
+  contents: write
+
+concurrency:
+  group: release
+  # Never abort a half-published release: it would leave a tag with no assets, which every
+  # installed app would then see as an update it cannot download.
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # macOS because the artifact contains a Swift app bundle. Free on public repositories.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the generated release notes can see what changed.
+          fetch-depth: 0
+
+      - name: Decide whether this version needs releasing
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(node -p "require('./wiki-mirror/package.json').version")"
+          tag="wiki-mirror-v$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::$tag is already released — bump wiki-mirror/package.json to ship a new one."
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::releasing $tag"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.decide.outputs.release == 'true'
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.decide.outputs.release == 'true'
+        run: npm ci
+
+      # Publishing something broken is worse than not publishing: installed apps update
+      # themselves from whatever lands here.
+      - name: Typecheck
+        if: steps.decide.outputs.release == 'true'
+        run: npm run typecheck
+
+      - name: Test the engine and the mirror
+        if: steps.decide.outputs.release == 'true'
+        run: npm test
+
+      - name: Test the menu-bar app
+        if: steps.decide.outputs.release == 'true'
+        run: |
+          swift --version
+          cd wiki-mirror-menubar && swift test
+
+      - name: Build and publish
+        if: steps.decide.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/make-release.sh --publish
+
+      - name: Keep the built artifact even when publishing fails
+        # `always()` first so a failed publish still leaves the artifact to inspect.
+        if: always() && steps.decide.outputs.release == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: wiki-mirror-${{ steps.decide.outputs.version }}-macos
+          path: build/*.tar.gz*
+          if-no-files-found: warn

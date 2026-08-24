@@ -40,6 +40,19 @@ chmod +x "$OUT/install.sh"
 sed -e "s/@VERSION@/$VERSION/g" -e "s/@COMMIT@/$COMMIT/g" \
   "$REPO_ROOT/scripts/release-README.md" > "$OUT/README.md"
 
+# A release nobody can install is worse than no release. Check the payload holds what the
+# installer needs before anything is published.
+for required in "install.sh" "README.md" "WikiMirror.app/Contents/MacOS/WikiMirror" \
+                "mirror/wiki-mirror.mjs" "mirror/install-agent.sh"; do
+  [ -e "$OUT/$required" ] || { echo "release payload is missing $required" >&2; exit 1; }
+done
+[ -n "$(ls "$OUT/mirror/models"/*.js 2>/dev/null)" ] || { echo "release payload has no model bundles" >&2; exit 1; }
+STAMPED="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$OUT/WikiMirror.app/Contents/Info.plist")"
+[ "$STAMPED" = "$VERSION" ] || {
+  echo "the app is stamped $STAMPED but this release is $VERSION — the updater compares these" >&2
+  exit 1
+}
+
 ARCHIVE="$REPO_ROOT/build/$NAME.tar.gz"
 tar -czf "$ARCHIVE" -C "$REPO_ROOT/build" "$NAME"
 # Published beside the tarball so the in-app updater can tell a complete download from a truncated
@@ -64,13 +77,21 @@ if [ "$PUBLISH" = "1" ]; then
   else
     gh release create "$TAG" "$ARCHIVE" "$ARCHIVE.sha256" \
       --title "wiki-mirror $VERSION" \
-      --notes "Local Markdown mirror + macOS menu-bar console. Built from $COMMIT.
+      --generate-notes \
+      --notes "Local Markdown mirror + macOS menu-bar console. Built from \`$COMMIT\`.
 
-Requires macOS 14+ and Node 20+.
+Requires **macOS 14+** and **Node 20+**.
 
-    tar -xzf $NAME.tar.gz && ./$NAME/install.sh
+\`\`\`sh
+tar -xzf $NAME.tar.gz && ./$NAME/install.sh
+\`\`\`
 
-The app is ad-hoc signed, so macOS quarantines it on download; the installer clears that for the files it installs."
+Already have it installed? The app updates itself — **Check for Updates…** in the menu.
+
+The app is ad-hoc signed rather than notarized, so macOS quarantines it on download; the installer clears that for the files it installs.
+
+---
+"
   fi
   gh release view "$TAG" --json url -q .url
 fi

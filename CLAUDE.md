@@ -43,6 +43,12 @@ Run from the repo root unless noted. There is **no linter/formatter** — `typec
 | Build the portable mirror | `npm run bundle -w wiki-mirror` → `wiki-mirror/build/` |
 | Build a macOS release | `./scripts/make-release.sh` (add `--publish` for a GitHub release) |
 
+**CI.** `.github/workflows/release.yml` releases on push to `main` — but only when
+`wiki-mirror/package.json`'s **version changes**, since the tag is derived from it and pushing the
+same version twice would re-create an existing tag. It typechecks, runs every test (including
+`swift test`), builds, and publishes; a failed publish still uploads the artifact so you can see
+what was built. **Bumping that version is how you ship an update** to every installed app.
+
 `<pkg>` ∈ `wiki` · `wiki-models` · `wiki-mcp` · `wiki-server` · `wiki-mirror`. **`wiki-ui` is NOT covered by the root
 scripts** — it has its own `node_modules`/lockfile and `next build`/`vitest`; run `npm install` / `npm run
 typecheck` **inside `wiki-ui/`** (see "wiki-ui (the browser)" below).
