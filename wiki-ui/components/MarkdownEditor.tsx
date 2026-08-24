@@ -8,7 +8,7 @@
  * only while the editor is NOT focused, so a sync can never fight the cursor.
  */
 import { useEffect, useRef } from "react";
-import { Compartment, Prec } from "@codemirror/state";
+import { Annotation, Compartment, Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import {
   imageUploadExtension,
@@ -17,6 +17,11 @@ import {
   typewriterExtension,
   type EditorTermRef,
 } from "../lib/md-live";
+
+/** Marks a dispatch that is REPLAYING the external `value` into the document. CodeMirror
+ *  can't tell that from typing, so without it the sync flows straight back out through
+ *  `onChange` and the caller saves the text it just handed us — over a newer edit. */
+const Replay = Annotation.define<boolean>();
 
 export function MarkdownEditor({
   value,
@@ -95,7 +100,9 @@ export function MarkdownEditor({
         termsComp.current.of(liveEditorTermsExtension({ terms, onTermClick: (id) => onTermClickRef.current(id) })),
         typewriterComp.current.of(typewriter === true ? typewriterExtension() : []),
         EditorView.updateListener.of((u) => {
-          if (u.docChanged) onChangeRef.current(u.state.doc.toString());
+          if (u.docChanged && !u.transactions.some((t) => t.annotation(Replay) === true)) {
+            onChangeRef.current(u.state.doc.toString());
+          }
           if (u.focusChanged && !u.view.hasFocus) onBlurRef.current?.();
         }),
       ],
@@ -116,7 +123,7 @@ export function MarkdownEditor({
     if (view === null || view.hasFocus) return;
     const current = view.state.doc.toString();
     if (current !== value) {
-      view.dispatch({ changes: { from: 0, to: current.length, insert: value } });
+      view.dispatch({ changes: { from: 0, to: current.length, insert: value }, annotations: Replay.of(true) });
     }
   }, [value]);
 

@@ -26,6 +26,7 @@ import type { PageId, WorkspaceId } from "wiki";
 import { diffNotes, notesToDocument, NOTES_SECTION, READING, readSource, readSummary, splitNoteDocument } from "../lib/article-notes";
 import { uploadAttachment } from "../lib/attachments";
 import { usePageMutator, useSectionDocument } from "../lib/live";
+import { useStagedText } from "../lib/staged-text";
 import { useTypewriter } from "../lib/useTypewriter";
 import { MarkdownEditor } from "./MarkdownEditor";
 
@@ -54,15 +55,26 @@ export function ArticleStudio({
   const storedSummary = useMemo(() => readSummary(pageMarkdown), [pageMarkdown]);
   const storedNotes = useMemo(() => notesToDocument(notes.notes), [notes.notes]);
 
-  const [link, setLink] = useState<string | null>(null);
+  // Every field is staged over the engine's text and retired only when the engine answers
+  // back — see lib/staged-text.ts for why dropping a draft any earlier loses the edit.
+  const linkField = useStagedText(source.link);
+  const summaryField = useStagedText(storedSummary);
+  const notesField = useStagedText(storedNotes);
   const [editingLink, setEditingLink] = useState(false);
-  const [summary, setSummary] = useState<string | null>(null);
   /** Opens the summary editor on a page that has none yet — see {@link summaryOpen}. */
   const [writingSummary, setWritingSummary] = useState(false);
-  const [draft, setDraft] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const upload = useCallback((file: File) => uploadAttachment(workspaceId, file), [workspaceId]);
+
+  /** Blur out of the link: save it, and keep the typed text until the page re-renders with
+   *  it (a rejected write falls back to the stored link, with the error banner saying why). */
+  const commitLink = useCallback(async () => {
+    const text = linkField.draft;
+    if (text === null || text === source.link) linkField.drop();
+    else if (await runMutation("setLink", { link: text })) linkField.saved(text);
+    else linkField.drop();
+  }, [linkField, source.link, runMutation]);
 
   /* An empty summary is not an empty field: an unwritten summary is the one thing this page
      is FOR, so it says so in a line you can read and scroll straight past, rather than an
@@ -76,20 +88,25 @@ export function ArticleStudio({
    * unlinked or empty draft just saves quietly instead of raising the engine's refusal.
    */
   const finishSummary = useCallback(async () => {
-    const text = summary;
-    setSummary(null);
-    if (text !== null && text !== storedSummary && !(await runMutation("writeSummary", { markdown: text }))) return;
+    const text = summaryField.draft;
+    if (text !== null && text !== storedSummary) {
+      // A rejected write keeps its draft: the words are still in the editor, unsaved.
+      if (!(await runMutation("writeSummary", { markdown: text }))) return;
+      summaryField.saved(text);
+    } else {
+      summaryField.drop(text ?? undefined);
+    }
     const written = (text ?? storedSummary).trim();
     if (reading && written !== "" && source.link !== "") await runMutation("summarize", {});
-  }, [summary, storedSummary, reading, source.link, runMutation]);
+  }, [summaryField, storedSummary, reading, source.link, runMutation]);
 
   /** Blur out of the summary: save (and finish), then fold an untouched editor back to the
    *  invitation — an empty field left open is exactly what the button replaced. */
   const leaveSummary = useCallback(async () => {
-    const empty = (summary ?? storedSummary).trim() === "";
+    const empty = summaryField.value.trim() === "";
     await finishSummary();
     if (empty) setWritingSummary(false);
-  }, [summary, storedSummary, finishSummary]);
+  }, [summaryField, finishSummary]);
 
   // Read at save time, never captured: a debounced save must diff against the list as it
   // stands when it fires, not as it stood when the keystroke scheduled it.
@@ -99,38 +116,42 @@ export function ArticleStudio({
   // The list is the storage, the document is the edit: re-split and diff, then run the
   // commands in order (the host takes one at a time, so this is a short sequence).
   const saveNotes = useCallback(
-    async (document: string): Promise<boolean> => {
-      for (const edit of diffNotes(storedRef.current, splitNoteDocument(document))) {
-        if (!(await runMutation(edit.command, edit.args))) return false;
+    async (document: string): Promise<"committed" | "unchanged" | "failed"> => {
+      const edits = diffNotes(storedRef.current, splitNoteDocument(document));
+      if (edits.length === 0) return "unchanged";
+      for (const edit of edits) {
+        if (!(await runMutation(edit.command, edit.args))) return "failed";
       }
-      return true;
+      return "committed";
     },
     [runMutation],
   );
 
+  // Save, then hand the draft over to the engine's own render — but only once that render
+  // has arrived (a failed write keeps the draft, so the words are never the casualty).
+  const commitNotes = useCallback(
+    (text: string) => {
+      void saveNotes(text).then((outcome) => {
+        if (outcome === "committed") notesField.saved(text);
+        else if (outcome === "unchanged") notesField.drop(text);
+      });
+    },
+    [saveNotes, notesField],
+  );
+
   const scheduleNotes = useCallback(
     (text: string) => {
-      setDraft(text);
+      notesField.edit(text);
       if (timer.current !== null) clearTimeout(timer.current);
-      timer.current = setTimeout(() => {
-        // Drop the local draft once it IS the saved state (and no newer keystroke has
-        // replaced it): a draft outranks the engine's own text, so a window that typed
-        // once would otherwise stop showing what anyone else writes until it was blurred.
-        void saveNotes(text).then((ok) => {
-          if (ok) setDraft((d) => (d === text ? null : d));
-        });
-      }, AUTOSAVE_MS);
+      timer.current = setTimeout(() => commitNotes(text), AUTOSAVE_MS);
     },
-    [saveNotes],
+    [notesField, commitNotes],
   );
 
   const flushNotes = useCallback(() => {
     if (timer.current !== null) clearTimeout(timer.current);
-    if (draft === null) return;
-    const text = draft;
-    setDraft(null); // re-seed from the engine's own render once the write lands
-    void saveNotes(text);
-  }, [draft, saveNotes]);
+    if (notesField.draft !== null) commitNotes(notesField.draft);
+  }, [notesField, commitNotes]);
 
   // A pending autosave must not fire after the studio unmounts.
   useEffect(
@@ -164,21 +185,20 @@ export function ArticleStudio({
               <input
                 type="url"
                 className="article-link-input"
-                value={link ?? source.link}
+                value={linkField.value}
                 autoFocus={editingLink}
                 placeholder="https://… — where the article lives"
                 aria-label="Article link"
-                onChange={(e) => setLink(e.target.value)}
+                onChange={(e) => linkField.edit(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") e.currentTarget.blur();
                   if (e.key === "Escape") {
-                    setLink(null);
+                    linkField.drop();
                     setEditingLink(false);
                   }
                 }}
                 onBlur={() => {
-                  if (link !== null && link !== source.link) void runMutation("setLink", { link });
-                  setLink(null);
+                  void commitLink();
                   setEditingLink(false);
                 }}
               />
@@ -201,8 +221,8 @@ export function ArticleStudio({
               <h2 className="restate-block-head">Summary</h2>
               <div className="article-doc article-doc-short">
                 <MarkdownEditor
-                  value={summary ?? storedSummary}
-                  onChange={setSummary}
+                  value={summaryField.value}
+                  onChange={summaryField.edit}
                   onBlur={() => void leaveSummary()}
                   autoFocus={writingSummary}
                   terms={[]}
@@ -241,7 +261,7 @@ export function ArticleStudio({
             </div>
             <div className="article-doc">
               <MarkdownEditor
-                value={draft ?? storedNotes}
+                value={notesField.value}
                 onChange={scheduleNotes}
                 onBlur={flushNotes}
                 typewriter={typewriter.on}
