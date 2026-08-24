@@ -6,7 +6,7 @@
  * can never recover by retrying — every layer has to be rebuilt, and the health listener a client
  * is watching has to survive that (its port must not move, and its answers must not gap).
  */
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -16,6 +16,7 @@ import type { IWiki, IWorkspaceHandle } from "wiki";
 import { startTestServer, wikiOn } from "wiki/testing";
 
 import { silentLogger } from "../src/logger.js";
+import { HealthPortInUseError } from "../src/health.js";
 import { startMirror, type RunningMirror } from "../src/main.js";
 
 describe("wiki-mirror — the service", () => {
@@ -135,6 +136,32 @@ describe("wiki-mirror — the service", () => {
     // A restart after close must be a no-op rather than resurrecting the engine.
     await running.restart("after close");
     await expect(fetch(`${running.health.url}/_mirror/status`)).rejects.toThrow();
+  });
+
+  it("refuses to start a SECOND mirror on the same health port, before it writes anything", async () => {
+    // The port IS the single-writer guard: two mirrors on one root clobber each other's manifest.
+    // bin.ts turns this error into a clean exit 0 so launchd parks the loser instead of respawning
+    // it into the same collision every 30 seconds.
+    const first = await start(await freshRoot());
+    const port = Number(new URL(first.health.url).port);
+    const secondRoot = await freshRoot();
+
+    await expect(
+      startMirror(
+        {
+          streamBaseUrl: url,
+          namespace: "test",
+          models: [],
+          emitters: [{ workspaceId: writer.id, root: secondRoot }],
+          healthHost: "127.0.0.1",
+          healthPort: port,
+        },
+        silentLogger,
+      ),
+    ).rejects.toBeInstanceOf(HealthPortInUseError);
+
+    // Nothing was written: the guard has to run BEFORE the emitters touch the root.
+    expect(await readdir(secondRoot)).toEqual([]);
   });
 
   it("serves a config path and a pid so a client edits the right file and sees the right process", async () => {
