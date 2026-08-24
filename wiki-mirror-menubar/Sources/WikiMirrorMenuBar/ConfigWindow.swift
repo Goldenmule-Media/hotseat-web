@@ -18,7 +18,9 @@ struct ConfigWindow: View {
             mirrors.tabItem { Label("Mirrors", systemImage: "folder") }
             service.tabItem { Label("Service", systemImage: "gearshape") }
         }
-        .frame(width: 620, height: 460)
+        // Resizable: the emitter table grows with the number of mirrors, and the paths in it are
+        // long enough that a fixed 620pt window truncates them.
+        .frame(minWidth: 580, idealWidth: 720, maxWidth: .infinity, minHeight: 420, idealHeight: 560, maxHeight: .infinity)
         .task {
             await store.refreshAll()
             load()
@@ -29,55 +31,79 @@ struct ConfigWindow: View {
     // ── mirrors ──────────────────────────────────────────────────────────────
 
     private var mirrors: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Form {
-                TextField("Server", text: $config.streamBaseUrl)
-                TextField("Namespace", text: $config.namespace)
-            }
-            .formStyle(.grouped)
-            .frame(height: 90)
-
-            HStack {
-                Text("Mirrored workspaces").font(.headline)
-                Spacer()
-                if store.catalogError != nil {
-                    Text("Workspace list needs a running mirror")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Button("Add") { config.emitters.append(EmitterEntry()) }
-            }
-
+        VStack(alignment: .leading, spacing: 0) {
+            // ONE scrolling column: two independently scrolling panes made the window feel like
+            // two windows, and the top one could never show more than two fields.
             ScrollView {
-                VStack(spacing: 10) {
-                    ForEach($config.emitters) { $emitter in
-                        EmitterRow(emitter: $emitter, catalog: store.catalog) {
-                            config.emitters.removeAll { $0.id == emitter.id }
+                VStack(alignment: .leading, spacing: 18) {
+                    PanelSection("Server") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            field("Server", "https://wiki.example.com", $config.streamBaseUrl)
+                            field("Namespace", "default", $config.namespace)
                         }
                     }
-                    if config.emitters.isEmpty {
-                        Text("Nothing is mirrored on this Mac yet.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                    PanelSection(
+                        "Mirrored workspaces",
+                        boxed: false,
+                        accessory: {
+                            HStack(spacing: 8) {
+                                if store.catalogError != nil {
+                                    Text("Workspace list needs a running mirror")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Button("Add") { config.emitters.append(EmitterEntry()) }
+                            }
+                        }
+                    ) {
+                        VStack(spacing: 10) {
+                            ForEach($config.emitters) { $emitter in
+                                EmitterRow(emitter: $emitter, catalog: store.catalog) {
+                                    config.emitters.removeAll { $0.id == emitter.id }
+                                }
+                            }
+                            if config.emitters.isEmpty {
+                                Text("Nothing is mirrored on this Mac yet.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
                     }
                 }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            problems
+            Divider()
 
-            HStack {
-                Text(loadedFrom).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
-                Spacer()
-                Button("Revert") { load() }
-                Button("Save & Restart") { save() }
-                    .keyboardShortcut(.defaultAction)
-                    // A failed load leaves an EMPTY default in hand; saving it would erase the
-                    // real file's emitters, token and every other key.
-                    .disabled(loadError != nil || !config.validate().isEmpty || store.busy != nil)
+            // The footer stays put: scrolling Save off the bottom of a config editor is a way to
+            // lose work.
+            VStack(alignment: .leading, spacing: 8) {
+                problems
+                HStack {
+                    Text(loadedFrom).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
+                    Spacer()
+                    Button("Revert") { load() }
+                    Button("Save & Restart") { save() }
+                        .keyboardShortcut(.defaultAction)
+                        // A failed load leaves an EMPTY default in hand; saving it would erase the
+                        // real file's emitters, token and every other key.
+                        .disabled(loadError != nil || !config.validate().isEmpty || store.busy != nil)
+                }
             }
+            .padding(16)
         }
-        .padding(16)
+    }
+
+    /// A labelled text field, sharing the Service tab's label column so both tabs line up.
+    private func field(_ label: String, _ placeholder: String, _ text: Binding<String>) -> some View {
+        HStack(spacing: 6) {
+            Text(label).frame(width: 74, alignment: .leading).foregroundStyle(.secondary)
+            TextField(placeholder, text: text).textFieldStyle(.roundedBorder)
+        }
+        .font(.caption)
     }
 
     @ViewBuilder
@@ -166,6 +192,7 @@ private struct EmitterRow: View {
             }
         }
         .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
     }
 
@@ -192,80 +219,73 @@ private struct ServiceTab: View {
     @State private var launchAtLogin = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            section("Status") {
-                VStack(alignment: .leading, spacing: 4) {
-                    row("Agent", agentSummary)
-                    row("Answering", store.status != nil ? "yes, pid \(store.status?.pid.map(String.init) ?? "?")" : "no")
-                    row("Endpoint", store.healthURL)
-                    if let info = LaunchAgent.info() {
-                        row("Mode", info.mode)
-                        row("Runs", info.programArguments.joined(separator: " "))
-                    }
-                    row("Config", store.configPath, reveal: store.configPath)
-                    row("Log", LaunchAgent.logPath, reveal: LaunchAgent.logPath)
-                }
-                .font(.caption)
-            }
-
-            section("Install") {
-                VStack(alignment: .leading, spacing: 8) {
-                    Picker("Run from", selection: $mode) {
-                        Text("Repo source (tsx — always current)").tag("source")
-                        Text("Repo build (dist/bin.js)").tag("dist")
-                        Text("Portable artifact").tag("portable")
-                    }
-                    HStack(spacing: 8) {
-                        TextField("folder containing install-agent.sh", text: $installerDirectory)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(.caption, design: .monospaced))
-                        Button("Choose…") { chooseInstaller() }
-                    }
-                    Text("For repo modes pick wiki-mirror/scripts; for a portable artifact pick the unpacked folder.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    HStack {
-                        Button(store.agent.installed ? "Reinstall" : "Install") {
-                            Task { await store.install(installerDirectory: installerDirectory, mode: mode) }
+        // Scrolls for the same reason the Mirrors tab does: the window is resizable now, and
+        // "Runs" alone can wrap to three lines on a narrow one.
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                PanelSection("Status") {
+                    VStack(alignment: .leading, spacing: 4) {
+                        row("Agent", agentSummary)
+                        row("Answering", store.status != nil ? "yes, pid \(store.status?.pid.map(String.init) ?? "?")" : "no")
+                        row("Endpoint", store.healthURL)
+                        if let info = LaunchAgent.info() {
+                            row("Mode", info.mode)
+                            row("Runs", info.programArguments.joined(separator: " "))
                         }
-                        .disabled(installerDirectory.isEmpty || store.busy != nil)
-                        Button("Uninstall") { Task { await store.uninstall() } }
-                            .disabled(!store.agent.installed || store.busy != nil)
-                        Spacer()
-                        if let message = store.lastActionMessage {
-                            Text(message).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        row("Config", store.configPath, reveal: store.configPath)
+                        row("Log", LaunchAgent.logPath, reveal: LaunchAgent.logPath)
+                    }
+                    .font(.caption)
+                }
+
+                PanelSection("Install") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Picker("Run from", selection: $mode) {
+                            Text("Repo source (tsx — always current)").tag("source")
+                            Text("Repo build (dist/bin.js)").tag("dist")
+                            Text("Portable artifact").tag("portable")
+                        }
+                        HStack(spacing: 8) {
+                            TextField("folder containing install-agent.sh", text: $installerDirectory)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(.caption, design: .monospaced))
+                            Button("Choose…") { chooseInstaller() }
+                        }
+                        Text("For repo modes pick wiki-mirror/scripts; for a portable artifact pick the unpacked folder.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        HStack {
+                            Button(store.agent.installed ? "Reinstall" : "Install") {
+                                Task { await store.install(installerDirectory: installerDirectory, mode: mode) }
+                            }
+                            .disabled(installerDirectory.isEmpty || store.busy != nil)
+                            Button("Uninstall") { Task { await store.uninstall() } }
+                                .disabled(!store.agent.installed || store.busy != nil)
+                            Spacer()
+                            if let message = store.lastActionMessage {
+                                Text(message).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            }
                         }
                     }
                 }
+
+                Toggle("Show this app in the menu bar at login", isOn: $launchAtLogin)
+                    .onChange(of: launchAtLogin) { _, enabled in setLaunchAtLogin(enabled) }
+                Text("The mirror itself runs from the launchd agent above — it keeps mirroring whether or not this app is open.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
             }
-
-            Toggle("Show this app in the menu bar at login", isOn: $launchAtLogin)
-                .onChange(of: launchAtLogin) { _, enabled in setLaunchAtLogin(enabled) }
-            Text("The mirror itself runs from the launchd agent above — it keeps mirroring whether or not this app is open.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-            Spacer()
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(16)
         .onAppear {
             if let info = LaunchAgent.info() {
                 mode = info.mode == "custom" ? "source" : info.mode
                 installerDirectory = info.installerDirectory ?? ""
             }
             launchAtLogin = SMAppService.mainApp.status == .enabled
-        }
-    }
-
-    /// A titled panel whose heading lines up with its own content. GroupBox insets its label
-    /// past the box it labels, which reads as a mistake next to the controls below it.
-    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.headline)
-            content()
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
         }
     }
 
@@ -317,5 +337,53 @@ private struct ServiceTab: View {
             store.lastActionMessage = error.localizedDescription
             launchAtLogin = SMAppService.mainApp.status == .enabled
         }
+    }
+}
+
+/// A titled block whose heading lines up with its own content.
+///
+/// `GroupBox` insets its label past the box it labels, which reads as a mistake next to every
+/// other control in the window. `boxed: false` is for content that already draws its own cards.
+private struct PanelSection<Content: View, Accessory: View>: View {
+    private let title: String
+    private let boxed: Bool
+    private let accessory: () -> Accessory
+    private let content: () -> Content
+
+    init(
+        _ title: String,
+        boxed: Bool = true,
+        @ViewBuilder accessory: @escaping () -> Accessory,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.title = title
+        self.boxed = boxed
+        self.accessory = accessory
+        self.content = content
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title).font(.headline)
+                Spacer()
+                accessory()
+            }
+            if boxed {
+                content()
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
+            } else {
+                content().frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+extension PanelSection where Accessory == EmptyView {
+    init(_ title: String, boxed: Bool = true, @ViewBuilder content: @escaping () -> Content) {
+        self.init(title, boxed: boxed, accessory: { EmptyView() }, content: content)
     }
 }

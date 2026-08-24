@@ -25,7 +25,7 @@ struct WikiMirrorApp: App {
             ConfigWindow(store: store)
                 .onAppear { store.start() }
         }
-        .windowResizability(.contentSize)
+        .windowResizability(.contentMinSize)
     }
 
     init() {
