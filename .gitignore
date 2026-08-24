@@ -1,5 +1,7 @@
 node_modules/
 dist/
+dist-portable/
+wiki-mirror/build/
 .wiki-data/
 .env
 *.log

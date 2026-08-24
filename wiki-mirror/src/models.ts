@@ -36,15 +36,21 @@ function toImportUrl(spec: string): string {
   return spec; // bare package specifier
 }
 
-/** Pull the page-type array from a loaded module: the default export, else a `pageTypes` named export. */
-function extractPageTypes(mod: Record<string, unknown>, spec: string): readonly IPageType[] {
+/** The page-type array a module exports (default, else a `pageTypes` named export), or undefined. */
+function tryExtractPageTypes(mod: Record<string, unknown>): readonly IPageType[] | undefined {
   const candidate = mod.default ?? mod.pageTypes;
-  if (!Array.isArray(candidate)) {
+  return Array.isArray(candidate) ? (candidate as readonly IPageType[]) : undefined;
+}
+
+/** Pull the page-type array from a loaded module. Throws — an EXPLICIT specifier must be a bundle. */
+function extractPageTypes(mod: Record<string, unknown>, spec: string): readonly IPageType[] {
+  const types = tryExtractPageTypes(mod);
+  if (types === undefined) {
     throw new Error(
-      `wiki-mirror: model bundle "${spec}" must default-export an array of page types (got ${typeof candidate})`,
+      `wiki-mirror: model bundle "${spec}" must default-export an array of page types (got ${typeof (mod.default ?? mod.pageTypes)})`,
     );
   }
-  return candidate as readonly IPageType[];
+  return types;
 }
 
 /** Dynamically import every model-bundle specifier and return their combined page-type defs. */
@@ -97,7 +103,13 @@ export async function loadModelsDir(dir: string, logger: Logger): Promise<IPageT
   for (const bundle of discoverModelBundles(dir)) {
     try {
       const mod = (await import(toImportUrl(bundle.specifier))) as Record<string, unknown>;
-      all.push(...extractPageTypes(mod, bundle.specifier));
+      const types = tryExtractPageTypes(mod);
+      if (types === undefined) {
+        // Expected, not a problem: a built tree is full of shared chunks that are not bundles.
+        logger.info("wiki-mirror: ignored a file that is not a model bundle", { id: bundle.id });
+        continue;
+      }
+      all.push(...types);
     } catch (err) {
       logger.warn("wiki-mirror: skipped an unloadable discovered bundle", {
         id: bundle.id,

@@ -18,6 +18,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "tsdown",
+    "build:portable": "tsdown --config tsdown.portable.config.ts",
+    "bundle": "node scripts/build-portable.mjs",
     "start": "tsx src/bin.ts",
     "test": "vitest run",
     "test:watch": "vitest"
