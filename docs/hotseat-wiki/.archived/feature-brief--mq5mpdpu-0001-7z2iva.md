@@ -1,4 +1,4 @@
-# Feature: Shared engine in a SharedWorker (one engine + PGlite across all tabs)
+# Shared engine in a SharedWorker (one engine + PGlite across all tabs)
 
 **Status:** shipped
 

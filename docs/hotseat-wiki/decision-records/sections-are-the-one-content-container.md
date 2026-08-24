@@ -1,8 +1,9 @@
-# ADR-5: Sections are the one content container
+# Sections are the one content container
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-5
 - **Date:** 2026-06-03
 - **Scope:** wiki
 

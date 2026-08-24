@@ -1,8 +1,9 @@
-# ADR-3: Workspace as the aggregate (one stream)
+# Workspace as the aggregate (one stream)
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-3
 - **Date:** 2026-06-01
 - **Scope:** wiki
 

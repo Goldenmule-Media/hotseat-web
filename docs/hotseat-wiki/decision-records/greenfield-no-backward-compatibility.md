@@ -1,8 +1,9 @@
-# ADR-11: Greenfield: no backward compatibility
+# Greenfield: no backward compatibility
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-11
 - **Date:** 2026-06-03
 - **Scope:** wiki
 

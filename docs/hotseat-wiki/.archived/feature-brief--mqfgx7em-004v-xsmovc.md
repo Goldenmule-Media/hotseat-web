@@ -1,4 +1,4 @@
-# Feature: Model page: show page schema and current-state mutable sections
+# Model page: show page schema and current-state mutable sections
 
 **Status:** shipped
 

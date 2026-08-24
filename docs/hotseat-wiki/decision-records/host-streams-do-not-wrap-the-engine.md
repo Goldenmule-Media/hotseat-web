@@ -1,8 +1,9 @@
-# ADR-20: Host streams; do not wrap the engine
+# Host streams; do not wrap the engine
 
 **Status:** superseded
 
 ## Metadata
+- **Number:** ADR-20
 - **Date:** 2026-06-01
 - **Scope:** wiki-server
 

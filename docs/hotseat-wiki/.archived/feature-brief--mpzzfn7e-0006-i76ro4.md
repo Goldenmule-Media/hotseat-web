@@ -1,4 +1,4 @@
-# Feature: ADR page type — decisions as first-class wiki pages
+# ADR page type — decisions as first-class wiki pages
 
 **Status:** shipped
 

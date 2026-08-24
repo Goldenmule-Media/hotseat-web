@@ -1,4 +1,4 @@
-# Feature: Runtime-configurable Markdown emitters (per-project disk mirrors)
+# Runtime-configurable Markdown emitters (per-project disk mirrors)
 
 **Status:** shipped
 

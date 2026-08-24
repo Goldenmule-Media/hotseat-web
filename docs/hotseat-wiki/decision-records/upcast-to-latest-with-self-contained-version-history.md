@@ -1,8 +1,9 @@
-# ADR-23: Upcast-to-latest with self-contained version history
+# Upcast-to-latest with self-contained version history
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-23
 - **Date:** 2026-06-02
 - **Scope:** wiki-models
 

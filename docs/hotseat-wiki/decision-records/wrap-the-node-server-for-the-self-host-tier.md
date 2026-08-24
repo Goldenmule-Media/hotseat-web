@@ -1,8 +1,9 @@
-# ADR-21: Wrap the Node server for the self-host tier
+# Wrap the Node server for the self-host tier
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-21
 - **Date:** 2026-06-01
 - **Scope:** wiki-server
 

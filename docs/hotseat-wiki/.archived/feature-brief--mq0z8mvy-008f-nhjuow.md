@@ -1,4 +1,4 @@
-# Feature: Full-text search — an engine-bundled search index for client and server
+# Full-text search — an engine-bundled search index for client and server
 
 **Status:** shipped
 

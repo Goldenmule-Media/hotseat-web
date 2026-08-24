@@ -133,6 +133,12 @@ Deterministic, language-aware tooling lives in the host as read-side projections
 
 The content model shipped greenfield. There was no data migration: page types are authored directly on sections, and golden render tests assert the deterministic Markdown projection of structured state. The richer write model and its read-side projections were built in sequence — sections and field-kinds as the substrate and the Markdown render read model first, then read-only outline and symbol-index projections behind the language registry, then semantic write-back operations once justified by need.
 
+Attachments and images (2026-08-19). The block vocabulary gained an eighth kind, so the IBlock snippet above is one short: `{ kind: "image", id: BlockId, ref: string, alt: string, title?: string }`. Its ref is either `attachment:<sha256>`, naming bytes in wiki-server's content-addressed attachment store, or an ordinary absolute URL. It renders as exactly `![alt](ref)` and the ref is emitted VERBATIM, because resolving it belongs to each consumer: wiki-ui fetches it into an object URL, and wiki-mirror downloads it beside the tree and rewrites the ref to a relative path. Parsing is block position only, so an image mid-paragraph keeps its historic degradation to a literal exclamation mark plus a link. See the decision record An `image` block kind.
+
+This is also what finally puts an external store behind `attachment-ref`, the field-kind that has described a content-addressed pointer since ADR-6 while no page type used it. The two carriers are deliberate and complete: an image block places bytes inline in a blocks field, and an attachment-ref field hangs any file, such as a PDF, off a section or element field. Both carry the same ref string, so consumers resolve them with one carrier-blind pass. See the decision record Attachments: bytes outside the stream, content-addressed behind the workspace's own auth.
+
+The render config's `as` gained `stack`, the companion of `sections` for list elements that have no heading: each element's declared body parts render as top-level blocks, one after another. `sections` cannot express this, because an empty heading template emits a bare `###` with trailing whitespace, which the canonical Markdown contract forbids. Reach for it when a list's items ARE rich text, such as reading notes, rather than titled subsections. `element.heading` is therefore optional now.
+
 ## Components
 _No components._
 

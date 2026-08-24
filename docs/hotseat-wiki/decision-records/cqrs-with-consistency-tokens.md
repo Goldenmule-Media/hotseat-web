@@ -1,8 +1,9 @@
-# ADR-4: CQRS with consistency tokens
+# CQRS with consistency tokens
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-4
 - **Date:** 2026-06-02
 - **Scope:** wiki
 

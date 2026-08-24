@@ -1,4 +1,4 @@
-# Feature: wiki-ui model inspection
+# wiki-ui model inspection
 
 **Status:** shipped
 

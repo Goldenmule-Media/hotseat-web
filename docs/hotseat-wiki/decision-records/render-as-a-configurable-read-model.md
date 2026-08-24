@@ -1,8 +1,9 @@
-# ADR-8: Render as a configurable read model
+# Render as a configurable read model
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-8
 - **Date:** 2026-06-03
 - **Scope:** wiki
 

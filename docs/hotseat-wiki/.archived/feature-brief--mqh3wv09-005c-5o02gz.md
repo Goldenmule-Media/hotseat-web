@@ -1,4 +1,4 @@
-# Feature: Mirror (emitter) status in wiki-ui
+# Mirror (emitter) status in wiki-ui
 
 **Status:** shipped
 

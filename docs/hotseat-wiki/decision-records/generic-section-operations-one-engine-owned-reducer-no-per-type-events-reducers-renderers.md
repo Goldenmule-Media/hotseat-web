@@ -1,8 +1,9 @@
-# ADR-7: Generic section operations + one engine-owned reducer (no per-type events/reducers/renderers)
+# Generic section operations + one engine-owned reducer (no per-type events/reducers/renderers)
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-7
 - **Date:** 2026-06-03
 - **Scope:** wiki
 

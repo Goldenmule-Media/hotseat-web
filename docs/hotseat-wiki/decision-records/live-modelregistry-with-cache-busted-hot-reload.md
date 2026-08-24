@@ -1,8 +1,9 @@
-# ADR-18: Live ModelRegistry with cache-busted hot-reload
+# Live ModelRegistry with cache-busted hot-reload
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-18
 - **Date:** 2026-06-02
 - **Scope:** wiki-mcp
 

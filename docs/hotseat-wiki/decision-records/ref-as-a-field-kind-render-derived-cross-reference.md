@@ -1,8 +1,9 @@
-# ADR-9: `ref` as a field-kind (render-derived cross-reference)
+# `ref` as a field-kind (render-derived cross-reference)
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-9
 - **Date:** 2026-06-03
 - **Scope:** wiki
 

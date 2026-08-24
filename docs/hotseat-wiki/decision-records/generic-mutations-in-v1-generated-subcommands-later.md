@@ -1,8 +1,9 @@
-# ADR-29: Generic mutations in v1, generated subcommands later
+# Generic mutations in v1, generated subcommands later
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-29
 - **Date:** 2026-06-02
 - **Scope:** wiki-cli
 

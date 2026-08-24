@@ -1,8 +1,9 @@
-# ADR-1: Design decisions live in the wiki
+# Design decisions live in the wiki
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-1
 - **Date:** 2026-06-05
 - **Scope:** wiki-models
 - **Deciders:** Ben Jordan

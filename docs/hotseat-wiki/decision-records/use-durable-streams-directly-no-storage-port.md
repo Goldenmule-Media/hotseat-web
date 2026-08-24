@@ -1,8 +1,9 @@
-# ADR-2: Use Durable Streams directly; no storage port
+# Use Durable Streams directly; no storage port
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-2
 - **Date:** 2026-06-01
 - **Scope:** wiki
 

@@ -1,4 +1,4 @@
-# Bug: Boot-time emitter back-fill races model-bundle registration and deletes mirrored files
+# Boot-time emitter back-fill races model-bundle registration and deletes mirrored files
 
 **Status:** closed
 

@@ -1,8 +1,9 @@
-# ADR-17: wiki-mcp holds the logic; wiki-server hosts it
+# wiki-mcp holds the logic; wiki-server hosts it
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-17
 - **Date:** 2026-06-02
 - **Scope:** wiki-mcp
 

@@ -1,4 +1,4 @@
-# Spec: Quint runner
+# Quint runner
 
 **Status:** restating
 

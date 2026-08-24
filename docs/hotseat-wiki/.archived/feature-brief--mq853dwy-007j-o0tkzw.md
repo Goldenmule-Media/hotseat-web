@@ -1,4 +1,4 @@
-# Feature: General-purpose block-list page type
+# General-purpose block-list page type
 
 **Status:** shipped
 

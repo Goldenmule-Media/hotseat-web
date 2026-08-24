@@ -1,8 +1,9 @@
-# ADR-12: Page archival is an orthogonal visibility flag, not a status
+# Page archival is an orthogonal visibility flag, not a status
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-12
 - **Date:** 2026-06-04
 - **Scope:** wiki
 

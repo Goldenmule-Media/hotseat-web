@@ -1,8 +1,9 @@
-# ADR-26: Admin "by degrees" via command locality
+# Admin "by degrees" via command locality
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-26
 - **Date:** 2026-06-02
 - **Scope:** wiki-cli
 

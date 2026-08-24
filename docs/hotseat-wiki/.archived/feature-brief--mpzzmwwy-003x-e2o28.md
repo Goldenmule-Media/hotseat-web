@@ -1,4 +1,4 @@
-# Feature: Markdown projection to disk — live filesystem mirror
+# Markdown projection to disk — live filesystem mirror
 
 **Status:** shipped
 

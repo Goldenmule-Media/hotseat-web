@@ -1,8 +1,9 @@
-# ADR-32: Markdown emission is a local stream-client, not a host responsibility
+# Markdown emission is a local stream-client, not a host responsibility
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-32
 - **Date:** 2026-06-11
 - **Scope:** wiki-mirror / deploy
 - **Deciders:** Benjamin Jordan

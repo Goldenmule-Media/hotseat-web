@@ -1,8 +1,9 @@
-# ADR-10: The section tree is author-editable, with model-declared constraints
+# The section tree is author-editable, with model-declared constraints
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-10
 - **Date:** 2026-06-03
 - **Scope:** wiki
 

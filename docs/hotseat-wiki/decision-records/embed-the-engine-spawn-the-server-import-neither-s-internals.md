@@ -1,8 +1,9 @@
-# ADR-25: Embed the engine; spawn the server; import neither's internals
+# Embed the engine; spawn the server; import neither's internals
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-25
 - **Date:** 2026-06-02
 - **Scope:** wiki-cli
 

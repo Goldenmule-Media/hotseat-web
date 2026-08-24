@@ -40,3 +40,5 @@ _No overview yet._
 - [Markdown emission is a local stream-client, not a host responsibility](decision-record:mqa1x5yj-000d-foj09k)
 - [GitHub auth at the host edge: an auth gateway + per-surface injected enforcement](decision-record:mqazxkh2-0001-vnogwy)
 - [OAuth 2.1 façade over the stateless gateway — signed-blob codes and refresh tokens](decision-record:mqbfg2yp-0027-n6wrih)
+- [An `image` block kind](decision-record:mt0mgz4p-0001-oasvsj)
+- [Attachments: bytes outside the stream, content-addressed behind the workspace's own auth](decision-record:mt0mhp3t-000o-2azfry)

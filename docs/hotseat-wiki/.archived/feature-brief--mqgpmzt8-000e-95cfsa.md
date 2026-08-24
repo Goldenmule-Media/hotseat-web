@@ -1,4 +1,4 @@
-# Feature: Auto-resolve build-feature's workspace from a repo hotseat.config.json
+# Auto-resolve build-feature's workspace from a repo hotseat.config.json
 
 **Status:** shipped
 

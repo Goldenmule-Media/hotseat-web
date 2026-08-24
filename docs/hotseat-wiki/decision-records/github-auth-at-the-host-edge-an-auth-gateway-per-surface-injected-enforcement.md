@@ -1,8 +1,9 @@
-# ADR-33: GitHub auth at the host edge: an auth gateway + per-surface injected enforcement
+# GitHub auth at the host edge: an auth gateway + per-surface injected enforcement
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-33
 - **Date:** 2026-06-12
 - **Scope:** wiki-server (auth gateway) · wiki-mcp (injected McpAuth) · wiki engine (IStreamConfig.headers) · wiki-mirror + wiki-ui (token clients)
 

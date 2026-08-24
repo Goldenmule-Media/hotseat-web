@@ -1,4 +1,4 @@
-# Feature: Stream-to-stream migration: copy a workspace between servers
+# Stream-to-stream migration: copy a workspace between servers
 
 **Status:** shipped
 

@@ -1,8 +1,9 @@
-# ADR-19: AST/analysis as read-side projections + a runtime LanguageRegistry
+# AST/analysis as read-side projections + a runtime LanguageRegistry
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-19
 - **Date:** 2026-06-03
 - **Scope:** wiki-mcp
 

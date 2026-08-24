@@ -1,8 +1,9 @@
-# ADR-14: SQL read model via Kysely; PGlite local, pg prod
+# SQL read model via Kysely; PGlite local, pg prod
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-14
 - **Date:** 2026-06-02
 - **Scope:** wiki-mcp
 

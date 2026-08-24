@@ -1,8 +1,9 @@
-# ADR-28: Remote auth via an engine `IStreamConfig.headers` hook
+# Remote auth via an engine `IStreamConfig.headers` hook
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-28
 - **Date:** 2026-06-02
 - **Scope:** wiki-cli
 

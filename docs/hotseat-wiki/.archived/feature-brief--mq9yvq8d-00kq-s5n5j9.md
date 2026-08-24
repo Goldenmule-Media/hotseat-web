@@ -1,4 +1,4 @@
-# Feature: Local markdown mirror (wiki-mirror)
+# Local markdown mirror (wiki-mirror)
 
 **Status:** shipped
 

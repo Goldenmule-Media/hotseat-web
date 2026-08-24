@@ -1,8 +1,9 @@
-# ADR-31: Declared authored-ness gates (`requiredIn`): the engine enforces field completeness per status
+# Declared authored-ness gates (`requiredIn`): the engine enforces field completeness per status
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-31
 - **Date:** 2026-06-11
 - **Scope:** wiki
 - **Deciders:** Ben

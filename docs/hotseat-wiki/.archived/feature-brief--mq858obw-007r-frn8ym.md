@@ -1,4 +1,4 @@
-# Feature: Model-packaged Claude skills
+# Model-packaged Claude skills
 
 **Status:** shipped
 

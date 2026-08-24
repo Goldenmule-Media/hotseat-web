@@ -1,8 +1,9 @@
-# ADR-13: CQRS with consistency tokens in the engine core
+# CQRS with consistency tokens in the engine core
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-13
 - **Date:** 2026-06-02
 - **Scope:** wiki-mcp
 

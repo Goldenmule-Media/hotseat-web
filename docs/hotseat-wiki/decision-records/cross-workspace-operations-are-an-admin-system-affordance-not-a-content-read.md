@@ -1,8 +1,9 @@
-# ADR-30: Cross-workspace operations are an admin/system affordance, not a content read
+# Cross-workspace operations are an admin/system affordance, not a content read
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-30
 - **Date:** 2026-06-08
 - **Scope:** wiki-mcp
 - **Deciders:** Benjamin Jordan

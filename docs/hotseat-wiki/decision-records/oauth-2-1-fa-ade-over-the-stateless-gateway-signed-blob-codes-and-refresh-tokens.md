@@ -1,8 +1,9 @@
-# ADR-34: OAuth 2.1 façade over the stateless gateway — signed-blob codes and refresh tokens
+# OAuth 2.1 façade over the stateless gateway — signed-blob codes and refresh tokens
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-34
 - **Date:** 2026-06-12
 - **Scope:** wiki-server (auth gateway); wiki/auth-client; wiki-mirror; wiki-mcp transport
 - **Deciders:** Benjamin Jordan

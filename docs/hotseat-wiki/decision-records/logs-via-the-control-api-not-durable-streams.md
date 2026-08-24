@@ -1,8 +1,9 @@
-# ADR-27: Logs via the control API, not Durable Streams
+# Logs via the control API, not Durable Streams
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-27
 - **Date:** 2026-06-02
 - **Scope:** wiki-cli
 

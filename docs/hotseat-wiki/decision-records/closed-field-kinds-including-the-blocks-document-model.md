@@ -1,8 +1,9 @@
-# ADR-6: Closed field-kinds, including the `blocks` document model
+# Closed field-kinds, including the `blocks` document model
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-6
 - **Date:** 2026-06-03
 - **Scope:** wiki
 

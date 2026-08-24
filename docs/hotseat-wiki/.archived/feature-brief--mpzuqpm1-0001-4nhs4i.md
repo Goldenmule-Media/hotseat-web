@@ -1,4 +1,4 @@
-# Feature: wiki-ui interactive FSM transitions
+# wiki-ui interactive FSM transitions
 
 **Status:** shipped
 

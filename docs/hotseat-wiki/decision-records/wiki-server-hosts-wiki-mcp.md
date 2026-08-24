@@ -1,8 +1,9 @@
-# ADR-22: wiki-server hosts wiki-mcp
+# wiki-server hosts wiki-mcp
 
 **Status:** accepted
 
 ## Metadata
+- **Number:** ADR-22
 - **Date:** 2026-06-02
 - **Scope:** wiki-server
 
