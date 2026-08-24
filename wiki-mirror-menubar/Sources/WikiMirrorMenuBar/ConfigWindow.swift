@@ -8,6 +8,7 @@ import SwiftUI
 /// so a mirror started with `--config` elsewhere is still configured by the same window.
 struct ConfigWindow: View {
     @Bindable var store: MirrorStore
+    @Bindable var updates: UpdateController
     @State private var config = MirrorConfigFile()
     @State private var loadedFrom = ""
     @AppStorage(EmitterRow.clientBaseURLKey) private var clientBaseURL = EmitterRow.defaultClientBaseURL
@@ -168,7 +169,7 @@ struct ConfigWindow: View {
     // ── service ──────────────────────────────────────────────────────────────
 
     private var service: some View {
-        ServiceTab(store: store)
+        ServiceTab(store: store, updates: updates)
     }
 }
 
@@ -289,9 +290,11 @@ private struct EmitterRow: View {
 /// Install, inspect, and remove the launchd agent that keeps the mirror running.
 private struct ServiceTab: View {
     @Bindable var store: MirrorStore
+    @Bindable var updates: UpdateController
     @State private var mode = "source"
     @State private var installerDirectory = ""
     @State private var launchAtLogin = false
+    @State private var automaticUpdates = true
 
     var body: some View {
         // Scrolls for the same reason the Mirrors tab does: the window is resizable now, and
@@ -346,6 +349,22 @@ private struct ServiceTab: View {
 
                 PanelSection("This app") {
                     VStack(alignment: .leading, spacing: 8) {
+                        row("Version", updates.current.map(String.init(describing:)) ?? "unknown")
+                        HStack(spacing: 8) {
+                            Text("Updates").frame(width: 74, alignment: .leading).foregroundStyle(.secondary)
+                            Text(updateSummary)
+                            Spacer()
+                            Button("Check now") { Task { await updates.check(userInitiated: true) } }
+                                .disabled(updates.state == .checking || updates.state == .installing)
+                            if let update = updates.pending {
+                                Button("Install " + update.version.description) { Task { await updates.install(update) } }
+                                    .disabled(updates.state == .installing)
+                            }
+                        }
+                        .font(.caption)
+                        Toggle("Check for updates automatically", isOn: $automaticUpdates)
+                            .onChange(of: automaticUpdates) { _, on in updates.automaticallyChecks = on }
+                        Divider().padding(.vertical, 2)
                         Toggle("Show this app in the menu bar at login", isOn: $launchAtLogin)
                             .onChange(of: launchAtLogin) { _, enabled in setLaunchAtLogin(enabled) }
                         Text("The mirror itself runs from the launchd agent above — it keeps mirroring whether or not this app is open.")
@@ -365,6 +384,22 @@ private struct ServiceTab: View {
                 installerDirectory = info.installerDirectory ?? ""
             }
             launchAtLogin = SMAppService.mainApp.status == .enabled
+            automaticUpdates = updates.automaticallyChecks
+        }
+    }
+
+    /// One line describing where the updater has got to.
+    private var updateSummary: String {
+        switch updates.state {
+        case .checking: return "checking…"
+        case .installing: return "installing…"
+        case .available(let update): return "\(update.version) is available"
+        case .failed(let message): return message
+        case .upToDate, .idle:
+            guard let last = updates.lastCheckedAt else { return "not checked yet" }
+            let formatter = RelativeDateTimeFormatter()
+            formatter.unitsStyle = .full
+            return "up to date, checked \(formatter.localizedString(for: last, relativeTo: Date()))"
         }
     }
 

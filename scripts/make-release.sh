@@ -14,6 +14,8 @@ cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 REPO_ROOT="$PWD"
 VERSION="$(node -p "require('./wiki-mirror/package.json').version")"
 COMMIT="$(git rev-parse --short HEAD)"
+# Must stay in step with AppVersion.tagPrefix: the in-app updater filters releases by it, so a
+# release tagged anything else is invisible to every installed copy.
 TAG="wiki-mirror-v$VERSION"
 NAME="wiki-mirror-$VERSION-macos"
 OUT="$REPO_ROOT/build/$NAME"
@@ -29,7 +31,7 @@ npm run bundle -w wiki-mirror >/dev/null
 cp -R "$REPO_ROOT/wiki-mirror/build/wiki-mirror-portable" "$OUT/mirror"
 
 # 2. The app, universal so it runs on Intel too.
-(cd "$REPO_ROOT/wiki-mirror-menubar" && ./scripts/bundle-app.sh --universal >/dev/null)
+(cd "$REPO_ROOT/wiki-mirror-menubar" && ./scripts/bundle-app.sh --universal --version "$VERSION" >/dev/null)
 cp -R "$REPO_ROOT/wiki-mirror-menubar/build/WikiMirror.app" "$OUT/WikiMirror.app"
 
 # 3. The installer + what it is.
@@ -40,9 +42,14 @@ sed -e "s/@VERSION@/$VERSION/g" -e "s/@COMMIT@/$COMMIT/g" \
 
 ARCHIVE="$REPO_ROOT/build/$NAME.tar.gz"
 tar -czf "$ARCHIVE" -C "$REPO_ROOT/build" "$NAME"
+# Published beside the tarball so the in-app updater can tell a complete download from a truncated
+# one. It is an integrity check, NOT a signature: whoever can publish a release can publish a
+# matching checksum. The trust anchor is HTTPS to GitHub.
+(cd "$REPO_ROOT/build" && shasum -a 256 "$NAME.tar.gz" > "$NAME.tar.gz.sha256")
 
 echo
 echo "  $ARCHIVE"
+echo "  $ARCHIVE.sha256"
 echo "  $(du -h "$ARCHIVE" | cut -f1)  ·  app: $(file -b "$OUT/WikiMirror.app/Contents/MacOS/WikiMirror" | grep -o 'universal.*' || echo 'single-arch')"
 echo
 echo "  install on this Mac:  tar -xzf $ARCHIVE -C /tmp && /tmp/$NAME/install.sh"
@@ -53,9 +60,9 @@ if [ "$PUBLISH" = "1" ]; then
   echo "==> publishing $TAG"
   # `create` fails if the tag already exists; fall back to replacing the asset on it.
   if gh release view "$TAG" >/dev/null 2>&1; then
-    gh release upload "$TAG" "$ARCHIVE" --clobber
+    gh release upload "$TAG" "$ARCHIVE" "$ARCHIVE.sha256" --clobber
   else
-    gh release create "$TAG" "$ARCHIVE" \
+    gh release create "$TAG" "$ARCHIVE" "$ARCHIVE.sha256" \
       --title "wiki-mirror $VERSION" \
       --notes "Local Markdown mirror + macOS menu-bar console. Built from $COMMIT.
 

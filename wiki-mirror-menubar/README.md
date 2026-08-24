@@ -46,6 +46,28 @@ panel):
 Process-wide problems outrank per-workspace ones: an expired grant is one line saying so, not
 seven red workspaces pointing at the network.
 
+## Updating itself
+
+The app checks the repo's GitHub releases on launch and daily, and offers a one-click update: it
+downloads the release tarball, verifies it against the `.sha256` published beside it, unpacks it,
+and hands off to the release's own `install.sh` under `nohup` — which quits the app, replaces the
+bundle, and relaunches. Output lands in `~/Library/Logs/wiki-mirror/update.log`, because an
+install that fails after the app dies leaves nothing else to read.
+
+Three things worth knowing:
+
+- **It checks, it does not install.** Updating restarts the mirror service, and doing that
+  mid-edit without asking is not a courtesy.
+- **On a dev machine it updates only the app.** If the launchd job runs in `source` or `dist`
+  mode, installing the mirror half would repoint the service at a portable copy and orphan the
+  checkout it was built to track, so the hand-off passes `--app-only`.
+- **The checksum is integrity, not authenticity.** It catches a truncated or corrupted download.
+  Whoever can publish a release can publish a matching checksum; the trust anchor is HTTPS to
+  GitHub plus an allow-list of GitHub hosts for the download URL.
+
+Releases are filtered by the `wiki-mirror-v` tag prefix rather than asking GitHub for "the latest
+release", so a release for anything else in the same repo cannot hijack the update.
+
 ## Layout
 
 | File | Role |
@@ -54,6 +76,9 @@ seven red workspaces pointing at the network.
 | `MirrorStore.swift` | the 5s poll, the launchd state, and the one-word health verdict |
 | `LaunchAgent.swift` | reads the installed plist; install / restart / uninstall / sign in |
 | `MirrorConfig.swift` | reads and rewrites the config file, preserving unknown keys |
+| `UpdateChecker.swift` | finds, verifies and unpacks a newer release |
+| `UpdateController.swift` | when to check, and the hand-off to `install.sh` |
+| `AppVersion.swift` | dotted-version parsing and ordering |
 | `Tests/` | round-trip + plist-inference tests (`swift test`) |
 | `MenuContent.swift` | the panel |
 | `ConfigWindow.swift` | the emitter editor and the Service tab |

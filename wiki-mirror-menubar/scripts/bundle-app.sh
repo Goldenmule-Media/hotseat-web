@@ -9,24 +9,34 @@
 #   ./scripts/bundle-app.sh              # build into build/WikiMirror.app
 #   ./scripts/bundle-app.sh --install    # …and copy it to /Applications, then launch it
 #   ./scripts/bundle-app.sh --universal  # arm64 + x86_64, for a build other Macs will run
+#   ./scripts/bundle-app.sh --version X  # stamp a version (default: wiki-mirror's package.json)
 #
 set -euo pipefail
 
 APP_NAME="WikiMirror"
 BUNDLE_ID="com.thegoldenmule.wiki-mirror-menubar"
-VERSION="0.1.0"
 INSTALL=0
 UNIVERSAL=0
-for arg in "$@"; do
-  case "$arg" in
-    --install) INSTALL=1 ;;
-    --universal) UNIVERSAL=1 ;;
-    *) echo "unknown argument \"$arg\"" >&2; exit 1 ;;
+VERSION=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --install) INSTALL=1; shift ;;
+    --universal) UNIVERSAL=1; shift ;;
+    --version) [ $# -ge 2 ] || { echo "--version needs a value" >&2; exit 1; }; VERSION="$2"; shift 2 ;;
+    --version=*) VERSION="${1#*=}"; shift ;;
+    *) echo "unknown argument \"$1\"" >&2; exit 1 ;;
   esac
 done
 
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 OUT="build/$APP_NAME.app"
+
+# ONE version for the app and the mirror: they ship in one artifact and update together, and the
+# updater compares the bundle's version against the release tag. A second hardcoded copy here
+# would drift and either offer an update forever or never offer one at all.
+if [ -z "$VERSION" ]; then
+  VERSION="$(node -p "require('../wiki-mirror/package.json').version" 2>/dev/null || echo "0.0.0")"
+fi
 
 # A machine-local build targets this Mac; a release build has to run on Intel too.
 ARCH_FLAGS=()

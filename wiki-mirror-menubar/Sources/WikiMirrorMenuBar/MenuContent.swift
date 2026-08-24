@@ -5,6 +5,7 @@ import SwiftUI
 /// handful of things you actually do to it.
 struct MenuContent: View {
     @Bindable var store: MirrorStore
+    @Bindable var updates: UpdateController
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -13,6 +14,7 @@ struct MenuContent: View {
             Divider().padding(.vertical, 8)
             workspaces
             Divider().padding(.vertical, 8)
+            updateBanner
             actions
                 // Menu rows highlight nearly edge-to-edge; pull them back out of the panel's
                 // content inset so the hover fill doesn't sit in a gutter.
@@ -62,6 +64,27 @@ struct MenuContent: View {
         }
     }
 
+    /// An update, when there is one, sits ABOVE the actions: it is the one thing here that is
+    /// news rather than a control.
+    @ViewBuilder
+    private var updateBanner: some View {
+        if let update = updates.pending {
+            MenuRow("Update to " + update.version.description, systemImage: "arrow.down.circle", enabled: !installing) {
+                Task { await updates.install(update) }
+            }
+            .padding(.horizontal, -4)
+            Divider().padding(.vertical, 6)
+        } else if installing {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Installing the update…").font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.bottom, 6)
+        }
+    }
+
+    private var installing: Bool { updates.state == .installing }
+
     /// Actions as full-width menu rows rather than a grid of bordered buttons.
     ///
     /// This is a menu, not a dialog: bordered buttons wrapped into ragged rows, sized to their
@@ -81,6 +104,13 @@ struct MenuContent: View {
                 enabled: FileManager.default.fileExists(atPath: LaunchAgent.logPath)
             ) {
                 NSWorkspace.shared.open(URL(fileURLWithPath: LaunchAgent.logPath))
+            }
+            MenuRow(
+                "Check for Updates…",
+                systemImage: "sparkles",
+                enabled: updates.state != .checking && !installing
+            ) {
+                Task { await updates.check(userInitiated: true) }
             }
             MenuRow("Configure…", systemImage: "gearshape", shortcut: ",") { openConfiguration() }
 

@@ -10,10 +10,11 @@ struct WikiMirrorApp: App {
     static let configWindowID = "mirror-config"
 
     @State private var store = MirrorStore()
+    @State private var updates = UpdateController()
 
     var body: some Scene {
         MenuBarExtra {
-            MenuContent(store: store)
+            MenuContent(store: store, updates: updates)
         } label: {
             // Menu-bar glyphs render monochrome, so state is carried by SHAPE, not color.
             Image(systemName: store.health.symbol)
@@ -22,15 +23,19 @@ struct WikiMirrorApp: App {
         .menuBarExtraStyle(.window)
 
         Window("Wiki Mirror", id: Self.configWindowID) {
-            ConfigWindow(store: store)
+            ConfigWindow(store: store, updates: updates)
                 .onAppear { store.start() }
         }
         .windowResizability(.contentMinSize)
     }
 
     init() {
-        // The poll has to run whether or not the window was ever opened.
+        // Both have to run whether or not the window was ever opened.
         let store = self.store
-        Task { @MainActor in store.start() }
+        let updates = self.updates
+        Task { @MainActor in
+            store.start()
+            updates.start()
+        }
     }
 }

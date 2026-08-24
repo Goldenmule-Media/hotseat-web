@@ -240,7 +240,10 @@ its own. Full surface: [`architecture/wiki-server.md`](docs/hotseat-wiki/archite
   macOS 14+ machine with Node 20+ and nothing else (no repo, no npm, no Xcode). The app is ad-hoc
   signed rather than notarized, so the installer clears the download quarantine on the files it
   installs; without that macOS refuses to open it at all. `--publish` attaches the tarball to a
-  GitHub release (**the repo is public — that publishes it to the world**).
+  GitHub release (**the repo is public — that publishes it to the world**). The installed app
+  self-updates from those releases: it filters them by the **`wiki-mirror-v` tag prefix**, so the
+  tag `make-release.sh` builds and `AppVersion.tagPrefix` must stay in step, and the app's version
+  comes from `wiki-mirror/package.json` — bump that to ship an update.
 - **When the docs stop moving, the mirror is telling you why.** `curl localhost:4440/_mirror/status` reports
   `auth` (an expired `~/.wiki` grant is the usual culprit — `wiki-mirror login`, or the app's Sign in…),
   `server` (host reachable / 401), and per workspace `connected` + `lastReconcileError` + `nextRetryAt`. A
