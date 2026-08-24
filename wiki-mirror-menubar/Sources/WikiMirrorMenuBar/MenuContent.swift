@@ -95,8 +95,12 @@ struct MenuContent: View {
             MenuRow("Restart", systemImage: "arrow.clockwise", enabled: canControlAgent) {
                 Task { await store.restart() }
             }
-            MenuRow("Sign in…", systemImage: "person.crop.circle", enabled: canControlAgent) {
-                Task { await store.signIn() }
+            // Only when signing in is the useful action: an always-present "Sign in…" under a
+            // panel that already says you are signed in reads as a prompt to do it again.
+            if store.needsSignIn {
+                MenuRow("Sign in…", systemImage: "person.crop.circle.badge.exclamationmark", enabled: canControlAgent) {
+                    Task { await store.signIn() }
+                }
             }
             MenuRow(
                 "Open logs",

@@ -187,6 +187,40 @@ final class MirrorStore {
         }
     }
 
+    /// How the mirror is authenticating right now, as one of four states the UI can act on.
+    enum Account: Equatable {
+        /// No mirror is answering, so its credentials cannot be read.
+        case unknown
+        /// An open server, or a machine that has never signed in.
+        case signedOut
+        /// A stored grant, with the login it belongs to.
+        case signedIn(user: String?, refreshExpiresAt: Date?)
+        /// A stored grant whose refresh window has closed — only a new sign-in fixes it.
+        case expired(user: String?)
+        /// A static token from the config file; there is nothing to sign out of.
+        case staticToken
+    }
+
+    var account: Account {
+        guard let auth = status?.auth else { return .unknown }
+        switch auth.mode {
+        case "token": return .staticToken
+        case "oauth":
+            if auth.expired { return .expired(user: auth.user) }
+            let expiry = auth.refreshTokenExpiresAt.flatMap { $0 > 0 ? Date(timeIntervalSince1970: $0 / 1000) : nil }
+            return .signedIn(user: auth.user, refreshExpiresAt: expiry)
+        default: return .signedOut
+        }
+    }
+
+    /// Whether signing in is the useful action right now — the ONLY reason to offer it.
+    var needsSignIn: Bool {
+        switch account {
+        case .signedOut, .expired: return true
+        case .signedIn, .staticToken, .unknown: return false
+        }
+    }
+
     func signIn() async {
         await perform("Waiting for the browser…") {
             try await LaunchAgent.signIn()
@@ -194,6 +228,16 @@ final class MirrorStore {
             // makes that immediate instead of waiting for the next probe recovery.
             try? await LaunchAgent.restart()
             return "Signed in."
+        }
+    }
+
+    /// Forget the stored grant. The running mirror holds its token in memory until the engine is
+    /// rebuilt, so this restarts too — otherwise "signed out" would keep mirroring.
+    func signOut() async {
+        await perform("Signing out…") {
+            try await LaunchAgent.signOut()
+            try? await LaunchAgent.restart()
+            return "Signed out."
         }
     }
 

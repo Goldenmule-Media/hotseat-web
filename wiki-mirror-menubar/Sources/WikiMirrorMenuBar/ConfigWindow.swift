@@ -50,6 +50,10 @@ struct ConfigWindow: View {
                         }
                     }
 
+                    PanelSection("Account") {
+                        AccountRow(store: store)
+                    }
+
                     PanelSection(
                         "Mirrored workspaces",
                         boxed: false,
@@ -510,5 +514,91 @@ private struct RevealButton: View {
         // A path that does not exist yet (no log until the agent has run, no config until the
         // first save) would open the user's home folder instead, which looks like a bug.
         .disabled(path.isEmpty || !FileManager.default.fileExists(atPath: path))
+    }
+}
+
+/// Who the mirror is signed in as, and the one action that changes it.
+///
+/// The mirror owns its credentials, so both buttons shell out to its own `login` / `logout` —
+/// this app never reads or writes `~/.wiki/credentials.json`.
+private struct AccountRow: View {
+    @Bindable var store: MirrorStore
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: symbol).foregroundStyle(tint).frame(width: 16)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(headline)
+                if let detail {
+                    Text(detail).font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            action
+        }
+        .font(.caption)
+    }
+
+    @ViewBuilder
+    private var action: some View {
+        switch store.account {
+        case .signedIn:
+            Button("Sign out") { Task { await store.signOut() } }
+                .disabled(store.busy != nil)
+        case .signedOut, .expired:
+            Button("Sign in…") { Task { await store.signIn() } }
+                .disabled(store.busy != nil || !store.agent.installed)
+        case .staticToken, .unknown:
+            EmptyView()
+        }
+    }
+
+    private var symbol: String {
+        switch store.account {
+        case .signedIn: return "person.crop.circle.badge.checkmark"
+        case .expired: return "person.crop.circle.badge.exclamationmark"
+        case .staticToken: return "key"
+        case .signedOut: return "person.crop.circle"
+        case .unknown: return "questionmark.circle"
+        }
+    }
+
+    private var tint: Color {
+        switch store.account {
+        case .signedIn: return .green
+        case .expired: return .red
+        case .signedOut, .staticToken, .unknown: return .secondary
+        }
+    }
+
+    private var headline: String {
+        switch store.account {
+        case .signedIn(let user, _): return user.map { "Signed in as \($0)" } ?? "Signed in"
+        case .expired(let user): return user.map { "Sign-in expired (\($0))" } ?? "Sign-in expired"
+        case .staticToken: return "Using a token from the config file"
+        case .signedOut: return "Not signed in"
+        case .unknown: return "Unknown"
+        }
+    }
+
+    private var detail: String? {
+        switch store.account {
+        case .signedIn(_, let expiry):
+            let host = store.host
+            guard let expiry else { return "at \(host)" }
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .none
+            // The ACCESS token renews itself; this is the date the whole sign-in lapses.
+            return "at \(host) · sign-in valid until \(formatter.string(from: expiry))"
+        case .expired:
+            return "Sign in again — the mirror can't reach \(store.host) until you do."
+        case .staticToken:
+            return "Remove the `token` key from the config file to sign in instead."
+        case .signedOut:
+            return store.status?.auth?.server ?? store.host
+        case .unknown:
+            return "The mirror isn't answering, so its credentials can't be read."
+        }
     }
 }

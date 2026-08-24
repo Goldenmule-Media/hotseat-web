@@ -29,13 +29,18 @@ struct LaunchAgentInfo {
 
     /// The command that signs this machine in, so the app never hardcodes a runtime.
     ///
-    /// `login` must sit immediately AFTER the script, because the mirror only takes the login
+    /// The subcommand must sit immediately AFTER the script, because the mirror only takes that
     /// path when it is `argv[0]`. Appending it at the end (past `--models-dir …`) silently starts
-    /// a SECOND mirror instead of signing in.
-    var loginCommand: [String]? {
+    /// a SECOND mirror instead.
+    var loginCommand: [String]? { command("login") }
+
+    /// The command that forgets this machine's stored grant.
+    var logoutCommand: [String]? { command("logout") }
+
+    private func command(_ subcommand: String) -> [String]? {
         guard let scriptIndex else { return nil }
         var command = programArguments
-        command.insert("login", at: scriptIndex + 1)
+        command.insert(subcommand, at: scriptIndex + 1)
         return command
     }
 }
@@ -116,20 +121,29 @@ enum LaunchAgent {
     /// Run the mirror's own `login` command and wait for it (it opens a browser and serves a
     /// loopback callback). The running mirror picks the new grant up on its next self-restart.
     static func signIn() async throws {
+        try await run(subcommand: "login") { $0.loginCommand }
+    }
+
+    /// Run the mirror's own `logout`. Credentials belong to the mirror — an app that rewrote
+    /// ~/.wiki/credentials.json itself would be a second writer of a file it does not own.
+    static func signOut() async throws {
+        try await run(subcommand: "logout") { $0.logoutCommand }
+    }
+
+    private static func run(subcommand: String, _ pick: (LaunchAgentInfo) -> [String]?) async throws {
         guard let info = info() else {
             throw ShellError.failed(
-                command: "login",
-                result: ShellResult(status: -1, stdout: "", stderr: "No mirror is installed to sign in with.")
+                command: subcommand,
+                result: ShellResult(status: -1, stdout: "", stderr: "No mirror is installed.")
             )
         }
-        guard let command = info.loginCommand, let executable = command.first else {
+        guard let command = pick(info), let executable = command.first else {
             throw ShellError.failed(
-                command: "login",
+                command: subcommand,
                 result: ShellResult(
                     status: -1,
                     stdout: "",
-                    stderr: "Could not tell which program the agent runs, so there is nothing to sign in with. "
-                        + "Run `wiki-mirror login` yourself."
+                    stderr: "Could not tell which program the agent runs. Run `wiki-mirror \(subcommand)` yourself."
                 )
             )
         }

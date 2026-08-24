@@ -128,3 +128,32 @@ final class UpdateCheckerTests: XCTestCase {
         }
     }
 }
+
+/// The `login` / `logout` subcommand must land immediately after the script: the mirror only takes
+/// those paths when the word is `argv[0]`, so appending it past `--models-dir …` would silently
+/// start a second mirror instead.
+final class LaunchAgentSubcommandTests: XCTestCase {
+    private let portable = LaunchAgentInfo(
+        programArguments: ["/bin/node", "/art/wiki-mirror.mjs", "--models=", "--models-dir", "/art/models"],
+        workingDirectory: "/art"
+    )
+
+    func testLogoutGoesBeforeTheFlags() {
+        XCTAssertEqual(
+            portable.logoutCommand,
+            ["/bin/node", "/art/wiki-mirror.mjs", "logout", "--models=", "--models-dir", "/art/models"]
+        )
+    }
+
+    func testLoginAndLogoutDifferOnlyByTheSubcommand() throws {
+        let login = try XCTUnwrap(portable.loginCommand)
+        let logout = try XCTUnwrap(portable.logoutCommand)
+        XCTAssertEqual(login.filter { $0 != "login" }, logout.filter { $0 != "logout" })
+    }
+
+    func testAnUnrecognizableJobOffersNeither() {
+        let odd = LaunchAgentInfo(programArguments: ["/usr/bin/env", "wiki-mirror"], workingDirectory: nil)
+        XCTAssertNil(odd.loginCommand)
+        XCTAssertNil(odd.logoutCommand)
+    }
+}

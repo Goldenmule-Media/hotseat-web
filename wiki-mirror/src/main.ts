@@ -20,7 +20,7 @@
 import { createWiki } from "wiki";
 import type { IWiki, IWorkspaceSummary, WorkspaceId } from "wiki";
 import { AttachmentClient } from "wiki/attachments";
-import { loginLoopback, resolveAuthorization } from "wiki/auth-client";
+import { CredentialsStore, defaultCredentialsPath, loginLoopback, resolveAuthorization } from "wiki/auth-client";
 import { Registry } from "wiki/registry";
 import type { IPageType } from "wiki/authoring";
 
@@ -338,6 +338,19 @@ export async function main(argv = process.argv.slice(2), env = process.env): Pro
     const loginConfig = resolveConfig(argv.slice(1), env);
     const credentials = await loginLoopback({ serverUrl: loginConfig.streamBaseUrl, clientName: "wiki-mirror" });
     logger.info("wiki-mirror: signed in", { server: new URL(loginConfig.streamBaseUrl).origin, user: credentials.user });
+    return;
+  }
+  // `wiki-mirror logout [--stream-url …]`: forget the stored grant for the resolved server.
+  // The running mirror keeps the token it already holds in memory until it rebuilds its engine,
+  // so a caller that wants sign-out to take effect NOW restarts it afterwards.
+  if (argv[0] === "logout") {
+    const logoutConfig = resolveConfig(argv.slice(1), env);
+    const origin = new URL(logoutConfig.streamBaseUrl).origin;
+    // Resolve the path from the INJECTED env, not process.env: `main` takes an env, and a
+    // credentials store that ignored it would read a different file than the rest of this run.
+    const existed = new CredentialsStore(defaultCredentialsPath(env)).delete(logoutConfig.streamBaseUrl);
+    if (existed) logger.info("wiki-mirror: signed out", { server: origin });
+    else logger.warn("wiki-mirror: nothing to sign out of", { server: origin });
     return;
   }
   const config = resolveConfig(argv, env);

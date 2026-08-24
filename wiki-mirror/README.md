@@ -118,11 +118,16 @@ Against an auth-gated server the mirror needs its own credentials:
 
 ```sh
 npm run start -w wiki-mirror -- login       # or the app's Sign in…
+npm run start -w wiki-mirror -- logout      # or Configure → Account → Sign out
 ```
 
-That runs a browser sign-in once and stores a self-refreshing grant at `~/.wiki/credentials.json`
-(shared with `migrate-workspace`). A running mirror picks a new grant up on its next self-restart —
-no token copying, no kill.
+`login` runs a browser sign-in once and stores a self-refreshing grant at
+`~/.wiki/credentials.json` (shared with `migrate-workspace`). A running mirror picks a new grant up
+on its next self-restart — no token copying, no kill.
+
+`logout` forgets the grant for that server and leaves every other server's alone. The running
+mirror holds its token in memory until the engine rebuilds, so restart it (the app does) or
+sign-out won't take effect until it does.
 
 ## When the docs stop moving
 

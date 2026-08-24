@@ -90,6 +90,7 @@ release", so a release for anything else in the same repo cannot hijack the upda
 | `MirrorStore.swift` | the 5s poll, the launchd state, and the one-word health verdict |
 | `LaunchAgent.swift` | reads the installed plist; install / restart / uninstall / sign in |
 | `MirrorConfig.swift` | reads and rewrites the config file, preserving unknown keys |
+| `ConfigWindow.swift` → `AccountRow` | who the mirror is signed in as, and sign in / sign out |
 | `UpdateChecker.swift` | finds, verifies and unpacks a newer release |
 | `UpdateController.swift` | when to check, and the hand-off to `install.sh` |
 | `AppVersion.swift` | dotted-version parsing and ordering |
@@ -106,6 +107,9 @@ Two details worth keeping:
 - **Installing always shells out to `wiki-mirror/scripts/install-agent.sh`.** An app that wrote
   its own plist would drift from the script the moment either changed; the app derives the
   runtime (source / dist / portable) by reading the installed plist back.
+- **The app holds no credentials.** Sign in and sign out both shell out to the mirror's own
+  `login` / `logout`; nothing here reads or writes `~/.wiki/credentials.json`. Sign-out restarts
+  the agent, because the running mirror keeps its token in memory until the engine rebuilds.
 - **`login` is inserted right after the script, not appended.** The mirror only takes the login
   path when `login` is `argv[0]`, so appending it past `--models-dir …` starts a second mirror
   instead of signing in — and reports success.
