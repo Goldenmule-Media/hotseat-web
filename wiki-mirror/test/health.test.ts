@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { arg, definePageType, t, z, zodSchema } from "wiki";
-import type { IWiki, IWorkspaceHandle } from "wiki";
+import type { IWiki, IWorkspaceHandle, IWorkspaceSummary } from "wiki";
 import { Registry } from "wiki/registry";
 import { startTestServer, wikiOn } from "wiki/testing";
 
@@ -94,17 +94,28 @@ describe("wiki-mirror — local health endpoint", () => {
   }
 
   /** Start a health server over `mirrors` on an ephemeral port; registered for teardown. */
-  async function makeHealth(mirrors: readonly WorkspaceMirror[]): Promise<{ url: string }> {
+  async function makeHealth(
+    mirrors: readonly WorkspaceMirror[],
+    extra: { catalog?: () => Promise<readonly IWorkspaceSummary[]>; nameOf?: (id: string) => string | undefined } = {},
+  ): Promise<{ url: string }> {
     const health = await startHealthServer({
       host: "127.0.0.1",
       port: 0,
       namespace: "test",
       streamBaseUrl: url,
-      mirrors,
+      sources: mirrors,
+      ...extra,
       logger: silentLogger,
     });
     cleanup.push(() => health.stop());
     return health;
+  }
+
+  /** A second read-only wiki on the same server — the catalog source for the health endpoint. */
+  function catalogWiki(): IWiki {
+    const w = wikiOn(url, PAGE_TYPES, { namespace: "test" });
+    cleanup.push(() => w.close());
+    return w;
   }
 
   async function syncUntil(m: WorkspaceMirror, fn: () => Promise<boolean>, timeoutMs = 10_000): Promise<void> {
@@ -143,6 +154,11 @@ describe("wiki-mirror — local health endpoint", () => {
     expect(body.namespace).toBe("test");
     expect(body.workspaces).toHaveLength(1);
     expect(body.workspaces[0]).toMatchObject({ workspaceId: writer.id, root, appliedVersion: head, connected: true });
+    // The process/credentials block a status client needs to explain itself.
+    expect(body.pid).toBe(process.pid);
+    expect(body.configPath).toBeNull();
+    expect(body.auth).toMatchObject({ mode: "none", expired: false });
+    expect(body.server).toMatchObject({ reachable: true });
   });
 
   it("a healthy reconcile sets lastReconcileAt and clears lastReconcileError", async () => {
@@ -210,5 +226,119 @@ describe("wiki-mirror — local health endpoint", () => {
 
     await running.close();
     await expect(fetch(`${running.health.url}/_mirror/health`)).rejects.toThrow();
+  });
+
+  it("merges the catalog name into each workspace entry", async () => {
+    const mirror = await makeMirror(await freshRoot());
+    await mirror.start();
+    const health = await makeHealth([mirror], { nameOf: (id) => (id === writer.id ? "Docs" : undefined) });
+
+    const body = await (await fetch(`${health.url}/_mirror/status`)).json();
+    expect(body.workspaces[0].name).toBe("Docs");
+  });
+
+  it("GET /_mirror/workspaces returns the catalog, marking which entries this machine mirrors", async () => {
+    const other = await writerWiki.createWorkspace({ name: "Other" });
+    const root = await freshRoot();
+    const mirror = await makeMirror(root);
+    await mirror.start();
+    const wiki = catalogWiki();
+    const health = await makeHealth([mirror], { catalog: () => wiki.listWorkspaces() });
+
+    const res = await fetch(`${health.url}/_mirror/workspaces`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("access-control-allow-origin")).toBe("*");
+    const body = await res.json();
+    expect(body.workspaces).toEqual(
+      expect.arrayContaining([
+        { id: writer.id, name: "Docs", status: "active", mirroredRoot: root },
+        { id: other.id, name: "Other", status: "active", mirroredRoot: null },
+      ]),
+    );
+  });
+
+  it("GET /_mirror/workspaces answers 503 when there is no catalog source", async () => {
+    const health = await makeHealth([]);
+    const res = await fetch(`${health.url}/_mirror/workspaces`);
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe("catalog_unavailable");
+  });
+
+  it("reports an unreachable stream host as degraded WITHOUT failing the request", async () => {
+    const mirror = await makeMirror(await freshRoot());
+    await mirror.start();
+    const health = await startHealthServer({
+      host: "127.0.0.1",
+      port: 0,
+      namespace: "test",
+      streamBaseUrl: url,
+      sources: [mirror],
+      server: () => ({ reachable: false, lastProbeAt: 1, lastError: "connect ECONNREFUSED", unauthorized: false }),
+      logger: silentLogger,
+    });
+    cleanup.push(() => health.stop());
+
+    // A non-2xx here would tell every client "no mirror is running", which is a lie.
+    const res = await fetch(`${health.url}/_mirror/status`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.status).toBe("degraded");
+    expect(body.server).toMatchObject({ reachable: false, lastError: "connect ECONNREFUSED" });
+    // An unreachable host means the tail cannot be trusted, whatever the loop believes.
+    expect(body.workspaces[0].connected).toBe(false);
+  });
+
+  it("reports an expired grant as degraded, naming the user, and never leaks a token", async () => {
+    const health = await startHealthServer({
+      host: "127.0.0.1",
+      port: 0,
+      namespace: "test",
+      streamBaseUrl: url,
+      sources: [],
+      auth: () => ({
+        mode: "oauth" as const,
+        server: url,
+        user: "thegoldenmule",
+        accessTokenExpiresAt: 1,
+        refreshTokenExpiresAt: 2,
+        expired: true,
+      }),
+      logger: silentLogger,
+    });
+    cleanup.push(() => health.stop());
+
+    const raw = await (await fetch(`${health.url}/_mirror/status`)).text();
+    expect(raw).not.toMatch(/Bearer|accessToken"|refreshToken"/);
+    const body = JSON.parse(raw);
+    expect(body.status).toBe("degraded");
+    expect(body.auth).toMatchObject({ mode: "oauth", user: "thegoldenmule", expired: true });
+  });
+
+  it("a workspace whose boot failed stays LISTED as disconnected with its reason, not omitted", async () => {
+    // An empty registry can't fold this workspace, so the emitter never starts. Omitting it
+    // (the old behavior) made a broken emitter indistinguishable from an unconfigured one.
+    await writer.createPage("note", { title: "X", parentId: null });
+    const root = await freshRoot();
+    const running = await startMirror(
+      {
+        streamBaseUrl: url,
+        namespace: "test",
+        models: [],
+        emitters: [{ workspaceId: writer.id, root }],
+        healthHost: "127.0.0.1",
+        healthPort: 0,
+      },
+      silentLogger,
+    );
+    cleanup.push(() => running.close());
+
+    const body = await (await fetch(`${running.health.url}/_mirror/status`)).json();
+    expect(body.status).toBe("degraded");
+    expect(body.workspaces).toHaveLength(1);
+    expect(body.workspaces[0]).toMatchObject({ workspaceId: writer.id, root, connected: false });
+    // wiki-ui checks `lastReconcileError !== null` strictly: an undefined here renders "undefined".
+    expect(typeof body.workspaces[0].lastReconcileError).toBe("string");
+    expect(body.workspaces[0].attempts).toBeGreaterThan(0);
+    expect(running.mirrors).toHaveLength(0); // listed, but no tail loop is running
   });
 });

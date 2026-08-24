@@ -32,12 +32,27 @@ export interface IMirrorConfig {
   readonly namespace: string;
   /** Model-bundle specifiers to `import()` into the engine `Registry`. */
   readonly models: readonly string[];
+  /**
+   * A directory of model bundles to discover (one level deep — a `src`-style tree of
+   * `<bundle>/index.ts`, or a flat built `dist` of `<bundle>.js`), mirroring wiki-server's
+   * `--models-dir`. This is what makes a PORTABLE mirror possible: a copied folder can carry
+   * its schema as loose files instead of resolving bare specifiers through node_modules.
+   */
+  readonly modelsDir?: string;
   /** The workspace → absolute-root mirrors; one tail loop each. */
   readonly emitters: readonly IEmitterEntry[];
   /** Host the local health endpoint binds to (loopback by default — unauthenticated, local-trust). */
   readonly healthHost: string;
   /** Port the local health endpoint binds to (fixed default {@link DEFAULT_HEALTH_PORT}, NOT derived from the stream port). */
   readonly healthPort: number;
+  /** How often to probe the stream host for reachability + tail pace (ms). */
+  readonly probeIntervalMs?: number;
+  /**
+   * The config file this run resolved (whether or not it existed) — echoed over the health
+   * endpoint so a client edits the same file this process read. Optional so hand-built configs
+   * (tests, embedders) need not invent one; `resolveConfig` always sets it.
+   */
+  readonly configPath?: string;
   /**
    * Optional bearer token sent as `Authorization: Bearer <token>` on every stream request —
    * a wiki-server session token (copy from the wiki-ui account menu), used when the server
@@ -59,10 +74,12 @@ interface IMirrorConfigFile {
   streamBaseUrl?: string;
   namespace?: string;
   models?: string[];
+  modelsDir?: string;
   emitters?: { workspaceId?: string; root?: string }[];
   token?: string;
   healthHost?: string;
   healthPort?: number;
+  probeIntervalMs?: number;
 }
 
 export const DEFAULT_CONFIG_FILENAME = "wiki-mirror.config.json";
@@ -151,11 +168,25 @@ export function resolveConfig(
     (file.healthPort !== undefined ? String(file.healthPort) : undefined);
   const healthPort = healthPortRaw === undefined ? DEFAULT_HEALTH_PORT : parsePort(healthPortRaw);
 
+  const probeIntervalRaw = flags["probe-interval-ms"] ?? env.WIKI_MIRROR_PROBE_INTERVAL_MS;
+  const probeIntervalMs =
+    probeIntervalRaw !== undefined ? parsePositiveInt(probeIntervalRaw, "--probe-interval-ms") : file.probeIntervalMs;
+
   const modelsRaw = flags["models"] ?? env.WIKI_MIRROR_MODELS;
   const models =
     modelsRaw !== undefined
       ? modelsRaw.split(",").map((s) => s.trim()).filter((s) => s.length > 0)
       : (file.models ?? []);
+
+  // Like an emitter root: a flag/env path resolves against cwd, a file entry against the
+  // config file's own directory, so a portable folder's relative "./models" always works.
+  const modelsDirRaw = flags["models-dir"] ?? env.WIKI_MIRROR_MODELS_DIR;
+  const modelsDir =
+    modelsDirRaw !== undefined
+      ? resolvePath(cwd, modelsDirRaw)
+      : file.modelsDir !== undefined
+        ? resolvePath(configDir, file.modelsDir)
+        : undefined;
 
   // ── emitters: file entries (root base = config dir) + one optional flag/env entry (base = cwd) ──
   const raw: { workspaceId?: string; root?: string; base: string }[] = (file.emitters ?? []).map((e) => ({
@@ -200,12 +231,24 @@ export function resolveConfig(
     streamBaseUrl,
     namespace,
     models,
+    ...(modelsDir !== undefined ? { modelsDir } : {}),
     emitters,
     token,
     healthHost,
     healthPort,
+    ...(probeIntervalMs !== undefined ? { probeIntervalMs } : {}),
+    configPath,
     configWasExplicit: explicitConfig !== undefined,
   };
+}
+
+/** Parse a positive integer flag value. Fail loud otherwise. */
+function parsePositiveInt(value: string, what: string): number {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new Error(`wiki-mirror: invalid ${what} ${JSON.stringify(value)} (expected a positive integer)`);
+  }
+  return n;
 }
 
 /** Parse a port (`--health-port` / env / file): an integer in 0–65535 (0 = auto-assign). Fail loud otherwise. */

@@ -146,4 +146,37 @@ describe("wiki-mirror config resolution", () => {
     expect(() => resolveConfig(["--health-port", "abc"], env, dir)).toThrow(/invalid health port/);
     expect(() => resolveConfig(["--health-port", "99999"], env, dir)).toThrow(/invalid health port/);
   });
+
+  it("echoes the config path it resolved, so a client edits the file this process read", () => {
+    expect(resolveConfig([], env, dir).configPath).toBe(join(dir, ".wiki", "wiki-mirror.config.json"));
+    const explicit = join(dir, "elsewhere.json");
+    writeFileSync(explicit, JSON.stringify({ emitters: [] }), "utf8");
+    expect(resolveConfig(["--config", explicit], env, dir).configPath).toBe(explicit);
+  });
+
+  it("resolves modelsDir flag → env → file, absolute-izing it (file base = config dir, flag base = cwd)", () => {
+    expect(resolveConfig([], env, dir).modelsDir).toBeUndefined();
+    writeConfig({ modelsDir: "bundles", emitters: [] });
+    expect(resolveConfig([], env, dir).modelsDir).toBe(join(dir, ".wiki", "bundles"));
+    const env2 = { ...env, WIKI_MIRROR_MODELS_DIR: "from-env" };
+    expect(resolveConfig([], env2, dir).modelsDir).toBe(join(dir, "from-env"));
+    expect(resolveConfig(["--models-dir", "from-flag"], env2, dir).modelsDir).toBe(join(dir, "from-flag"));
+  });
+
+  it("keeps --models and --models-dir independent (both feed the registry)", () => {
+    writeConfig({ models: ["a"], modelsDir: "/bundles", emitters: [] });
+    const cfg = resolveConfig(["--models", "x,y"], env, dir);
+    expect(cfg.models).toEqual(["x", "y"]);
+    expect(cfg.modelsDir).toBe("/bundles");
+  });
+
+  it("resolves the probe interval flag → env → file and rejects a non-positive value", () => {
+    expect(resolveConfig([], env, dir).probeIntervalMs).toBeUndefined();
+    writeConfig({ probeIntervalMs: 15_000, emitters: [] });
+    expect(resolveConfig([], env, dir).probeIntervalMs).toBe(15_000);
+    const env2 = { ...env, WIKI_MIRROR_PROBE_INTERVAL_MS: "20000" };
+    expect(resolveConfig([], env2, dir).probeIntervalMs).toBe(20_000);
+    expect(resolveConfig(["--probe-interval-ms", "5000"], env2, dir).probeIntervalMs).toBe(5_000);
+    expect(() => resolveConfig(["--probe-interval-ms", "0"], env, dir)).toThrow(/positive integer/);
+  });
 });

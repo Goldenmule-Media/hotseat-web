@@ -30,6 +30,16 @@ export interface MirrorWorkspaceStatus {
   readonly lastReconcileError: string | null;
   /** Whether the loop is subscribed to (tailing) the live stream. */
   readonly connected: boolean;
+  /** Display name from the workspace catalog; absent when the catalog could not be read. */
+  readonly name?: string;
+  /** When a not-yet-started emitter will be re-attempted (epoch ms); null/absent while running. */
+  readonly nextRetryAt?: number | null;
+  /** Consecutive start attempts since the last success (0 once running). */
+  readonly attempts?: number;
+  /** The stream host moved ahead of this mirror and it never caught up (set by the probe). */
+  readonly stuck?: boolean;
+  /** Epoch ms this mirror was first seen behind the stream host, else null. */
+  readonly behindSince?: number | null;
 }
 
 export class WorkspaceMirror {
