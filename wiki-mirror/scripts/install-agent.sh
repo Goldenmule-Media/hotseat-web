@@ -21,15 +21,28 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 die() { printf 'wiki-mirror: %s\n' "$1" >&2; exit 1; }
 
+# launchd plists are XML: any value interpolated below can contain & or < (a checkout under
+# ".../R&D/" is enough) and would produce a plist plutil rejects.
+xml() {
+  local value="$1"
+  value="${value//&/&amp;}"
+  value="${value//</&lt;}"
+  value="${value//>/&gt;}"
+  printf '%s' "$value"
+}
+
+# `shift 2` on a flag given without a value fails under `set -e` and exits silently on bash 3.2.
+need_value() { [ "$2" -ge 2 ] || die "$1 needs a value"; }
+
 while [ $# -gt 0 ]; do
   case "$1" in
-    --mode) MODE="${2:-}"; shift 2 ;;
+    --mode) need_value --mode $#; MODE="$2"; shift 2 ;;
     --mode=*) MODE="${1#*=}"; shift ;;
-    --node) NODE_BIN="${2:-}"; shift 2 ;;
+    --node) need_value --node $#; NODE_BIN="$2"; shift 2 ;;
     --node=*) NODE_BIN="${1#*=}"; shift ;;
-    --label) LABEL="${2:-}"; shift 2 ;;
+    --label) need_value --label $#; LABEL="$2"; shift 2 ;;
     --label=*) LABEL="${1#*=}"; shift ;;
-    --config) CONFIG="${2:-}"; shift 2 ;;
+    --config) need_value --config $#; CONFIG="$2"; shift 2 ;;
     --config=*) CONFIG="${1#*=}"; shift ;;
     --uninstall|--status|--restart|--logs|--print) ACTION="${1#--}"; shift ;;
     -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -111,25 +124,29 @@ case "$MODE" in
   *) die "unknown --mode \"$MODE\" (source | dist | portable)" ;;
 esac
 
-[ -z "$CONFIG" ] || ARGS+=("--config" "$CONFIG")
+if [ -n "$CONFIG" ]; then
+  # The job runs with WorkingDirectory set to the package/artifact, so a relative --config would
+  # resolve against THAT rather than against the directory you typed it in.
+  case "$CONFIG" in /*) ;; *) CONFIG="$(cd -- "$(dirname -- "$CONFIG")" && pwd)/$(basename -- "$CONFIG")" ;; esac
+  ARGS+=("--config" "$CONFIG")
+fi
 
 # ── the plist ────────────────────────────────────────────────────────────────
 program_args=""
 for arg in "$NODE_BIN" "${ARGS[@]}"; do
-  escaped="${arg//&/&amp;}"; escaped="${escaped//</&lt;}"; escaped="${escaped//>/&gt;}"
   program_args="$program_args
-    <string>$escaped</string>"
+    <string>$(xml "$arg")</string>"
 done
 
 PLIST_XML="<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
 <plist version=\"1.0\">
 <dict>
-  <key>Label</key><string>$LABEL</string>
+  <key>Label</key><string>$(xml "$LABEL")</string>
   <key>ProgramArguments</key>
   <array>$program_args
   </array>
-  <key>WorkingDirectory</key><string>$WORKDIR</string>
+  <key>WorkingDirectory</key><string>$(xml "$WORKDIR")</string>
   <key>RunAtLoad</key><true/>
   <!-- Restart on a CRASH, but respect a clean exit: the mirror exits 0 when another instance
        already owns its port, and respawning into that collision every few seconds helps nobody. -->
@@ -140,11 +157,11 @@ PLIST_XML="<?xml version=\"1.0\" encoding=\"UTF-8\"?>
   <key>ThrottleInterval</key><integer>30</integer>
   <key>ProcessType</key><string>Background</string>
   <key>LowPriorityIO</key><true/>
-  <key>StandardOutPath</key><string>$LOG_DIR/mirror.log</string>
-  <key>StandardErrorPath</key><string>$LOG_DIR/mirror.err.log</string>
+  <key>StandardOutPath</key><string>$(xml "$LOG_DIR/mirror.log")</string>
+  <key>StandardErrorPath</key><string>$(xml "$LOG_DIR/mirror.err.log")</string>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key><string>$(dirname -- "$NODE_BIN"):/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>PATH</key><string>$(xml "$(dirname -- "$NODE_BIN")"):/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
 </dict>
 </plist>"
@@ -170,3 +187,17 @@ wiki-mirror: installed $LABEL (mode: $MODE)
   status   $0 --status
   restart  $0 --restart   # config is read at startup — restart after editing it
 EOF
+
+# `bootstrap` succeeding only means launchd accepted the job. Wait for the mirror to answer, so a
+# process that started and immediately parked (another instance owns the port, a bad config) is
+# reported as what it is rather than as a successful install.
+HEALTH_URL="http://127.0.0.1:4440/_mirror/health"
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  if curl -fsS --max-time 2 "$HEALTH_URL" >/dev/null 2>&1; then
+    echo "  the mirror is answering on $HEALTH_URL"
+    exit 0
+  fi
+  sleep 1
+done
+echo "wiki-mirror: WARNING — the agent is loaded but nothing is answering $HEALTH_URL yet." >&2
+echo "  It may still be starting. Check: $0 --status, and $LOG_DIR/mirror.err.log" >&2
