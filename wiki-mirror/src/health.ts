@@ -136,6 +136,9 @@ export function startHealthServer(options: HealthServerOptions): Promise<HealthS
     const degraded =
       !serverStatus.reachable ||
       serverStatus.unauthorized ||
+      // Any probe failure counts, including an HTTP error from a host that IS answering: a 502
+      // in front of the stream means the tail is not getting commits either.
+      serverStatus.lastError !== null ||
       auth.expired ||
       workspaces.some((w) => w.lastReconcileError !== null || !w.connected);
     return {
@@ -168,7 +171,16 @@ export function startHealthServer(options: HealthServerOptions): Promise<HealthS
   };
 
   const server: Server = createServer((req, res) => {
-    void handle(req, res, buildStatus, buildCatalog);
+    // A rejection here would be an unhandled rejection, i.e. a dead SERVICE — infinitely worse
+    // than a 500 on one poll.
+    handle(req, res, buildStatus, buildCatalog).catch((err: unknown) => {
+      options.logger?.error("wiki-mirror: health request failed", {
+        path: req.url,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      if (!res.headersSent) sendJson(res, 500, { error: "internal", message: String(err) });
+      else res.end();
+    });
   });
 
   return new Promise<HealthServer>((resolve, reject) => {

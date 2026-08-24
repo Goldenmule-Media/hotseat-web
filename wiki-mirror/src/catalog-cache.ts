@@ -15,7 +15,12 @@ export class CatalogCache {
 
   constructor(
     private readonly load: () => Promise<readonly IWorkspaceSummary[]>,
-    private readonly opts: { readonly ttlMs?: number; readonly now?: () => number } = {},
+    private readonly opts: {
+      readonly ttlMs?: number;
+      readonly now?: () => number;
+      /** Give up on a load after this long. @default 15_000 */
+      readonly timeoutMs?: number;
+    } = {},
   ) {}
 
   /** The last known catalog, with NO I/O — safe on a hot status path. Empty until first loaded. */
@@ -36,9 +41,14 @@ export class CatalogCache {
     }
   }
 
-  /** Force a reload (concurrent callers share one round-trip). Rejects on failure. */
+  /**
+   * Force a reload (concurrent callers share one round-trip). Rejects on failure or after
+   * `timeoutMs`. The timeout is load-bearing: a catalog read against a half-open socket never
+   * settles, and an un-timed one would pin `inFlight` forever — hanging `/_mirror/workspaces`
+   * and, worse, the service's own self-restart, which waits on this.
+   */
   async refresh(): Promise<readonly IWorkspaceSummary[]> {
-    this.inFlight ??= this.load()
+    this.inFlight ??= this.loadWithTimeout()
       .then((entries) => {
         this.entries = entries;
         this.loadedAt = (this.opts.now ?? Date.now)();
@@ -48,6 +58,22 @@ export class CatalogCache {
         this.inFlight = undefined;
       });
     return this.inFlight;
+  }
+
+  private async loadWithTimeout(): Promise<readonly IWorkspaceSummary[]> {
+    const limit = this.opts.timeoutMs ?? 15_000;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        this.load(),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error(`the workspace catalog did not answer in ${limit}ms`)), limit);
+          timer.unref?.();
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   /** The display name for a workspace id, when the catalog knows it. */

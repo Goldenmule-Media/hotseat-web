@@ -141,6 +141,7 @@ describe("wiki-mirror — server probe", () => {
     let now = 1_000_000;
     const events: ProbeEvent[] = [];
     const { impl } = fakeFetch([okAt("10"), okAt("11"), okAt("11")]);
+    // lastReconcileAt stays in the distant past: this tail is subscribed but no longer applying.
     const probe = new ServerProbe({
       baseUrl: "http://host",
       namespace: "ns",
@@ -163,6 +164,61 @@ describe("wiki-mirror — server probe", () => {
     await probe.round(); // still behind, past the threshold
     expect(probe.workspace(WS)?.stuck).toBe(true);
     expect(events).toContainEqual({ type: "wedged", workspaceId: WS, behindSince: 1_000_000 });
+  });
+
+  it("does NOT call a mirror wedged for a commit it already reconciled between rounds", async () => {
+    // The real ordering: the tail reconciles milliseconds after the append, and the probe only
+    // finds out on its NEXT round. Stamping "behind" at the moment the probe noticed would make
+    // every healthy commit look like a miss, and a quiet mirror would rebuild itself for nothing
+    // a few minutes after every editing session.
+    let now = 90_000;
+    const events: ProbeEvent[] = [];
+    const { impl } = fakeFetch([okAt("5"), okAt("6"), okAt("6"), okAt("6")]);
+    const probe = new ServerProbe({
+      baseUrl: "http://host",
+      namespace: "ns",
+      snapshot: async () => [statusOf({ lastReconcileAt: 100_200 })],
+      logger: silentLogger,
+      fetchImpl: impl,
+      stuckAfterMs: 180_000,
+      now: () => now,
+    });
+    probe.on((e) => events.push(e));
+
+    await probe.round(); // t=90s, baseline offset 5
+    now = 120_000;
+    await probe.round(); // t=120s, offset moved to 6 — but we reconciled at t=100.2s
+    expect(probe.workspace(WS)?.behindSince).toBeNull();
+
+    now = 300_000;
+    await probe.round(); // long after the stuck threshold would have fired
+    expect(probe.workspace(WS)?.stuck).toBe(false);
+    expect(events).toEqual([]);
+  });
+
+  it("ignores pace for a workspace that is not tailing — that is the supervisor's failure to report", async () => {
+    let now = 1_000;
+    const events: ProbeEvent[] = [];
+    const { impl } = fakeFetch([okAt("1"), okAt("2"), okAt("3")]);
+    const probe = new ServerProbe({
+      baseUrl: "http://host",
+      namespace: "ns",
+      snapshot: async () => [statusOf({ connected: false, lastReconcileAt: null })],
+      logger: silentLogger,
+      fetchImpl: impl,
+      stuckAfterMs: 1,
+      now: () => now,
+    });
+    probe.on((e) => events.push(e));
+
+    await probe.round();
+    now = 100_000;
+    await probe.round();
+    now = 200_000;
+    await probe.round();
+
+    expect(probe.workspace(WS)?.behindSince).toBeNull();
+    expect(events).toEqual([]);
   });
 
   it("clears 'behind' as soon as a reconcile lands after the server moved", async () => {

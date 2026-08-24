@@ -61,6 +61,7 @@ export class MirrorService implements RunningMirror {
   private registry!: Registry;
   private pageTypes: readonly IPageType[] = [];
   private restarting: Promise<void> | undefined;
+  private deferred: ReturnType<typeof setTimeout> | undefined;
   private lastRestartAt = 0;
   private closed = false;
 
@@ -87,7 +88,16 @@ export class MirrorService implements RunningMirror {
     return this.healthServer;
   }
 
-  /** Load models, build the engine, start every emitter, then expose health + probing. */
+  /**
+   * Bind health FIRST, then build the engine and start every emitter.
+   *
+   * The order is load-bearing twice over. A client watching :4440 must see the process even
+   * while the first emitter is still opening its workspace, which can take a full start timeout
+   * against a host that accepts connections and never answers — otherwise the app and wiki-ui
+   * both report "no mirror running here", the exact misdiagnosis this service exists to prevent.
+   * And the port IS the single-writer guard: discovering another mirror owns it has to happen
+   * before this one starts writing to the same roots.
+   */
   async start(): Promise<void> {
     // Explicit `models` win over anything discovered under `modelsDir` with the same type id.
     const explicit = await loadModels(this.config.models);
@@ -96,10 +106,7 @@ export class MirrorService implements RunningMirror {
     this.pageTypes = dedupePageTypes([...explicit, ...discovered], this.logger);
     this.registry = new Registry(this.pageTypes);
     this.buildEngine();
-    await this.startEmitters();
 
-    // Health FIRST: a client watching this port must see the process even while the catalog and
-    // the first probe round are still in flight.
     this.healthServer = await startHealthServer({
       host: this.config.healthHost,
       port: this.config.healthPort,
@@ -115,6 +122,8 @@ export class MirrorService implements RunningMirror {
       logger: this.logger,
     });
     this.logger.info("wiki-mirror: health endpoint listening", { url: this.healthServer.url });
+
+    await this.startEmitters();
 
     this.probe = new ServerProbe({
       baseUrl: this.config.streamBaseUrl,
@@ -132,8 +141,9 @@ export class MirrorService implements RunningMirror {
       void this.restart(`workspace ${event.workspaceId} stopped keeping pace with the stream`);
     });
     await this.probe.start();
-    // Best-effort: names make every client's output legible, but a mirror runs fine without them.
-    await this.catalog.refresh().catch((err: unknown) => {
+    // Best-effort and NOT awaited past its own timeout: names make every client's output legible,
+    // but a mirror runs fine without them.
+    void this.catalog.refresh().catch((err: unknown) => {
       this.logger.warn("wiki-mirror: could not read the workspace catalog", {
         error: err instanceof Error ? err.message : String(err),
       });
@@ -149,8 +159,19 @@ export class MirrorService implements RunningMirror {
     if (this.closed) return;
     if (this.restarting !== undefined) return this.restarting;
     const now = Date.now();
-    if (now - this.lastRestartAt < MIN_RESTART_INTERVAL_MS) {
-      this.logger.info("wiki-mirror: restart suppressed (too soon after the last)", { reason });
+    const sinceLast = now - this.lastRestartAt;
+    if (sinceLast < MIN_RESTART_INTERVAL_MS) {
+      // DEFER, never drop: the probe's `recovered` is edge-triggered and fires once, so a
+      // suppressed restart would strand the mirror until the next unrelated failure.
+      if (this.deferred === undefined) {
+        const delay = MIN_RESTART_INTERVAL_MS - sinceLast;
+        this.logger.info("wiki-mirror: restart deferred (too soon after the last)", { reason, delayMs: delay });
+        this.deferred = setTimeout(() => {
+          this.deferred = undefined;
+          void this.restart(reason);
+        }, delay);
+        this.deferred.unref();
+      }
       return;
     }
     this.lastRestartAt = now;
@@ -162,7 +183,12 @@ export class MirrorService implements RunningMirror {
 
   async close(): Promise<void> {
     this.closed = true;
+    if (this.deferred !== undefined) clearTimeout(this.deferred);
+    this.deferred = undefined;
     this.probe?.stop();
+    // A restart in flight is rebuilding the very things we are about to tear down; let it finish
+    // (it checks `closed` between steps) rather than racing it.
+    await this.restarting?.catch(() => {});
     await this.healthServer?.stop();
     await this.stopEmitters();
     await this.engine.wiki.close();
@@ -178,12 +204,13 @@ export class MirrorService implements RunningMirror {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+    if (this.closed) return; // close() won the race; do not rebuild what it just tore down
     // A fresh engine re-resolves credentials, so a `wiki-mirror login` in another process takes
     // effect here without a process restart.
     this.buildEngine();
     this.probe?.reset();
     await this.startEmitters();
-    await this.catalog.refresh().catch(() => {});
+    void this.catalog.refresh().catch(() => {});
     this.logger.info("wiki-mirror: restarted", { workspaces: this.mirrors.length });
   }
 

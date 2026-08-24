@@ -74,7 +74,10 @@ export class ServerProbe {
   private unauthorized = false;
   private reachable = false;
   private started = false;
-  private readonly perWorkspace = new Map<string, { offset: string | null; behindSince: number | null }>();
+  private readonly perWorkspace = new Map<
+    string,
+    { offset: string | null; behindSince: number | null; probedAt: number }
+  >();
   private readonly listeners = new Set<(event: ProbeEvent) => void>();
 
   private readonly intervalMs: number;
@@ -148,6 +151,7 @@ export class ServerProbe {
   /** One probe round: HEAD every mirrored workspace, then re-derive reachability + pace. */
   async round(): Promise<void> {
     const workspaces = await this.options.snapshot();
+    const roundAt = this.now();
     if (workspaces.length === 0) {
       // Nothing configured: probe the catalog instead, so "is the server up?" still has an answer.
       const outcome = await this.head(`${this.options.baseUrl}/${this.options.namespace}/_catalog`);
@@ -155,31 +159,45 @@ export class ServerProbe {
       return;
     }
 
+    // Concurrent, so a round against a hung host costs one request timeout rather than N of them.
+    const results = await Promise.all(workspaces.map((ws) => this.head(this.urlFor(ws.workspaceId))));
     let outcome: HeadOutcome = { kind: "ok", offset: null };
-    for (const ws of workspaces) {
-      const result = await this.head(this.urlFor(ws.workspaceId));
+    for (const [index, ws] of workspaces.entries()) {
+      const result = results[index];
       if (result.kind !== "ok") {
         outcome = result; // the last failure wins the process-level verdict
-        this.perWorkspace.set(ws.workspaceId, { offset: null, behindSince: null });
+        this.perWorkspace.set(ws.workspaceId, { offset: null, behindSince: null, probedAt: roundAt });
         continue;
       }
-      this.trackPace(ws, result.offset);
+      this.trackPace(ws, result.offset, roundAt);
     }
     this.record(outcome);
   }
 
-  private trackPace(ws: MirrorWorkspaceStatus, offset: string | null): void {
+  private trackPace(ws: MirrorWorkspaceStatus, offset: string | null, roundAt: number): void {
     const previous = this.perWorkspace.get(ws.workspaceId);
-    const moved = previous !== undefined && previous.offset !== null && previous.offset !== offset;
-    // "Behind" starts when the server's offset moves; it clears the moment we reconcile past it.
-    let behindSince = previous?.behindSince ?? null;
-    if (moved && behindSince === null) behindSince = this.now();
-    if (behindSince !== null && ws.lastReconcileAt !== null && ws.lastReconcileAt >= behindSince) {
-      behindSince = null;
+    // A workspace that is not tailing at all is the supervisor's problem, not the pace tracker's:
+    // measuring how far behind a stopped mirror is would just re-report the same failure.
+    if (!ws.connected) {
+      this.perWorkspace.set(ws.workspaceId, { offset, behindSince: null, probedAt: roundAt });
+      return;
     }
-    this.perWorkspace.set(ws.workspaceId, { offset, behindSince });
 
-    if (behindSince !== null && this.now() - behindSince >= this.stuckAfterMs) {
+    let behindSince = previous?.behindSince ?? null;
+    const moved = previous !== undefined && previous.offset !== null && previous.offset !== offset;
+    if (moved && behindSince === null) {
+      // Anchor at the last round we KNEW we were level, NOT at "now". The tail reconciles within
+      // milliseconds of a commit while the probe only finds out a round later, so stamping now
+      // would leave every healthy commit looking like a miss — a quiet mirror would then declare
+      // itself wedged a few minutes after every editing session and rebuild its engine for nothing.
+      behindSince = previous.probedAt;
+    }
+    if (behindSince !== null && ws.lastReconcileAt !== null && ws.lastReconcileAt >= behindSince) {
+      behindSince = null; // we reconciled after that point, so we are keeping pace
+    }
+    this.perWorkspace.set(ws.workspaceId, { offset, behindSince, probedAt: roundAt });
+
+    if (behindSince !== null && roundAt - behindSince >= this.stuckAfterMs) {
       this.emit({ type: "wedged", workspaceId: ws.workspaceId, behindSince });
     }
   }

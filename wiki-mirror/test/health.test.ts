@@ -288,6 +288,26 @@ describe("wiki-mirror — local health endpoint", () => {
     expect(body.workspaces[0].connected).toBe(false);
   });
 
+  it("treats a host that answers HTTP errors as degraded — 'answering' is not 'working'", async () => {
+    const mirror = await makeMirror(await freshRoot());
+    await mirror.start();
+    const health = await startHealthServer({
+      host: "127.0.0.1",
+      port: 0,
+      namespace: "test",
+      streamBaseUrl: url,
+      sources: [mirror],
+      // A 502 in front of the stream: reachable, authorized, and getting no commits through.
+      server: () => ({ reachable: true, lastProbeAt: 2, lastError: "the stream host answered 502", unauthorized: false }),
+      logger: silentLogger,
+    });
+    cleanup.push(() => health.stop());
+
+    const body = await (await fetch(`${health.url}/_mirror/status`)).json();
+    expect(body.status).toBe("degraded");
+    expect(body.server.lastError).toMatch(/502/);
+  });
+
   it("reports an expired grant as degraded, naming the user, and never leaks a token", async () => {
     const health = await startHealthServer({
       host: "127.0.0.1",

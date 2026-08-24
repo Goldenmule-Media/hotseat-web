@@ -63,7 +63,14 @@ export class WorkspaceMirror {
   async start(): Promise<void> {
     await this.sink.init();
     await this.sync(); // boot back-fill from the workspace head
-    this.unsub = await this.handle.subscribe(() => this.kick());
+    const unsub = await this.handle.subscribe(() => this.kick());
+    // A start that a supervisor timed out and abandoned can still land here later; hand the
+    // subscription straight back rather than leaving a tail nobody holds a handle to.
+    if (this.stopped) {
+      unsub();
+      return;
+    }
+    this.unsub = unsub;
     this.connected = true;
   }
 
