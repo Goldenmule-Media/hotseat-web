@@ -73,6 +73,9 @@ final class MirrorStore {
     /// True when `configPath` is a guess rather than the running mirror's own answer.
     var configPathIsGuess: Bool { status?.configPath == nil }
 
+    /// The local endpoint this app polls, port included — the first thing to check by hand.
+    var healthURL: String { client.baseURL.absoluteString }
+
     var health: MirrorHealth {
         guard let status else {
             if !agent.installed { return .notInstalled }

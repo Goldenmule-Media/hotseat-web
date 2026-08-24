@@ -193,22 +193,22 @@ private struct ServiceTab: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            GroupBox("Status") {
+            section("Status") {
                 VStack(alignment: .leading, spacing: 4) {
                     row("Agent", agentSummary)
                     row("Answering", store.status != nil ? "yes, pid \(store.status?.pid.map(String.init) ?? "?")" : "no")
+                    row("Endpoint", store.healthURL)
                     if let info = LaunchAgent.info() {
                         row("Mode", info.mode)
                         row("Runs", info.programArguments.joined(separator: " "))
                     }
-                    row("Config", store.configPath)
-                    row("Log", LaunchAgent.logPath)
+                    row("Config", store.configPath, reveal: store.configPath)
+                    row("Log", LaunchAgent.logPath, reveal: LaunchAgent.logPath)
                 }
                 .font(.caption)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            GroupBox("Install") {
+            section("Install") {
                 VStack(alignment: .leading, spacing: 8) {
                     Picker("Run from", selection: $mode) {
                         Text("Repo source (tsx — always current)").tag("source")
@@ -237,7 +237,6 @@ private struct ServiceTab: View {
                         }
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             Toggle("Show this app in the menu bar at login", isOn: $launchAtLogin)
@@ -258,6 +257,18 @@ private struct ServiceTab: View {
         }
     }
 
+    /// A titled panel whose heading lines up with its own content. GroupBox insets its label
+    /// past the box it labels, which reads as a mistake next to the controls below it.
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.headline)
+            content()
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
+        }
+    }
+
     private var agentSummary: String {
         guard store.agent.installed else { return "not installed" }
         guard store.agent.loaded else { return "installed, not loaded" }
@@ -265,11 +276,23 @@ private struct ServiceTab: View {
         return store.agent.running ? "running" : "loaded, not running\(exit)"
     }
 
-    private func row(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .top) {
-            Text(label).frame(width: 70, alignment: .leading).foregroundStyle(.secondary)
+    private func row(_ label: String, _ value: String, reveal: String? = nil) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text(label).frame(width: 74, alignment: .leading).foregroundStyle(.secondary)
             Text(value).textSelection(.enabled)
             Spacer()
+            if let reveal {
+                Button {
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: reveal)])
+                } label: {
+                    Image(systemName: "folder")
+                }
+                .buttonStyle(.borderless)
+                .help("Show in Finder")
+                // A path that does not exist yet (no log until the agent has run) would open the
+                // user's home folder instead, which looks like a bug.
+                .disabled(!FileManager.default.fileExists(atPath: reveal))
+            }
         }
     }
 
