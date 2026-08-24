@@ -10,6 +10,7 @@ struct ConfigWindow: View {
     @Bindable var store: MirrorStore
     @State private var config = MirrorConfigFile()
     @State private var loadedFrom = ""
+    @AppStorage(EmitterRow.clientBaseURLKey) private var clientBaseURL = EmitterRow.defaultClientBaseURL
     @State private var loadError: String?
     @State private var saveError: String?
 
@@ -38,8 +39,13 @@ struct ConfigWindow: View {
                 VStack(alignment: .leading, spacing: 18) {
                     PanelSection("Server") {
                         VStack(alignment: .leading, spacing: 8) {
-                            field("Server", "https://wiki.example.com", $config.streamBaseUrl)
+                            field("Stream", "https://hotseat.example.com", $config.streamBaseUrl)
                             field("Namespace", "default", $config.namespace)
+                            field("Client", EmitterRow.defaultClientBaseURL, $clientBaseURL)
+                            Text("Stream is the host the mirror tails. Client is where the globe button opens a "
+                                + "workspace — often a different host, and this app's own setting (saved as you type).")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                         }
                     }
 
@@ -176,10 +182,12 @@ private struct EmitterRow: View {
     let taken: Set<String>
     let onDelete: () -> Void
 
-    @AppStorage("wikiUiBaseURL") private var wikiUiBaseURL = EmitterRow.defaultWikiUiBaseURL
+    @AppStorage(EmitterRow.clientBaseURLKey) private var clientBaseURL = EmitterRow.defaultClientBaseURL
 
-    /// Where the globe button opens a workspace — wiki-ui's dev server unless told otherwise.
-    static let defaultWikiUiBaseURL = "http://localhost:3000"
+    static let clientBaseURLKey = "clientBaseURL"
+    /// Where the globe button opens a workspace. The wiki CLIENT, which is usually a different
+    /// host from the stream the mirror tails — wiki-ui's dev server until told otherwise.
+    static let defaultClientBaseURL = "http://localhost:3000"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -188,7 +196,7 @@ private struct EmitterRow: View {
                 Spacer()
                 Button { openInWiki() } label: { Image(systemName: "globe") }
                     .buttonStyle(.borderless)
-                    .help("Open this workspace in the wiki (\(wikiUiBaseURL))")
+                    .help("Open this workspace in the wiki (\(clientBaseURL))")
                     .disabled(emitter.workspaceId.isEmpty)
                 Button { openFolder() } label: { Image(systemName: "folder") }
                     .buttonStyle(.borderless)
@@ -247,9 +255,8 @@ private struct EmitterRow: View {
     private func openInWiki() {
         // Matches wiki-ui's own workspaceHref: `/${encodeURIComponent(workspaceId)}`.
         let encoded = emitter.workspaceId.addingPercentEncoding(withAllowedCharacters: Self.uriComponent)
-        let base = wikiUiBaseURL.trimmingCharacters(in: .whitespaces).hasSuffix("/")
-            ? String(wikiUiBaseURL.trimmingCharacters(in: .whitespaces).dropLast())
-            : wikiUiBaseURL.trimmingCharacters(in: .whitespaces)
+        let trimmed = clientBaseURL.trimmingCharacters(in: .whitespaces)
+        let base = trimmed.hasSuffix("/") ? String(trimmed.dropLast()) : trimmed
         guard let encoded, let url = URL(string: "\(base)/\(encoded)"), url.scheme != nil else { return }
         NSWorkspace.shared.open(url)
     }
@@ -282,7 +289,6 @@ private struct ServiceTab: View {
     @State private var mode = "source"
     @State private var installerDirectory = ""
     @State private var launchAtLogin = false
-    @AppStorage("wikiUiBaseURL") private var wikiUiBaseURL = EmitterRow.defaultWikiUiBaseURL
 
     var body: some View {
         // Scrolls for the same reason the Mirrors tab does: the window is resizable now, and
@@ -337,15 +343,6 @@ private struct ServiceTab: View {
 
                 PanelSection("This app") {
                     VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 6) {
-                            Text("Wiki").frame(width: 74, alignment: .leading).foregroundStyle(.secondary)
-                            TextField("http://localhost:3000", text: $wikiUiBaseURL)
-                                .textFieldStyle(.roundedBorder)
-                        }
-                        .font(.caption)
-                        Text("Where the globe button on each mirror opens a workspace.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
                         Toggle("Show this app in the menu bar at login", isOn: $launchAtLogin)
                             .onChange(of: launchAtLogin) { _, enabled in setLaunchAtLogin(enabled) }
                         Text("The mirror itself runs from the launchd agent above — it keeps mirroring whether or not this app is open.")
