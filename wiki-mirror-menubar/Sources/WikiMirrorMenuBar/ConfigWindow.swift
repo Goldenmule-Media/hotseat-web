@@ -59,7 +59,11 @@ struct ConfigWindow: View {
                     ) {
                         VStack(spacing: 10) {
                             ForEach($config.emitters) { $emitter in
-                                EmitterRow(emitter: $emitter, catalog: store.catalog) {
+                                EmitterRow(
+                                    emitter: $emitter,
+                                    catalog: store.catalog,
+                                    taken: Set(config.emitters.map(\.workspaceId))
+                                ) {
                                     config.emitters.removeAll { $0.id == emitter.id }
                                 }
                             }
@@ -160,41 +164,102 @@ struct ConfigWindow: View {
 }
 
 /// One emitter: which workspace, and the folder it is written to.
+///
+/// The workspace is chosen by NAME — the id is machine detail that tells a person nothing, and
+/// the picker is the only thing that can produce a valid one anyway. It only ever appears as a
+/// fallback label for an emitter the catalog cannot resolve (no mirror running, or a workspace
+/// this account can no longer see), where it is the only truth available.
 private struct EmitterRow: View {
     @Binding var emitter: EmitterEntry
     let catalog: [CatalogWorkspace]
+    /// Workspace ids already claimed by another emitter — offered but not selectable.
+    let taken: Set<String>
     let onDelete: () -> Void
 
+    @AppStorage("wikiUiBaseURL") private var wikiUiBaseURL = EmitterRow.defaultWikiUiBaseURL
+
+    /// Where the globe button opens a workspace — wiki-ui's dev server unless told otherwise.
+    static let defaultWikiUiBaseURL = "http://localhost:3000"
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                TextField("ws:…", text: $emitter.workspaceId)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
-                if !catalog.isEmpty {
-                    Menu("Pick") {
-                        ForEach(catalog) { workspace in
-                            Button(workspace.name) { emitter.workspaceId = workspace.id }
-                        }
-                    }
-                    .frame(width: 70)
-                }
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 4) {
+                picker
+                Spacer()
+                Button { openInWiki() } label: { Image(systemName: "globe") }
+                    .buttonStyle(.borderless)
+                    .help("Open this workspace in the wiki (\(wikiUiBaseURL))")
+                    .disabled(emitter.workspaceId.isEmpty)
+                Button { openFolder() } label: { Image(systemName: "folder") }
+                    .buttonStyle(.borderless)
+                    .help("Open the mirrored folder")
+                    .disabled(!folderExists)
                 Button(role: .destructive, action: onDelete) { Image(systemName: "trash") }
                     .buttonStyle(.borderless)
+                    .help("Stop mirroring this workspace")
             }
             HStack(spacing: 8) {
                 TextField("/absolute/path/to/checkout/docs", text: $emitter.root)
                     .textFieldStyle(.roundedBorder)
+                    .font(.system(.caption, design: .monospaced))
                 Button("Choose…") { chooseFolder() }
-            }
-            if let name = catalog.first(where: { $0.id == emitter.workspaceId })?.name {
-                Text(name).font(.caption).foregroundStyle(.secondary)
             }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
     }
+
+    /// The workspace's name, or the bare id when nothing can resolve it.
+    private var title: String {
+        if let name = catalog.first(where: { $0.id == emitter.workspaceId })?.name { return name }
+        return emitter.workspaceId.isEmpty ? "Choose a workspace…" : emitter.workspaceId
+    }
+
+    private var picker: some View {
+        Menu {
+            if catalog.isEmpty {
+                Text("Start the mirror to list workspaces")
+            } else {
+                ForEach(catalog) { workspace in
+                    Button(workspace.name) { emitter.workspaceId = workspace.id }
+                        // One workspace, one emitter: the mirror rejects a duplicate anyway.
+                        .disabled(taken.contains(workspace.id) && workspace.id != emitter.workspaceId)
+                }
+            }
+        } label: {
+            Text(title).font(.headline)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
+    private var folderExists: Bool {
+        var isDirectory: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: emitter.root, isDirectory: &isDirectory)
+        return exists && isDirectory.boolValue
+    }
+
+    private func openFolder() {
+        NSWorkspace.shared.open(URL(fileURLWithPath: emitter.root))
+    }
+
+    private func openInWiki() {
+        // Matches wiki-ui's own workspaceHref: `/${encodeURIComponent(workspaceId)}`.
+        let encoded = emitter.workspaceId.addingPercentEncoding(withAllowedCharacters: Self.uriComponent)
+        let base = wikiUiBaseURL.trimmingCharacters(in: .whitespaces).hasSuffix("/")
+            ? String(wikiUiBaseURL.trimmingCharacters(in: .whitespaces).dropLast())
+            : wikiUiBaseURL.trimmingCharacters(in: .whitespaces)
+        guard let encoded, let url = URL(string: "\(base)/\(encoded)"), url.scheme != nil else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    /// The character set `encodeURIComponent` leaves alone.
+    private static let uriComponent: CharacterSet = {
+        var set = CharacterSet.alphanumerics
+        set.insert(charactersIn: "-_.!~*'()")
+        return set
+    }()
 
     private func chooseFolder() {
         let panel = NSOpenPanel()
@@ -217,6 +282,7 @@ private struct ServiceTab: View {
     @State private var mode = "source"
     @State private var installerDirectory = ""
     @State private var launchAtLogin = false
+    @AppStorage("wikiUiBaseURL") private var wikiUiBaseURL = EmitterRow.defaultWikiUiBaseURL
 
     var body: some View {
         // Scrolls for the same reason the Mirrors tab does: the window is resizable now, and
@@ -269,11 +335,24 @@ private struct ServiceTab: View {
                     }
                 }
 
-                Toggle("Show this app in the menu bar at login", isOn: $launchAtLogin)
-                    .onChange(of: launchAtLogin) { _, enabled in setLaunchAtLogin(enabled) }
-                Text("The mirror itself runs from the launchd agent above — it keeps mirroring whether or not this app is open.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                PanelSection("This app") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 6) {
+                            Text("Wiki").frame(width: 74, alignment: .leading).foregroundStyle(.secondary)
+                            TextField("http://localhost:3000", text: $wikiUiBaseURL)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        .font(.caption)
+                        Text("Where the globe button on each mirror opens a workspace.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Toggle("Show this app in the menu bar at login", isOn: $launchAtLogin)
+                            .onChange(of: launchAtLogin) { _, enabled in setLaunchAtLogin(enabled) }
+                        Text("The mirror itself runs from the launchd agent above — it keeps mirroring whether or not this app is open.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
 
                 Spacer()
             }
