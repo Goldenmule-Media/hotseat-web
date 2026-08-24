@@ -189,9 +189,10 @@ private struct EmitterRow: View {
     @AppStorage(EmitterRow.clientBaseURLKey) private var clientBaseURL = EmitterRow.defaultClientBaseURL
 
     static let clientBaseURLKey = "clientBaseURL"
-    /// Where the globe button opens a workspace. The wiki CLIENT, which is usually a different
-    /// host from the stream the mirror tails — wiki-ui's dev server until told otherwise.
-    static let defaultClientBaseURL = "http://localhost:3000"
+    /// Where the globe button opens a workspace: the wiki CLIENT, which is a different host from
+    /// the stream the mirror tails and cannot be derived from it. This is where this build ships
+    /// pointed; change it in Configure → Server for a different deployment.
+    static let defaultClientBaseURL = "https://wiki.thegoldenmule.com"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {

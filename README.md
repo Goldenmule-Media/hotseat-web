@@ -153,10 +153,12 @@ tar -xzf wiki-mirror-*-macos.tar.gz
 ```
 
 Needs **macOS 14+** and **Node 20+** — no npm, no Xcode, no clone. It installs a launchd agent that
-starts at login and restarts on a crash, plus `WikiMirror.app` in the menu bar. Then, in the app:
-**Configure…** to point it at your server, **Sign in…** to give the mirror its own credentials, and
-**Add** to pick a workspace and the folder to mirror it into. The app updates itself from later
-releases.
+starts at login and restarts on a crash, plus `WikiMirror.app` in the menu bar, then removes the
+download it came from.
+
+It arrives pointed at `hotseat.thegoldenmule.com`, so in the app you only need **Sign in…** to give
+the mirror its own credentials, then **Add** to pick a workspace and the folder to mirror it into
+(**Configure… → Server** for a different wiki). The app updates itself from later releases.
 
 **From this checkout** (so the service tracks your working tree):
 

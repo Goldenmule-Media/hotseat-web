@@ -34,11 +34,18 @@ or:
 ```sh
 curl -fsSL https://api.github.com/repos/Goldenmule-Media/hotseat-web/releases/latest \
   | grep -o 'https://[^"]*-macos\.tar\.gz' | head -1 \
-  | xargs curl -fsSL -o wiki-mirror-macos.tar.gz
+  | xargs curl -fsSLO
 ```
 
 Requires **macOS 14+** and **Node 20+**. It needs no checkout, no npm, and no Xcode: the mirror
-ships as one self-contained `.mjs` with its model bundles beside it. The app is ad-hoc signed
+ships as one self-contained `.mjs` with its model bundles beside it. Everything is copied to its
+final home, so the installer removes the download when it is done (`--keep` to hold on to it).
+
+A first install writes `~/.wiki/wiki-mirror.config.json` pointing at
+**`https://hotseat.thegoldenmule.com`**, with no folders mirrored yet — so **Sign in…** works
+immediately and the workspace picker fills in. It never touches an existing config: that file is
+shared by every project on the machine, and overwriting it would silently drop your other mirrors.
+Point it elsewhere in Configure → Server. The app is ad-hoc signed
 rather than notarized, so macOS quarantines it on download — `install.sh` clears that for the files
 it installs, which is the same trust you extend by running the script.
 
@@ -94,7 +101,7 @@ It is read **once at startup**: restart the agent after editing it.
 
 | Key | |
 |---|---|
-| `streamBaseUrl` | the Durable Streams host to tail (default `http://127.0.0.1:4437`) |
+| `streamBaseUrl` | the Durable Streams host to tail (library default `http://127.0.0.1:4437`; a release install seeds `https://hotseat.thegoldenmule.com`) |
 | `namespace` | must match the server's `WIKI_MCP_NAMESPACE` |
 | `models` | bundle specifiers to `import()` — resolved through `node_modules` |
 | `modelsDir` | a directory of bundles discovered one level deep — how a portable install carries its schema without `node_modules` |
