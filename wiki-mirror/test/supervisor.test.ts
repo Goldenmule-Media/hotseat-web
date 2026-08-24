@@ -77,11 +77,19 @@ describe("wiki-mirror — emitter supervisor", () => {
       supervisor,
       root,
       pending: () => scheduled !== undefined,
+      // Run the pending retry and WAIT for it to land: an attempt does real disk I/O, so a
+      // fixed tick races it.
       fire: async () => {
+        const before = (await supervisor.status()).attempts;
         const fn = scheduled;
         scheduled = undefined;
-        fn?.();
-        await new Promise((r) => setTimeout(r, 0));
+        if (fn === undefined) throw new Error("fire: nothing was scheduled");
+        fn();
+        for (let i = 0; i < 500; i++) {
+          await new Promise((r) => setTimeout(r, 2));
+          if ((await supervisor.status()).attempts !== before) return;
+        }
+        throw new Error("fire: the retry never completed");
       },
     };
   }
