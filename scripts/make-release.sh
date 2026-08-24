@@ -47,6 +47,10 @@ for required in "install.sh" "README.md" "WikiMirror.app/Contents/MacOS/WikiMirr
   [ -e "$OUT/$required" ] || { echo "release payload is missing $required" >&2; exit 1; }
 done
 [ -n "$(ls "$OUT/mirror/models"/*.js 2>/dev/null)" ] || { echo "release payload has no model bundles" >&2; exit 1; }
+codesign --verify --deep --strict "$OUT/WikiMirror.app" 2>/dev/null || {
+  echo "the app bundle is not validly signed — macOS would refuse to open it" >&2
+  exit 1
+}
 STAMPED="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$OUT/WikiMirror.app/Contents/Info.plist")"
 [ "$STAMPED" = "$VERSION" ] || {
   echo "the app is stamped $STAMPED but this release is $VERSION — the updater compares these" >&2
@@ -76,6 +80,7 @@ if [ "$PUBLISH" = "1" ]; then
     gh release upload "$TAG" "$ARCHIVE" "$ARCHIVE.sha256" --clobber
   else
     gh release create "$TAG" "$ARCHIVE" "$ARCHIVE.sha256" \
+      --target "$(git rev-parse HEAD)" \
       --title "wiki-mirror $VERSION" \
       --generate-notes \
       --notes "Local Markdown mirror + macOS menu-bar console. Built from \`$COMMIT\`.

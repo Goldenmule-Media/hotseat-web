@@ -27,7 +27,7 @@ jobs:
     # macOS because the artifact contains a Swift app bundle. Free on public repositories.
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # Full history so the generated release notes can see what changed.
           fetch-depth: 0
@@ -37,19 +37,41 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           version="$(node -p "require('./wiki-mirror/package.json').version")"
           tag="wiki-mirror-v$version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "release=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::$tag is already released — bump wiki-mirror/package.json to ship a new one."
-          else
-            echo "release=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::releasing $tag"
+
+          # Plain X.Y.Z only. AppVersion truncates at the first non-numeric segment, so a
+          # "0.2.0-beta.1" would be published as a normal release, offered to everyone as
+          # "0.2.0", and then the REAL 0.2.0 would never be newer than what they installed —
+          # stranding every user who took the beta.
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::wiki-mirror/package.json version \"$version\" must be plain X.Y.Z. A suffixed version would strand anyone who installs it."
+            exit 1
           fi
 
-      - uses: actions/setup-node@v4
+          # Distinguish "not released", "already released", and "could not ask GitHub". Treating
+          # the last as "not released" burns a full build and then dies on a 422.
+          if answer="$(gh release view "$tag" --json isDraft --jq .isDraft 2>&1)"; then
+            if [ "$answer" = "true" ]; then
+              # The updater skips drafts, so a leftover draft would block this version forever
+              # while every run stayed green.
+              echo "::error::$tag exists as a DRAFT. Publish or delete it — installed apps ignore drafts."
+              exit 1
+            fi
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::$tag is already released — bump wiki-mirror/package.json to ship a new one."
+          elif printf '%s' "$answer" | grep -qiE 'release not found|not found'; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::releasing $tag"
+          else
+            echo "::error::could not ask GitHub whether $tag exists: $answer"
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v5
         if: steps.decide.outputs.release == 'true'
         with:
           node-version: 22
@@ -84,8 +106,8 @@ jobs:
       - name: Keep the built artifact even when publishing fails
         # `always()` first so a failed publish still leaves the artifact to inspect.
         if: always() && steps.decide.outputs.release == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: wiki-mirror-${{ steps.decide.outputs.version }}-macos
-          path: build/*.tar.gz*
-          if-no-files-found: warn
+          path: build/
+          if-no-files-found: error
