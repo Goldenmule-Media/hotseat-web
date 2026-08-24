@@ -20,7 +20,7 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { defaultHighlightStyle, syntaxHighlighting, syntaxTree, HighlightStyle } from "@codemirror/language";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { EditorState, type Extension, type Range } from "@codemirror/state";
-import { Decoration, type DecorationSet, EditorView, keymap, layer, placeholder, RectangleMarker, ViewPlugin, type ViewUpdate, WidgetType } from "@codemirror/view";
+import { Decoration, type DecorationSet, EditorView, keymap, layer, RectangleMarker, ViewPlugin, type ViewUpdate, WidgetType } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import type { SyntaxNode, SyntaxNodeRef } from "@lezer/common";
 import { findTermMatches } from "./study";
@@ -233,7 +233,19 @@ const editorTheme = EditorView.theme({
   ".cm-cursor": { borderLeftColor: "var(--text)" },
   ".cm-selectionBackground": { backgroundColor: "var(--accent-dim) !important" },
   ".cm-md-bullet": { color: "var(--muted)" },
-  ".cm-placeholder": { color: "var(--muted)" },
+  // Zero-width, so the caret keeps the first character's place (see emptyDocPlaceholder);
+  // the line clips it rather than let it overflow, which a narrow editor would scroll.
+  ".cm-md-placeholder": { overflow: "hidden" },
+  ".cm-md-placeholder::before": {
+    content: "attr(data-placeholder)",
+    display: "inline-block",
+    width: "0",
+    overflow: "visible",
+    whiteSpace: "pre",
+    color: "var(--muted)",
+    pointerEvents: "none",
+    userSelect: "none",
+  },
 });
 
 // ── assembly ────────────────────────────────────────────────────────────────────
@@ -427,6 +439,34 @@ export function typewriterExtension(): Extension {
   return [typewriterPadding(), keepCaretCentred, platenLayer, platenTheme];
 }
 
+/**
+ * The empty-document placeholder, PAINTED rather than inserted. CodeMirror's own
+ * `placeholder()` puts a widget in the line, and the widget's inline-block takes a row of
+ * its own — leaving the caret, and the typewriter's lit line, stranded on the row above
+ * it. A pseudo-element on the empty line is in nobody's way: the document stays empty, so
+ * the caret and the line CodeMirror measures cannot disagree about where line 0 is.
+ */
+function emptyDocPlaceholder(text: string): Extension {
+  const empty = Decoration.line({ class: "cm-md-placeholder", attributes: { "data-placeholder": text } });
+  const decorate = (state: EditorState): DecorationSet =>
+    state.doc.length === 0 ? Decoration.set([empty.range(0)]) : Decoration.none;
+  return [
+    ViewPlugin.fromClass(
+      class {
+        decorations: DecorationSet;
+        constructor(view: EditorView) {
+          this.decorations = decorate(view.state);
+        }
+        update(u: ViewUpdate): void {
+          if (u.docChanged) this.decorations = decorate(u.state);
+        }
+      },
+      { decorations: (v) => v.decorations },
+    ),
+    EditorView.contentAttributes.of({ "aria-placeholder": text }),
+  ];
+}
+
 /** The stable extension set for one live markdown editor. */
 export function liveEditorBase(placeholderText?: string): Extension {
   return [
@@ -438,6 +478,6 @@ export function liveEditorBase(placeholderText?: string): Extension {
     livePreview,
     editorTheme,
     EditorView.lineWrapping,
-    ...(placeholderText !== undefined ? [placeholder(placeholderText)] : []),
+    ...(placeholderText !== undefined ? [emptyDocPlaceholder(placeholderText)] : []),
   ];
 }
