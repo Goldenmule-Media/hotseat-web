@@ -8,9 +8,10 @@ An **event-sourced, CQRS, LLM-first structured wiki**. Pages are typed documents
 through named, typed, FSM-gated mutations (never free text); a workspace is a graph of pages that maps
 to one append-only Durable Stream and is the unit of atomic consistency; everything renders
 deterministically to Markdown. An **npm-workspaces monorepo of five packages** (`wiki` · `wiki-models` ·
-`wiki-mcp` · `wiki-server` · `wiki-mirror`) forms the engine + host + local Markdown mirror; a sixth
-directory, **`wiki-ui`**, is a standalone Next.js browser for a running server — its own install/build,
-**not** a workspace member. ESM, TypeScript, Node ≥20.
+`wiki-mcp` · `wiki-server` · `wiki-mirror`) forms the engine + host + local Markdown mirror. Two more
+directories are NOT workspace members and build on their own: **`wiki-ui`**, a standalone Next.js browser
+for a running server, and **`wiki-mirror-menubar`**, a SwiftUI menu-bar console for the local mirror
+service. ESM, TypeScript, Node ≥20.
 
 **The codebase documents itself.** Design intent lives in the wiki and is mirrored to [`docs/hotseat-wiki/`](docs/hotseat-wiki/):
 per-package architecture plus the cross-cutting [Content model](docs/hotseat-wiki/architecture/content-model.md)
@@ -36,8 +37,10 @@ Run from the repo root unless noted. There is **no linter/formatter** — `typec
 | One test by name | `npm run test -w wiki -- -t "rejects a stale append"` |
 | Watch | `npm run test:watch -w <pkg>` (wiki · wiki-mcp · wiki-server; not wiki-models) |
 | Run the server | `npm run start -w wiki-server` (tsx; see "Running locally") |
-| Run server + mirror | `npm start` (root — boots the server **and** the local `wiki-mirror` via `concurrently`) |
-| Run server + mirror + UI | `npm run dev` (root — `npm start` plus `next dev` inside `wiki-ui/`; UI needs its own `npm install` first) |
+| Run the server (all models) | `npm start` (root — server only; the mirror is a launchd service, see below) |
+| Run server + UI | `npm run dev` (root — `npm start` plus `next dev` inside `wiki-ui/`; UI needs its own `npm install` first) |
+| Run the mirror in a terminal | `npm run start:mirror` (root) — debugging only; stop the service first, they fight over :4440 |
+| Build the portable mirror | `npm run bundle -w wiki-mirror` → `wiki-mirror/build/` |
 
 `<pkg>` ∈ `wiki` · `wiki-models` · `wiki-mcp` · `wiki-server` · `wiki-mirror`. **`wiki-ui` is NOT covered by the root
 scripts** — it has its own `node_modules`/lockfile and `next build`/`vitest`; run `npm install` / `npm run
@@ -81,6 +84,12 @@ wiki-models   The schema layer — the ONLY home for concrete page types (e.g. t
 [wiki-server](docs/hotseat-wiki/architecture/wiki-server.md) ·
 [wiki-mirror](docs/hotseat-wiki/architecture/wiki-mirror.md) ·
 [Content model](docs/hotseat-wiki/architecture/content-model.md).
+
+**`wiki-mirror-menubar`** — a standalone **SwiftUI `MenuBarExtra` app** (SwiftPM, macOS 14+, not a
+workspace member): the menu-bar console for the local mirror *service*. It polls `wiki-mirror`'s
+`/_mirror/status`, edits `~/.wiki/wiki-mirror.config.json`, and drives `launchctl`; **launchd owns the
+mirror process, not the app**, so quitting it never stops mirroring. Canonical doc:
+[`wiki-mirror-menubar/README.md`](wiki-mirror-menubar/README.md).
 
 **`wiki-ui`** — a standalone **Next.js (App Router) app**, *not* a workspace member (own lockfile,
 `transpilePackages`). A **live-updating** browser for a running `wiki-server`: it **embeds the engine in the
@@ -195,8 +204,9 @@ its own. Full surface: [`architecture/wiki-server.md`](docs/hotseat-wiki/archite
   `npm run start -w wiki-server -- --models wiki-models/feature` (or `WIKI_SERVER_MODELS=wiki-models/feature`).
   At runtime you can also `POST /_server/models {"id":"feature","specifier":"wiki-models/feature"}`, or list
   with `GET localhost:4438/_server/models`. **Load every bundle at once:** `npm start` (root) boots the
-  server with `--models-dir ../wiki-models/src` **and** the local `wiki-mirror` process (via `concurrently`;
-  config `~/.wiki/wiki-mirror.config.json`). Under `--models-dir`, each `src/<bundle>/` → a bundle,
+  server with `--models-dir ../wiki-models/src`. (It no longer starts a mirror — that is a launchd
+  service now; under `concurrently -k` a second mirror's exit would take the server down with it.)
+  Under `--models-dir`, each `src/<bundle>/` → a bundle,
   id = dir name; also accepts a built `dist` tree, skipping non-bundle chunks with a warning. An explicit
   `--models` overrides a discovered bundle of the same id (and still hard-fails if it can't load).
 - **Markdown disk mirrors — the `wiki-mirror` process.** A project mirrors a workspace's deterministic
@@ -213,11 +223,26 @@ its own. Full surface: [`architecture/wiki-server.md`](docs/hotseat-wiki/archite
   wiped output dir. **Archiving never deletes a mirrored file:** archiving a page (or the whole workspace)
   moves its file to a stable id-named `<workspace>/.archived/<type>--<id>.md`, and unarchiving moves it back
   to the tree; only a hard page delete removes a file. **This repo's own
-  [`docs/hotseat-wiki/`](docs/hotseat-wiki/) is one such mirror**, driven by the `wiki-mirror.config.json` at
-  the repo root (run it with the server via `npm start`, or standalone via `npm run start -w wiki-mirror`).
+  [`docs/hotseat-wiki/`](docs/hotseat-wiki/) is one such mirror**, driven by `~/.wiki/wiki-mirror.config.json`.
   Local-only trust (roots written verbatim, no sandboxing); single-writer per root (documented, not enforced).
-- **`.mcp.json`** wires this Claude Code session's `wiki` MCP server to `http://127.0.0.1:4439/mcp` — i.e. a
-  locally-running `wiki-server`. The `wiki` MCP tools won't work unless that server is up **with a model loaded**.
+- **The mirror runs as a launchd service, watched from the menu bar.** `wiki-mirror/scripts/install-agent.sh`
+  installs a user agent (`com.thegoldenmule.wiki-mirror`) that starts at login and restarts on a crash,
+  running the checkout via `tsx` (`--mode source`), the built `dist/bin.js` (`--mode dist`), or a portable
+  self-contained artifact (`--mode portable`; `npm run bundle -w wiki-mirror` builds one that runs on any Mac
+  with node and no `node_modules`). `--status` / `--restart` / `--logs` / `--uninstall` drive it; logs land in
+  `~/Library/Logs/wiki-mirror/`. **[`wiki-mirror-menubar/`](wiki-mirror-menubar/README.md)** is a SwiftUI
+  MenuBarExtra console for it (its own SwiftPM build, not a workspace member, like `wiki-ui`): it polls
+  `/_mirror/status`, edits the config file, and drives `launchctl` — it never owns the process, so quitting it
+  doesn't stop mirroring. **The config is read once at startup: restart the agent after editing it.**
+- **When the docs stop moving, the mirror is telling you why.** `curl localhost:4440/_mirror/status` reports
+  `auth` (an expired `~/.wiki` grant is the usual culprit — `wiki-mirror login`, or the app's Sign in…),
+  `server` (host reachable / 401), and per workspace `connected` + `lastReconcileError` + `nextRetryAt`. A
+  failed emitter stays listed and retries with backoff; the process rebuilds its engine by itself when the
+  host comes back or a tail stops keeping pace.
+- **`.mcp.json`** wires this Claude Code session's `wiki` MCP server to the DEPLOYED server
+  (`https://hotseat.thegoldenmule.com/mcp`), which Claude Code authenticates against on its own. Point it at
+  `http://127.0.0.1:4439/mcp` to drive a local `wiki-server` instead — the `wiki` MCP tools then need that
+  server up **with a model loaded**.
 - **Self-direction (don't ask "what next?").** The wiki is self-directing via two model-declared classifiers
   the engine surfaces generically: per-edge `agency` (`"agent"` = a forward edge to drive autonomously;
   `"human"` = a sign-off/decision gate) on FSM transitions, and a per-instance `awaitsHuman` predicate on
