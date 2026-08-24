@@ -670,6 +670,14 @@ code {
 .mirror-indicator[data-state="error"] .dot {
   background: var(--red);
 }
+/* "warn" = the mirror is up but not tailing (offline host, behind, not subscribed) — amber,
+   not red: nothing is broken on disk, it just stopped moving. */
+.mirror-indicator[data-state="warn"] {
+  color: var(--amber);
+}
+.mirror-indicator[data-state="warn"] .dot {
+  background: var(--amber);
+}
 /* checking / off / absent stay muted (the default dot/text color). */
 
 /* ── build provenance badge (sidebar foot) ───────────────────────────────── */
