@@ -22,10 +22,10 @@ every page renders **deterministically** to Markdown. Agents reach it over **MCP
   server by reference — the engine ships none baked in.
 - **Renders back to disk (optional, per project).** A separate local process, **`wiki-mirror`**, tails a
   (possibly remote) server's Durable Stream and writes a workspace's deterministic Markdown into a local root,
-  content-hashed so the git diff stays honest. It is configured by the user-level
-  `~/.wiki/wiki-mirror.config.json` (`workspaceId → absolute root`) — one file per machine, shared by every
-  project, never server state. The wiki stays the source of truth; each
-  repo gets a faithful, always-current rendered copy.
+  content-hashed so the git diff stays honest. It runs as a background service with a macOS menu-bar console,
+  configured by the user-level `~/.wiki/wiki-mirror.config.json` (`workspaceId → absolute root`) — one file per
+  machine, shared by every project, never server state. The wiki stays the source of truth; each repo gets a
+  faithful, always-current rendered copy. **[Install it →](#mirror-the-wiki-to-your-repo)**
 
 ### The packages
 
@@ -37,6 +37,7 @@ every page renders **deterministically** to Markdown. Agents reach it over **MCP
 | `wiki-server` | Thin process that runs the durable stream host **and** hosts `wiki-mcp` in one process. |
 | `wiki-mirror` | Local Markdown mirror: tails a (possibly remote) server's stream and writes a workspace's deterministic Markdown to a local checkout — the headless, disk-writing sibling of `wiki-ui`. |
 | `wiki-ui` | Standalone Next.js browser for a running server — embeds the engine client-side, tails the stream live, drives FSM transitions. **Not** a workspace member (own install/build). |
+| `wiki-mirror-menubar` | macOS menu-bar console for the local mirror service: is it connected, is it signed in, and which folders get mirrored where. **Not** a workspace member (SwiftPM). |
 
 Architecture, boundaries, and conventions live in [`CLAUDE.md`](./CLAUDE.md); per-package design intent,
 the content model, ADRs, and feature specs live in the wiki's own rendered mirror under
@@ -134,6 +135,49 @@ Because the FSM gates everything, the lifecycle is enforced for you — e.g. a f
 `beginImplementation` until its plan has a step and its testing-plan a case, and can't `ship` until the
 checklist is done, cases pass, and no questions are open.
 
+---
+
+## Mirror the wiki to your repo
+
+The wiki is the source of truth, but every project can keep a faithful, always-current **Markdown
+copy in its own checkout** — reviewable in a PR, greppable, readable without a server. That is
+`wiki-mirror`: a background service that tails the stream and writes the rendered tree to folders
+you choose, with a menu-bar app to watch and configure it.
+
+**On any Mac, with no checkout:**
+
+```sh
+gh release download --repo Goldenmule-Media/hotseat-web --pattern '*-macos.tar.gz'
+tar -xzf wiki-mirror-*-macos.tar.gz
+./wiki-mirror-*-macos/install.sh
+```
+
+Needs **macOS 14+** and **Node 20+** — no npm, no Xcode, no clone. It installs a launchd agent that
+starts at login and restarts on a crash, plus `WikiMirror.app` in the menu bar. Then, in the app:
+**Configure…** to point it at your server, **Sign in…** to give the mirror its own credentials, and
+**Add** to pick a workspace and the folder to mirror it into. The app updates itself from later
+releases.
+
+**From this checkout** (so the service tracks your working tree):
+
+```sh
+./wiki-mirror/scripts/install-agent.sh --mode source
+cd wiki-mirror-menubar && ./scripts/bundle-app.sh --install
+```
+
+**When the docs stop moving**, the mirror says why rather than making you guess — an expired
+credential is the usual culprit:
+
+```sh
+curl -s localhost:4440/_mirror/status | python3 -m json.tool
+```
+
+Full details — configuration keys, auth, what lands on disk, troubleshooting:
+[`wiki-mirror/README.md`](./wiki-mirror/README.md) and
+[`wiki-mirror-menubar/README.md`](./wiki-mirror-menubar/README.md).
+
+---
+
 ### Embedding the engine as a library (alternative)
 
 `wiki` is also a plain TypeScript library — `createWiki({ stream, pageTypes })` returns an `IWiki`; writes
@@ -158,7 +202,7 @@ canonical in the types — start at `wiki/src/index.ts` (and `wiki/src/api.ts`);
 npm install        # installs all workspaces
 npm run typecheck  # strict tsc across every package — this is the gate (there is no linter)
 npm run test       # vitest across every package (in-memory stream server + PGlite; no external infra)
-npm run build      # wiki → tsc; wiki-models/wiki-mcp/wiki-server → tsdown bundles
+npm run build      # wiki → tsc; wiki-models/wiki-mcp/wiki-server/wiki-mirror → tsdown bundles
 ```
 
 ### The dev loop
@@ -168,10 +212,11 @@ npm run build      # wiki → tsc; wiki-models/wiki-mcp/wiki-server → tsdown b
 | Typecheck / test / build one package | append `-w <pkg>`, e.g. `npm run test -w wiki-mcp` |
 | Run one test file | `npm run test -w wiki -- test/guard.test.ts` (`--` forwards to `vitest run`) |
 | Run one test by name | `npm run test -w wiki -- -t "rejects a stale append"` |
-| Watch a package's tests | `npm run test:watch -w <pkg>` (wiki · wiki-mcp · wiki-server) |
+| Watch a package's tests | `npm run test:watch -w <pkg>` (wiki · wiki-mcp · wiki-server · wiki-mirror) |
 | Run the server (tsx, no build) | `npm run start -w wiki-server -- --models wiki-models/feature` |
+| Build a macOS release of the mirror | `./scripts/make-release.sh` (CI does this on a version bump) |
 
-`<pkg>` ∈ `wiki` · `wiki-models` · `wiki-mcp` · `wiki-server`.
+`<pkg>` ∈ `wiki` · `wiki-models` · `wiki-mcp` · `wiki-server` · `wiki-mirror`.
 
 ### Editing the schema: the reload loop
 

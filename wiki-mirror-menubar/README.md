@@ -10,11 +10,25 @@ endpoint (`http://127.0.0.1:4440`), edits `~/.wiki/wiki-mirror.config.json`, and
 `launchctl`. It is not a workspace member — it has its own SwiftPM build, like `wiki-ui` has its
 own Next build.
 
-## Build and install
+## Install
+
+The app ships **with the mirror** in one release artifact, so installing that gets you both:
+
+```sh
+gh release download --repo Goldenmule-Media/hotseat-web --pattern '*-macos.tar.gz'
+tar -xzf wiki-mirror-*-macos.tar.gz
+./wiki-mirror-*-macos/install.sh          # add --app-only if a mirror is already running
+```
+
+Requires macOS 14+ (and Node 20+ for the mirror half). See
+[`wiki-mirror/README.md`](../wiki-mirror/README.md) for the service it watches.
+
+## Build it from this checkout
 
 ```sh
 cd wiki-mirror-menubar
 ./scripts/bundle-app.sh --install     # builds, copies to /Applications, launches it
+./scripts/bundle-app.sh --universal   # arm64 + x86_64, what a release ships
 ```
 
 `swift build` alone produces a bare executable; the bundler wraps it in `WikiMirror.app`, which
