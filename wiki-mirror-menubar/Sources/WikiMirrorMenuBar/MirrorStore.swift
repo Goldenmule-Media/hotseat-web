@@ -51,8 +51,7 @@ enum MirrorHealth {
 final class MirrorStore {
     private(set) var status: MirrorStatus?
     private(set) var probeError: String?
-    private(set) var agentInstalled = false
-    private(set) var agentLoaded = false
+    private(set) var agent = AgentState(installed: false, loaded: false, running: false, lastExitCode: nil)
     private(set) var catalog: [CatalogWorkspace] = []
     private(set) var catalogError: String?
     /// A user-triggered action in flight (restart, sign-in, install) — the menu disables itself.
@@ -63,13 +62,23 @@ final class MirrorStore {
     private var client = MirrorClient()
     private var timer: Timer?
 
-    /// The config file the RUNNING mirror read, so the editor never edits a different one.
-    var configPath: String { status?.configPath ?? MirrorConfigFile.defaultPath }
+    /// The config file the editor must target.
+    ///
+    /// The running mirror's own answer first. When it is down, fall back to the `--config` baked
+    /// into the installed job before the per-machine default: a mirror started with `--config`
+    /// elsewhere must not have a DIFFERENT file edited out from under it just because it happens
+    /// to be stopped.
+    var configPath: String { status?.configPath ?? LaunchAgent.configuredPath() ?? MirrorConfigFile.defaultPath }
+
+    /// True when `configPath` is a guess rather than the running mirror's own answer.
+    var configPathIsGuess: Bool { status?.configPath == nil }
 
     var health: MirrorHealth {
         guard let status else {
-            if !agentInstalled { return .notInstalled }
-            return agentLoaded ? .starting : .stopped
+            if !agent.installed { return .notInstalled }
+            // Loaded is not running: a job parked by KeepAlive {SuccessfulExit:false}, or one
+            // crash-looping through its throttle window, prints as bootstrapped either way.
+            return agent.loaded && agent.running ? .starting : .stopped
         }
         if status.auth?.expired == true || status.server?.unauthorized == true { return .signedOut }
         if status.server?.reachable == false { return .hostUnreachable }
@@ -84,7 +93,12 @@ final class MirrorStore {
         case .notInstalled:
             return "No launchd agent is installed on this Mac."
         case .stopped:
-            return "The agent is installed but not running."
+            if let code = agent.lastExitCode, code != 0 {
+                return "The agent is installed but stopped (last exit \(code)). Check the log."
+            }
+            return agent.loaded
+                ? "The agent is loaded but not running. Restart it, or check the log."
+                : "The agent is installed but not loaded." 
         case .starting:
             return "Waiting for \(client.baseURL.absoluteString)…"
         case .signedOut:
@@ -106,7 +120,10 @@ final class MirrorStore {
         return url.host ?? raw
     }
 
+    /// Begin polling. Idempotent: the app calls this from its initializer AND from the config
+    /// window, and a second never-invalidated 5s timer per window open is a slow leak.
     func start() {
+        guard timer == nil else { return }
         Task { await refreshAll() }
         let timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in await self?.refreshAll() }
@@ -116,10 +133,14 @@ final class MirrorStore {
         self.timer = timer
     }
 
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+    }
+
     func refreshAll() async {
         await refreshStatus()
-        agentInstalled = LaunchAgent.isInstalled
-        agentLoaded = await LaunchAgent.isLoaded()
+        agent = await LaunchAgent.state()
     }
 
     func refreshStatus() async {

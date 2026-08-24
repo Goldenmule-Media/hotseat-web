@@ -63,9 +63,9 @@ struct MenuContent: View {
         VStack(spacing: 6) {
             HStack(spacing: 8) {
                 Button("Restart") { Task { await store.restart() } }
-                    .disabled(store.busy != nil || !store.agentInstalled)
+                    .disabled(store.busy != nil || !store.agent.installed)
                 Button("Sign in…") { Task { await store.signIn() } }
-                    .disabled(store.busy != nil || !store.agentInstalled)
+                    .disabled(store.busy != nil || !store.agent.installed)
                 Button("Logs") { NSWorkspace.shared.open(URL(fileURLWithPath: LaunchAgent.logPath)) }
                     .disabled(!FileManager.default.fileExists(atPath: LaunchAgent.logPath))
                 Spacer()

@@ -64,9 +64,18 @@ enum Shell {
         } catch {
             return ShellResult(status: -1, stdout: "", stderr: error.localizedDescription)
         }
-        // Read before waiting: a child that fills a 64K pipe buffer deadlocks against waitUntilExit.
+        // Drain BOTH pipes concurrently, then wait. Reading stdout to the end first deadlocks any
+        // child that fills the 64K stderr buffer while we are still blocked on stdout — and the
+        // mirror is a process that logs a JSON line per commit.
+        var errData = Data()
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            errData = err.fileHandleForReading.readDataToEndOfFile()
+            group.leave()
+        }
         let outData = out.fileHandleForReading.readDataToEndOfFile()
-        let errData = err.fileHandleForReading.readDataToEndOfFile()
+        group.wait()
         process.waitUntilExit()
         return ShellResult(
             status: process.terminationStatus,

@@ -19,7 +19,9 @@ cd wiki-mirror-menubar
 
 `swift build` alone produces a bare executable; the bundler wraps it in `WikiMirror.app`, which
 is what `LSUIElement` (no Dock icon) and `MenuBarExtra` need, and ad-hoc signs it. Requires
-macOS 14+ and Xcode's Swift toolchain.
+macOS 14+ and Xcode's Swift toolchain. `swift test` covers the two pieces that can quietly do
+damage: the config round-trip (it must never drop a key it does not model) and the `login`
+command inferred from the installed plist.
 
 Install the service itself from the app's **Service** tab, or from a terminal:
 
@@ -52,6 +54,7 @@ seven red workspaces pointing at the network.
 | `MirrorStore.swift` | the 5s poll, the launchd state, and the one-word health verdict |
 | `LaunchAgent.swift` | reads the installed plist; install / restart / uninstall / sign in |
 | `MirrorConfig.swift` | reads and rewrites the config file, preserving unknown keys |
+| `Tests/` | round-trip + plist-inference tests (`swift test`) |
 | `MenuContent.swift` | the panel |
 | `ConfigWindow.swift` | the emitter editor and the Service tab |
 
@@ -64,3 +67,6 @@ Two details worth keeping:
 - **Installing always shells out to `wiki-mirror/scripts/install-agent.sh`.** An app that wrote
   its own plist would drift from the script the moment either changed; the app derives the
   runtime (source / dist / portable) by reading the installed plist back.
+- **`login` is inserted right after the script, not appended.** The mirror only takes the login
+  path when `login` is `argv[0]`, so appending it past `--models-dir …` starts a second mirror
+  instead of signing in — and reports success.

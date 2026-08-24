@@ -35,8 +35,11 @@ struct MirrorConfigFile {
         var extra = object
         if let value = object["streamBaseUrl"] as? String { config.streamBaseUrl = value }
         if let value = object["namespace"] as? String { config.namespace = value }
-        if let raw = object["emitters"] as? [[String: Any]] {
-            config.emitters = raw.map {
+        if let raw = object["emitters"] {
+            // A malformed `emitters` must be an ERROR, not an empty list: quietly reading zero
+            // emitters and then saving would erase every mirror on this machine.
+            guard let entries = raw as? [[String: Any]] else { throw ConfigError.malformedEmitters(path) }
+            config.emitters = entries.map {
                 EmitterEntry(workspaceId: $0["workspaceId"] as? String ?? "", root: $0["root"] as? String ?? "")
             }
         }
@@ -138,11 +141,13 @@ struct MirrorConfigFile {
 
 enum ConfigError: LocalizedError {
     case notAnObject(String)
+    case malformedEmitters(String)
     case invalid([String])
 
     var errorDescription: String? {
         switch self {
         case .notAnObject(let path): return "\(path) is not a JSON object."
+        case .malformedEmitters(let path): return "\(path) has an \"emitters\" key that is not a list of entries."
         case .invalid(let problems): return problems.joined(separator: "\n")
         }
     }

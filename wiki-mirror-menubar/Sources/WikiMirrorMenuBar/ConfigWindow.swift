@@ -72,7 +72,9 @@ struct ConfigWindow: View {
                 Button("Revert") { load() }
                 Button("Save & Restart") { save() }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(!config.validate().isEmpty || store.busy != nil)
+                    // A failed load leaves an EMPTY default in hand; saving it would erase the
+                    // real file's emitters, token and every other key.
+                    .disabled(loadError != nil || !config.validate().isEmpty || store.busy != nil)
             }
         }
         .padding(16)
@@ -82,7 +84,16 @@ struct ConfigWindow: View {
     private var problems: some View {
         let issues = config.validate()
         if let loadError {
-            Label(loadError, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+            Label("Could not read \(loadedFrom): \(loadError). Fix the file by hand, then Revert.",
+                  systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(.red)
+        }
+        if store.configPathIsGuess && loadError == nil {
+            Label("No mirror is answering, so this is the config file the installed agent names.",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         if let saveError {
             Label(saveError, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.red)
@@ -184,7 +195,7 @@ private struct ServiceTab: View {
         VStack(alignment: .leading, spacing: 14) {
             GroupBox("Status") {
                 VStack(alignment: .leading, spacing: 4) {
-                    row("Agent", store.agentInstalled ? (store.agentLoaded ? "loaded" : "installed, not loaded") : "not installed")
+                    row("Agent", agentSummary)
                     row("Answering", store.status != nil ? "yes, pid \(store.status?.pid.map(String.init) ?? "?")" : "no")
                     if let info = LaunchAgent.info() {
                         row("Mode", info.mode)
@@ -214,12 +225,12 @@ private struct ServiceTab: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                     HStack {
-                        Button(store.agentInstalled ? "Reinstall" : "Install") {
+                        Button(store.agent.installed ? "Reinstall" : "Install") {
                             Task { await store.install(installerDirectory: installerDirectory, mode: mode) }
                         }
                         .disabled(installerDirectory.isEmpty || store.busy != nil)
                         Button("Uninstall") { Task { await store.uninstall() } }
-                            .disabled(!store.agentInstalled || store.busy != nil)
+                            .disabled(!store.agent.installed || store.busy != nil)
                         Spacer()
                         if let message = store.lastActionMessage {
                             Text(message).font(.caption).foregroundStyle(.secondary).lineLimit(2)
@@ -245,6 +256,13 @@ private struct ServiceTab: View {
             }
             launchAtLogin = SMAppService.mainApp.status == .enabled
         }
+    }
+
+    private var agentSummary: String {
+        guard store.agent.installed else { return "not installed" }
+        guard store.agent.loaded else { return "installed, not loaded" }
+        let exit = store.agent.lastExitCode.map { " (last exit \($0))" } ?? ""
+        return store.agent.running ? "running" : "loaded, not running\(exit)"
     }
 
     private func row(_ label: String, _ value: String) -> some View {

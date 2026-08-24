@@ -18,6 +18,12 @@ let package = Package(
         .executableTarget(
             name: "WikiMirrorMenuBar",
             path: "Sources/WikiMirrorMenuBar"
+        ),
+        // The config writer edits a file the CLI also owns, so it is worth testing on its own.
+        .testTarget(
+            name: "WikiMirrorMenuBarTests",
+            dependencies: ["WikiMirrorMenuBar"],
+            path: "Tests/WikiMirrorMenuBarTests"
         )
     ]
 )

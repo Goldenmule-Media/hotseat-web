@@ -22,8 +22,22 @@ struct LaunchAgentInfo {
         return workingDirectory.map { ($0 as NSString).appendingPathComponent("scripts") }
     }
 
+    /// The index of the script/binary in `programArguments`, past any interpreter flags.
+    private var scriptIndex: Int? {
+        programArguments.firstIndex { $0.hasSuffix(".ts") || $0.hasSuffix(".js") || $0.hasSuffix(".mjs") }
+    }
+
     /// The command that signs this machine in, so the app never hardcodes a runtime.
-    var loginCommand: [String] { programArguments + ["login"] }
+    ///
+    /// `login` must sit immediately AFTER the script, because the mirror only takes the login
+    /// path when it is `argv[0]`. Appending it at the end (past `--models-dir …`) silently starts
+    /// a SECOND mirror instead of signing in.
+    var loginCommand: [String]? {
+        guard let scriptIndex else { return nil }
+        var command = programArguments
+        command.insert("login", at: scriptIndex + 1)
+        return command
+    }
 }
 
 /// The launchd side of the service: install, inspect, restart, remove.
@@ -55,9 +69,25 @@ enum LaunchAgent {
 
     private static var domain: String { "gui/\(getuid())" }
 
-    /// Is the job loaded in the user's launchd domain right now?
-    static func isLoaded() async -> Bool {
-        await Shell.run("/bin/launchctl", ["print", "\(domain)/\(label)"]).succeeded
+    /// What launchd currently thinks of the job.
+    ///
+    /// `launchctl print` exiting 0 only means the job is BOOTSTRAPPED. A job that ran, exited 0,
+    /// and is being left alone by `KeepAlive {SuccessfulExit: false}` prints exactly the same way
+    /// as one that is running, which would leave the app saying "starting…" forever.
+    static func state() async -> AgentState {
+        guard isInstalled else { return AgentState(installed: false, loaded: false, running: false, lastExitCode: nil) }
+        let result = await Shell.run("/bin/launchctl", ["print", "\(domain)/\(label)"])
+        guard result.succeeded else {
+            return AgentState(installed: true, loaded: false, running: false, lastExitCode: nil)
+        }
+        let running = result.stdout.contains("state = running")
+        var lastExitCode: Int?
+        for line in result.stdout.split(separator: "\n") {
+            guard line.contains("last exit code =") else { continue }
+            lastExitCode = Int(line.split(separator: "=").last?.trimmingCharacters(in: .whitespaces) ?? "")
+            break
+        }
+        return AgentState(installed: true, loaded: true, running: running, lastExitCode: lastExitCode)
     }
 
     /// Restart the job in place — how a config change takes effect (the mirror reads it at startup).
@@ -86,12 +116,41 @@ enum LaunchAgent {
     /// Run the mirror's own `login` command and wait for it (it opens a browser and serves a
     /// loopback callback). The running mirror picks the new grant up on its next self-restart.
     static func signIn() async throws {
-        guard let command = info()?.loginCommand, let executable = command.first else {
+        guard let info = info() else {
             throw ShellError.failed(
                 command: "login",
                 result: ShellResult(status: -1, stdout: "", stderr: "No mirror is installed to sign in with.")
             )
         }
-        try await Shell.check(executable, Array(command.dropFirst()), cwd: info()?.workingDirectory)
+        guard let command = info.loginCommand, let executable = command.first else {
+            throw ShellError.failed(
+                command: "login",
+                result: ShellResult(
+                    status: -1,
+                    stdout: "",
+                    stderr: "Could not tell which program the agent runs, so there is nothing to sign in with. "
+                        + "Run `wiki-mirror login` yourself."
+                )
+            )
+        }
+        try await Shell.check(executable, Array(command.dropFirst()), cwd: info.workingDirectory)
     }
+
+    /// The `--config` path baked into the installed job, when it names one.
+    static func configuredPath() -> String? {
+        guard let arguments = info()?.programArguments,
+              let index = arguments.firstIndex(of: "--config"),
+              index + 1 < arguments.count
+        else { return nil }
+        return arguments[index + 1]
+    }
+}
+
+/// launchd's view of the job: bootstrapped is not the same as running.
+struct AgentState {
+    let installed: Bool
+    let loaded: Bool
+    let running: Bool
+    /// The job's last exit status, when launchd has one to report.
+    let lastExitCode: Int?
 }
