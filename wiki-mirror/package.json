@@ -1,6 +1,6 @@
 {
   "name": "wiki-mirror",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Local Markdown-disk mirror for a (possibly remote) wiki-server. A headless, schema-agnostic stream client: tails a workspace's Durable Stream, folds + renders each commit with the `wiki` engine, and writes the deterministic Markdown to a local checkout. The disk-writing sibling of wiki-ui; imports `wiki` + `wiki-models` only, never wiki-mcp/wiki-server.",
   "exports": {
