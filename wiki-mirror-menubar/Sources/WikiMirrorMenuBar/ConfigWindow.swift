@@ -59,6 +59,9 @@ struct ConfigWindow: View {
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
+                                // These cards ARE the config file; a way to reach it belongs here,
+                                // not only in the Service tab.
+                                RevealButton(path: loadedFrom, help: "Show the config file in Finder")
                                 Button("Add") { config.emitters.append(EmitterEntry()) }
                             }
                         }
@@ -378,16 +381,7 @@ private struct ServiceTab: View {
             Text(value).textSelection(.enabled)
             Spacer()
             if let reveal {
-                Button {
-                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: reveal)])
-                } label: {
-                    Image(systemName: "folder")
-                }
-                .buttonStyle(.borderless)
-                .help("Show in Finder")
-                // A path that does not exist yet (no log until the agent has run) would open the
-                // user's home folder instead, which looks like a bug.
-                .disabled(!FileManager.default.fileExists(atPath: reveal))
+                RevealButton(path: reveal)
             }
         }
     }
@@ -461,5 +455,24 @@ private struct PanelSection<Content: View, Accessory: View>: View {
 extension PanelSection where Accessory == EmptyView {
     init(_ title: String, boxed: Bool = true, @ViewBuilder content: @escaping () -> Content) {
         self.init(title, boxed: boxed, accessory: { EmptyView() }, content: content)
+    }
+}
+
+/// Reveals a file in Finder, selected in its containing folder.
+private struct RevealButton: View {
+    let path: String
+    var help = "Show in Finder"
+
+    var body: some View {
+        Button {
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+        } label: {
+            Image(systemName: "folder")
+        }
+        .buttonStyle(.borderless)
+        .help(help)
+        // A path that does not exist yet (no log until the agent has run, no config until the
+        // first save) would open the user's home folder instead, which looks like a bug.
+        .disabled(path.isEmpty || !FileManager.default.fileExists(atPath: path))
     }
 }

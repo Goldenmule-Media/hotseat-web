@@ -71,13 +71,31 @@ struct MenuContent: View {
                 Spacer()
             }
             HStack(spacing: 8) {
-                Button("Configure…") {
-                    openWindow(id: WikiMirrorApp.configWindowID)
-                    NSApp.activate(ignoringOtherApps: true)
-                }
+                Button("Configure…") { openConfiguration() }
                 Spacer()
                 Button("Quit") { NSApp.terminate(nil) }
             }
+        }
+    }
+
+    private func openConfiguration() {
+        // Dismiss FIRST: the panel would otherwise sit on top of the window we are opening, and
+        // closing it afterwards would close that window instead.
+        dismissMenu()
+        openWindow(id: WikiMirrorApp.configWindowID)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Close the menu-bar panel. `MenuBarExtra(style: .window)` exposes no dismiss API, so this
+    /// closes its window directly — identified by class, with a fallback to the key window only
+    /// when that is a titleless panel, so it can never close the configuration window by mistake.
+    private func dismissMenu() {
+        if let panel = NSApp.windows.first(where: { $0.isVisible && $0.className.contains("MenuBarExtra") }) {
+            panel.close()
+            return
+        }
+        if let key = NSApp.keyWindow, key.title.isEmpty {
+            key.close()
         }
     }
 }

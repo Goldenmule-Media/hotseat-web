@@ -17,6 +17,11 @@ enum MirrorHealth {
     case healthy
 
     /// Menu-bar glyph. Distinct SHAPES, not colors: the menu bar renders these monochrome.
+    ///
+    /// Healthy is a FILLED pair of documents — the steady state is "a second copy of the wiki
+    /// exists on this disk", not an action in progress. A refresh-arrows glyph read as "something
+    /// wants updating", which is the opposite of what a caught-up mirror means. Everything wrong
+    /// is an outline, so the filled shape alone reads as "good" at a glance.
     var symbol: String {
         switch self {
         case .notInstalled: return "circle.dotted"
@@ -26,9 +31,14 @@ enum MirrorHealth {
         case .hostUnreachable: return "bolt.horizontal.circle"
         case .degraded: return "exclamationmark.triangle"
         case .idle: return "tray"
-        case .healthy: return "arrow.triangle.2.circlepath"
+        case .healthy: return "doc.on.doc.fill"
         }
     }
+
+    /// Every case, for tests and for anything that wants to enumerate the states.
+    static let all: [MirrorHealth] = [
+        .notInstalled, .stopped, .starting, .signedOut, .hostUnreachable, .degraded, .idle, .healthy,
+    ]
 
     var summary: String {
         switch self {
