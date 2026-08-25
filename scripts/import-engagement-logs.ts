@@ -9,6 +9,16 @@
  *   tsx scripts/import-engagement-logs.ts --vault ~/Documents/Braindump --workspace ws:…
  *   tsx scripts/import-engagement-logs.ts --vault … --workspace ws:… --apply
  *
+ * Against the DEPLOYED server, once `engagement-log` has shipped there (the bundle is
+ * bind-mounted from `~/wiki-server/models`, so it takes a `./deploy.sh` run — a page type
+ * cannot be pushed to it remotely):
+ *
+ *   tsx scripts/import-engagement-logs.ts --stream-url https://hotseat.thegoldenmule.com \
+ *     --workspace ws:… --apply
+ *
+ * Auth follows the shared CLI precedence: `--token` / `$WIKI_TOKEN`, else a stored grant
+ * from `wiki-mirror login --stream-url <url>`.
+ *
  * TWO SOURCE FORMATS, both present in the vault:
  *
  *  (a) Obsidian era — entries are `### MM/DD/YY` headings, newest first in the file.
@@ -32,7 +42,8 @@ import { homedir } from "node:os";
 import { join, relative, resolve, sep } from "node:path";
 
 import { createWiki } from "wiki";
-import type { IWorkspaceHandle, WorkspaceId } from "wiki";
+import type { IStreamConfig, IWorkspaceHandle, WorkspaceId } from "wiki";
+import { resolveAuthorization } from "wiki/auth-client";
 import engagementPageTypes from "wiki-models/engagement";
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -47,6 +58,7 @@ interface Flags {
   apply: boolean;
   limit: number;
   only: string | undefined;
+  token: string | undefined;
 }
 
 function parseFlags(argv: readonly string[]): Flags {
@@ -65,6 +77,7 @@ function parseFlags(argv: readonly string[]): Flags {
     apply: argv.includes("--apply"),
     limit: Number(flag("limit") ?? "0") || 0,
     only: flag("only"),
+    token: flag("token") ?? process.env.WIKI_TOKEN,
   };
 }
 
@@ -104,6 +117,9 @@ const NOT_A_THREAD = [
   /^jd[ _:]/i,
   /^untitled/i,
 ];
+
+/** A trailing date on a filename: `Foo 8_3_20`, `Foo - 9_28_20`, `Foo: 1_19_2021`. */
+const DATED_NAME = /^(.{4,}?)[\s:—-]+\d{1,2}[ ._/-]\d{1,2}(?:[ ._/-]\d{2,4})?$/;
 
 /**
  * Undo the Evernote export's filename encoding. It could not put `:` or `<>` in a name, so
@@ -175,8 +191,32 @@ interface Thread {
  * would otherwise reject the second one.
  */
 function threads(found: readonly Candidate[]): Thread[] {
-  const groups = new Map<string, Thread>();
+  // A RECURRING SERIES writes the date into the filename — `Sprint Planning 8_3_20`,
+  // `Sprint Planning - 9_28_20`, `Sprint Planning_ 1_19_2021` — with the separator drifting
+  // over the years, so the titles all differ and none of them collide. Those are one
+  // meeting, not eleven. Collapse a dated name onto its base, but ONLY where the same
+  // directory holds two or more of them: a lone `Sprint Review 3_9_16` keeps its date,
+  // since one dated note is a note, not a series.
+  //
+  // The date is dropped rather than used — every one of these files carries its own
+  // `Created at:` footer, and where the two disagree the footer is machine-stamped while
+  // the filename is hand-typed (two of them are off by a year, both fitting their series
+  // better on the footer's reading).
+  const seriesCount = new Map<string, number>();
   for (const c of found) {
+    const base = DATED_NAME.exec(c.title);
+    if (base !== null) seriesCount.set(`${c.dir}/${base[1].trim()}`, (seriesCount.get(`${c.dir}/${base[1].trim()}`) ?? 0) + 1);
+  }
+  const seriesTitle = (c: Candidate): string => {
+    const m = DATED_NAME.exec(c.title);
+    if (m === null) return c.title;
+    const base = m[1].trim();
+    return (seriesCount.get(`${c.dir}/${base}`) ?? 0) >= 2 ? base : c.title;
+  };
+
+  const groups = new Map<string, Thread>();
+  for (const raw of found) {
+    const c = { ...raw, title: seriesTitle(raw) };
     const key = `${c.employer}/${c.title}`;
     const g = groups.get(key);
     if (g === undefined) groups.set(key, { key, title: c.title, employer: c.employer, dir: c.dir, files: [c] });
@@ -406,11 +446,17 @@ async function main(): Promise<void> {
   // The clock is a mutable box: each page's writes are stamped with ITS date, so an
   // imported thread's createdAt is the day it actually started, not today.
   let now = new Date().toISOString();
-  const wiki = createWiki({
-    stream: { baseUrl: flags.streamUrl, namespace: flags.namespace },
-    pageTypes: [...engagementPageTypes],
-    clock: () => now,
-  });
+  // Same auth precedence as the other CLIs (migrate-workspace, wiki-mirror): an explicit
+  // token wins, else a stored OAuth grant for the origin (`wiki-mirror login`) becomes a
+  // self-refreshing header, else no header at all for an open server. Without this the
+  // importer can only ever talk to an unauthenticated local server.
+  const authorization = resolveAuthorization(flags.streamUrl, flags.token);
+  const stream: IStreamConfig = {
+    baseUrl: flags.streamUrl,
+    namespace: flags.namespace,
+    ...(authorization !== undefined ? { headers: { authorization } } : {}),
+  };
+  const wiki = createWiki({ stream, pageTypes: [...engagementPageTypes], clock: () => now });
 
   const ws: IWorkspaceHandle = await wiki.openWorkspace(flags.workspace as WorkspaceId);
 
