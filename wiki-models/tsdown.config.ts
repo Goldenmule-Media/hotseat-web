@@ -25,6 +25,7 @@ export default defineConfig({
     "restatement-glossary": "src/restatement-glossary/index.ts",
     "spec-restatement": "src/spec-restatement/index.ts",
     study: "src/study/index.ts",
+    engagement: "src/engagement/index.ts",
   },
   format: ["esm"],
   platform: "node",
