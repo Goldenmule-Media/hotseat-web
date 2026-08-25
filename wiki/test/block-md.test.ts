@@ -328,3 +328,18 @@ describe("image blocks", () => {
     expect(blocks.map((b) => b.kind)).toEqual(["paragraph", "image", "paragraph"]);
   });
 });
+
+describe("tab-indented nesting (Obsidian / Evernote exports)", () => {
+  it("reads a leading tab as one indent, so a tab-nested sublist nests", () => {
+    let n = 0;
+    const blocks = parseBlocks("* Top one\n\t* Nested a\n\t* Nested b\n* Top two", () => `b${n++}`);
+    expect(blocks).toHaveLength(1);
+    const list = blocks[0] as Extract<IBlock, { kind: "list" }>;
+    expect(list.kind).toBe("list");
+    expect(list.items).toHaveLength(2);
+    // The first item carries its paragraph PLUS the nested list, not literal "* Nested a".
+    const sub = list.items[0].find((b) => b.kind === "list") as Extract<IBlock, { kind: "list" }>;
+    expect(sub).toBeDefined();
+    expect(sub.items).toHaveLength(2);
+  });
+});

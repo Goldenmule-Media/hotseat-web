@@ -227,10 +227,13 @@ function parseList(lines: readonly string[], start: number, newId: NewId): { blo
   while (i < lines.length) {
     const line = lines[i]!;
     if (isBlank(line)) break;
-    // Continuation before marker: a 2+-space-indented line belongs to the current item
-    // (a nested marker there is the ITEM's sublist, not a sibling).
-    if (items.length > 0 && /^ {2}/.test(line)) {
-      items[items.length - 1]!.push(line.slice(2));
+    // Continuation before marker: an indented line belongs to the current item (a nested
+    // marker there is the ITEM's sublist, not a sibling). A leading TAB counts as one
+    // indent alongside the renderer's two-space form — Obsidian and Evernote both emit
+    // tab-indented sublists, and without this a nested item degrades to literal text.
+    const indent = items.length > 0 ? /^(?: {2}|\t)/.exec(line) : null;
+    if (indent !== null) {
+      items[items.length - 1]!.push(line.slice(indent[0].length));
       i++;
       continue;
     }

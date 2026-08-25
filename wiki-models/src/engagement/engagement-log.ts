@@ -229,6 +229,19 @@ export const EngagementLog = definePageType({
       target: { section: "context", field: "body" },
       set: { body: arg("text") },
     },
+    setStanding: {
+      args: zodSchema(z.object({ markdown: z.string() })),
+      target: { section: "standing", field: "body" },
+      description: "Replace the persistent header — roster, format, profile. Takes Markdown.",
+      produces: (_page, args, ctx): SectionOp[] => [
+        {
+          op: "setField",
+          section: "standing",
+          field: "body",
+          value: { kind: "blocks", blocks: parseBlocks((args as { markdown: string }).markdown, ctx.newId) },
+        },
+      ],
+    },
 
     // ── entries (newest first: insert at index 0, never append) ──
     recordEntry: {
