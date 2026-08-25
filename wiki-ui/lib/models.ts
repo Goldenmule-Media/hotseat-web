@@ -10,6 +10,7 @@ import articlePageTypes from "wiki-models/article";
 import architecturePageTypes from "wiki-models/architecture";
 import bugPageTypes from "wiki-models/bug";
 import documentPageTypes from "wiki-models/document";
+import engagementPageTypes from "wiki-models/engagement";
 import featurePageTypes from "wiki-models/feature";
 import restatementGlossaryPageTypes from "wiki-models/restatement-glossary";
 import securityPageTypes from "wiki-models/security";
@@ -24,6 +25,7 @@ export const pageTypes: readonly IPageType[] = [
   ...architecturePageTypes,
   ...adrPageTypes,
   ...documentPageTypes,
+  ...engagementPageTypes,
   ...bugPageTypes,
   ...securityPageTypes,
   ...specRestatementPageTypes,
