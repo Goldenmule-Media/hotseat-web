@@ -45,6 +45,8 @@ import { createWiki } from "wiki";
 import type { IStreamConfig, IWorkspaceHandle, WorkspaceId } from "wiki";
 import { resolveAuthorization } from "wiki/auth-client";
 import engagementPageTypes from "wiki-models/engagement";
+// The folder tree is `toc` pages, so the importer's engine must know that type too.
+import tocPageTypes from "wiki-models/toc";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Flags
@@ -456,35 +458,97 @@ async function main(): Promise<void> {
     namespace: flags.namespace,
     ...(authorization !== undefined ? { headers: { authorization } } : {}),
   };
-  const wiki = createWiki({ stream, pageTypes: [...engagementPageTypes], clock: () => now });
+  const wiki = createWiki({ stream, pageTypes: [...engagementPageTypes, ...tocPageTypes], clock: () => now });
 
   const ws: IWorkspaceHandle = await wiki.openWorkspace(flags.workspace as WorkspaceId);
 
-  // Idempotency: a page whose provenance names a file is already imported.
-  const already = new Set<string>();
-  const flatten = (n: { id: string; type?: string; children?: readonly unknown[] }): { id: string; type?: string }[] => [
-    n,
-    ...((n.children ?? []) as { id: string; type?: string; children?: readonly unknown[] }[]).flatMap(flatten),
-  ];
-  for (const node of flatten(await ws.tree() as never)) {
-    if (node.type !== "engagement-log") continue;
-    const view = await ws.page(node.id as never);
-    const state = await view.state();
-    const src = state.sections.find((s) => s.key === "provenance")?.fields["source"];
-    if (src !== undefined && src.kind === "scalar" && String(src.value).length > 0) already.add(String(src.value));
+  // Idempotency + placement: remember where each already-imported page lives, so a re-run
+  // both skips it AND can move it if the folder tree changed.
+  const already = new Map<string, { id: string; parent: string | null }>();
+  const tocByPath = new Map<string, string>();
+  type Node = { id: string; type?: string; title?: string; children?: readonly Node[] };
+  const walk = (n: Node, parent: string | null, out: { node: Node; parent: string | null }[] = []) => {
+    out.push({ node: n, parent });
+    for (const c of n.children ?? []) walk(c, n.id, out);
+    return out;
+  };
+  const rootNode = (await ws.tree()) as unknown as Node;
+  const seen = walk(rootNode, null);
+  const rootId = rootNode.id;
+  for (const { node, parent } of seen) {
+    const at = parent === rootId ? null : parent;
+    if (node.type === "engagement-log") {
+      const state = await (await ws.page(node.id as never)).state();
+      const src = state.sections.find((x) => x.key === "provenance")?.fields["source"];
+      if (src !== undefined && src.kind === "scalar" && String(src.value).length > 0) {
+        already.set(String(src.value), { id: node.id, parent: at });
+      }
+    } else if (node.type === "toc") {
+      // Rebuild each toc's path from its ancestry, so a re-run reuses the existing tree
+      // instead of minting a second "Interviews" beside the first.
+      const chain: string[] = [];
+      let cur: { node: Node; parent: string | null } | undefined = { node, parent };
+      while (cur !== undefined && cur.node.id !== rootId) {
+        chain.unshift(cur.node.title ?? "");
+        const pid: string | null = cur.parent;
+        cur = pid === null ? undefined : seen.find((x) => x.node.id === pid);
+      }
+      tocByPath.set(chain.join("/"), node.id);
+    }
   }
+
+  /**
+   * The folder a thread belongs in, as wiki `toc` pages — the vault's own directory tree.
+   * `toc` renders a DERIVED view of its children, so a folder needs no content written to
+   * it: create the page, parent the threads under it, and the contents list follows.
+   * Created lazily and memoized per path, parents before children.
+   */
+  const folderFor = async (dir: string): Promise<string | null> => {
+    const segments = dir.split("/").filter((x) => x.length > 0);
+    let parent: string | null = null;
+    let path = "";
+    for (const segment of segments) {
+      path = path.length > 0 ? `${path}/${segment}` : segment;
+      const hit = tocByPath.get(path);
+      if (hit !== undefined) {
+        parent = hit;
+        continue;
+      }
+      if (!flags.apply) {
+        parent = `(toc:${path})`;
+        tocByPath.set(path, parent);
+        foldersPlanned.add(path);
+        continue;
+      }
+      const id = (await ws.createPage("toc", { title: segment, parentId: parent as never })).value;
+      tocByPath.set(path, id);
+      foldersPlanned.add(path);
+      parent = id;
+    }
+    return parent;
+  };
 
   let created = 0;
   let skipped = 0;
+  let moved = 0;
   let entryTotal = 0;
   let actionTotal = 0;
   const byFormat: Record<string, number> = {};
+  const foldersPlanned = new Set<string>();
   const problems: string[] = [];
 
   for (const th of list) {
     const source = th.files.map((f) => f.rel).join("; ");
-    if (already.has(source)) {
+    const existing = already.get(source);
+    if (existing !== undefined) {
       skipped++;
+      // Converge an earlier flat import onto the folder tree without re-importing:
+      // reparent in place, keeping the page's id and its whole event history.
+      const home = await folderFor(th.dir);
+      if (flags.apply && home !== null && existing.parent !== home) {
+        await ws.reparent(existing.id as never, home as never);
+        moved++;
+      }
       continue;
     }
     // Merge every file of a thread into one page, then re-sort the union: a thread split
@@ -507,7 +571,8 @@ async function main(): Promise<void> {
     if (!flags.apply) continue;
 
     now = parsed.created !== undefined ? `${parsed.created}T12:00:00.000Z` : new Date().toISOString();
-    const pageId = (await ws.createPage("engagement-log", { title: th.title, parentId: null })).value;
+    const home = await folderFor(th.dir);
+    const pageId = (await ws.createPage("engagement-log", { title: th.title, parentId: home as never })).value;
 
     // One atomic batch per page: the whole thread lands or none of it does.
     const batch: { command: string; args?: Record<string, unknown> }[] = [
@@ -546,7 +611,12 @@ async function main(): Promise<void> {
   console.log(`formats    ${Object.entries(byFormat).map(([k, v]) => `${k}=${v}`).join("  ")}`);
   console.log(`entries    ${entryTotal}`);
   console.log(`actions    ${actionTotal}`);
-  console.log(flags.apply ? `created    ${created}  (skipped ${skipped} already imported)` : `DRY RUN — nothing written. Pass --apply.`);
+  console.log(`folders    ${foldersPlanned.size}`);
+  console.log(
+    flags.apply
+      ? `created    ${created}  (skipped ${skipped} already imported, moved ${moved} into folders)`
+      : `DRY RUN — nothing written. Pass --apply.`,
+  );
   if (problems.length > 0) {
     console.log(`\nproblems (${problems.length}):`);
     for (const p of problems.slice(0, 25)) console.log(`  ${p}`);
