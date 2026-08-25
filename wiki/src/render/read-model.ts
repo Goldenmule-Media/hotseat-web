@@ -305,7 +305,13 @@ function renderElementBodyPart(
   if (f === undefined) return "";
   const body = elementFieldBody(f, label);
   if (body.length === 0) return "";
-  return part.label !== undefined ? `**${part.label}:** ${body}` : body;
+  if (part.label === undefined) return body;
+  // An inline-ish body (a scalar, a prose run) reads best with the label as a prefix. A
+  // BLOCK body is a document — a list, a fence, several paragraphs — and prefixing it
+  // swallows its first line into the label (`**Prep:** - first bullet`), breaking the
+  // construct. Those take the label as its own line.
+  const inline = f.kind === "scalar" || f.kind === "prose";
+  return inline ? `**${part.label}:** ${body}` : `**${part.label}:**\n\n${body}`;
 }
 
 /** Block-level rendering of one element field (fenced code, full blocks tree). */

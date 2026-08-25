@@ -14,7 +14,8 @@
     "./security": "./src/security/index.ts",
     "./restatement-glossary": "./src/restatement-glossary/index.ts",
     "./spec-restatement": "./src/spec-restatement/index.ts",
-    "./study": "./src/study/index.ts"
+    "./study": "./src/study/index.ts",
+    "./engagement": "./src/engagement/index.ts"
   },
   "files": [
     "dist"
