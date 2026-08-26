@@ -78,6 +78,17 @@ export function resolveAttachment(workspaceId: string, id: string): Promise<stri
 }
 
 /**
+ * The `src` an `<img>` can load for one image ref: an `attachment:` ref fetched with the
+ * bearer and handed back as an object URL, any ordinary URL passed through untouched.
+ * `null` when it is neither — the caller shows the alt text instead.
+ */
+export function imageSrc(workspaceId: string, ref: string): Promise<string | null> {
+  const id = parseAttachmentRef(ref);
+  if (id !== undefined) return resolveAttachment(workspaceId, id);
+  return Promise.resolve(/^(?:https?:|data:)/i.test(ref) ? ref : null);
+}
+
+/**
  * Swap every `attachment:` URL inside `root` for a fetched object URL. Runs after the
  * rendered HTML is inserted, and covers `<img src>` and `<a href>` alike — so an inline
  * image and a PDF link need no separate handling.

@@ -24,7 +24,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PageId, WorkspaceId } from "wiki";
 
 import { diffNotes, notesToDocument, NOTES_SECTION, READING, readSource, readSummary, splitNoteDocument } from "../lib/article-notes";
-import { uploadAttachment } from "../lib/attachments";
+import { imageSrc, uploadAttachment } from "../lib/attachments";
 import { usePageMutator, useSectionDocument } from "../lib/live";
 import { useStagedText } from "../lib/staged-text";
 import { useTypewriter } from "../lib/useTypewriter";
@@ -66,6 +66,7 @@ export function ArticleStudio({
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const upload = useCallback((file: File) => uploadAttachment(workspaceId, file), [workspaceId]);
+  const showImage = useCallback((ref: string) => imageSrc(workspaceId, ref), [workspaceId]);
 
   /** Blur out of the link: save it, and keep the typed text until the page re-renders with
    *  it (a rejected write falls back to the stored link, with the error banner saying why). */
@@ -229,6 +230,7 @@ export function ArticleStudio({
                   onTermClick={() => {}}
                   placeholder="What you made of it, in your own words."
                   onUploadImage={upload}
+                  onResolveImage={showImage}
                 />
               </div>
             </section>
@@ -270,6 +272,7 @@ export function ArticleStudio({
                 onTermClick={() => {}}
                 placeholder="Notes, in your own words. Paste an image to attach it."
                 onUploadImage={upload}
+                onResolveImage={showImage}
               />
             </div>
           </section>

@@ -12,14 +12,15 @@
  *  - {@link livePreview}: walks the visible syntax tree; formatting-mark nodes are
  *    replaced (hidden) unless a selection range touches their enclosing construct;
  *    inactive bullet-list markers render as a • widget; nested list lines are indented
- *    by their nesting depth.
+ *    by their nesting depth; an image renders as the PICTURE, its ref resolved by the
+ *    host (see {@link imagePreviewExtension}).
  *  - {@link termHighlight}: underlines glossary-term occurrences by status (same
  *    classes as the rendered view); mod-click on one reports the term id.
  */
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { defaultHighlightStyle, syntaxHighlighting, syntaxTree, HighlightStyle } from "@codemirror/language";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
-import { EditorState, type Extension, type Range } from "@codemirror/state";
+import { EditorState, Facet, type Extension, type Range } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, keymap, layer, RectangleMarker, ViewPlugin, type ViewUpdate, WidgetType } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import type { SyntaxNode, SyntaxNodeRef } from "@lezer/common";
@@ -43,6 +44,72 @@ const mdHighlight = HighlightStyle.define([
   { tag: tags.quote, color: "var(--muted)" },
   { tag: [tags.processingInstruction, tags.meta], color: "var(--muted)" },
 ]);
+
+// ── images: the picture, not the markup ─────────────────────────────────────────
+
+/** Turn an image's ref into something an `<img>` can load — `null` when it can't be
+ *  resolved, and the widget falls back to the alt text. Async because an
+ *  `attachment:` ref is bytes to fetch, not a URL. */
+export type ImageResolver = (ref: string) => Promise<string | null>;
+
+/** Read per rebuild (like the uploader), so an editor mounted before its resolver exists
+ *  still shows pictures once it arrives; `undefined` leaves images as plain markup. */
+const imageResolver = Facet.define<() => ImageResolver | undefined, () => ImageResolver | undefined>({
+  combine: (values) => values[0] ?? ((): undefined => undefined),
+});
+
+export function imagePreviewExtension(resolve: () => ImageResolver | undefined): Extension {
+  return imageResolver.of(resolve);
+}
+
+/** `![alt](ref)` or `![alt](ref "title")` — the same shape the engine reifies into an
+ *  image block (core/block-md `IMAGE_LINE`), so what draws as a picture here is exactly
+ *  what renders as one on the page. */
+const IMAGE_SOURCE = /^!\[([^\]]*)\]\(([^\s()]+)(?:\s+"[^"]*")?\)$/;
+
+export function parseImageSource(text: string): { readonly alt: string; readonly ref: string } | null {
+  const m = IMAGE_SOURCE.exec(text);
+  return m === null ? null : { alt: m[1]!, ref: m[2]! };
+}
+
+class ImageWidget extends WidgetType {
+  constructor(
+    private readonly ref: string,
+    private readonly alt: string,
+    private readonly resolve: ImageResolver,
+  ) {
+    super();
+  }
+
+  /** Same picture, same DOM — so a cursor move next door never refetches or flickers. */
+  override eq(other: ImageWidget): boolean {
+    return other.ref === this.ref && other.alt === this.alt;
+  }
+
+  override toDOM(view: EditorView): HTMLElement {
+    const wrap = document.createElement("span");
+    wrap.className = "cm-md-image";
+    const img = document.createElement("img");
+    img.alt = this.alt;
+    // The line's height is only known once the bytes land; CodeMirror measured before that.
+    img.addEventListener("load", () => view.requestMeasure());
+    wrap.append(img);
+    void this.resolve(this.ref).then((src) => {
+      if (src === null) {
+        wrap.classList.add("is-missing");
+        wrap.textContent = this.alt === "" ? "image" : this.alt;
+        return;
+      }
+      img.src = src;
+    });
+    return wrap;
+  }
+
+  /** Let a click through: it puts the caret beside the image, which reveals the markup. */
+  override ignoreEvent(): boolean {
+    return false;
+  }
+}
 
 // ── live preview: hide formatting marks outside the cursor's construct ──────────
 
@@ -97,8 +164,10 @@ function listDepthAt(state: EditorState, pos: number): number {
   return depth;
 }
 
-function selectionTouches(state: EditorState, from: number, to: number): boolean {
-  return state.selection.ranges.some((r) => r.to >= from && r.from <= to);
+/** Is the cursor inside this construct — i.e. is the writer editing it right now? An
+ *  editor nobody is in has no "right now": it reads as rendered, whole. */
+function selectionTouches(view: EditorView, from: number, to: number): boolean {
+  return view.hasFocus && view.state.selection.ranges.some((r) => r.to >= from && r.from <= to);
 }
 
 /** The enclosing construct a mark belongs to, or null (then the mark stays visible). */
@@ -107,6 +176,14 @@ function constructOf(node: SyntaxNodeRef, parents: readonly string[]): { from: n
     if (parents.includes(p.name)) return { from: p.from, to: p.to };
   }
   return null;
+}
+
+/** The widget an image node renders as, or null when it stays raw markup. */
+function imageAt(view: EditorView, from: number, to: number): ImageWidget | null {
+  const resolve = view.state.facet(imageResolver)();
+  if (resolve === undefined || selectionTouches(view, from, to)) return null;
+  const image = parseImageSource(view.state.doc.sliceString(from, to));
+  return image === null ? null : new ImageWidget(image.ref, image.alt, resolve);
 }
 
 function buildLiveDecorations(view: EditorView): DecorationSet {
@@ -125,10 +202,18 @@ function buildLiveDecorations(view: EditorView): DecorationSet {
       from,
       to,
       enter: (node) => {
+        if (node.name === "Image") {
+          const image = imageAt(view, node.from, node.to);
+          // No resolver, an unparseable ref, or the cursor in it: fall through and let the
+          // marks reveal the source, the way every other construct is edited.
+          if (image === null) return;
+          decos.push(Decoration.replace({ widget: image }).range(node.from, node.to));
+          return false;
+        }
         const parents = MARK_PARENTS[node.name];
         if (parents !== undefined) {
           const ctx = constructOf(node, parents);
-          if (ctx === null || selectionTouches(state, ctx.from, ctx.to)) return;
+          if (ctx === null || selectionTouches(view, ctx.from, ctx.to)) return;
           let hideTo = node.to;
           // A header mark owns its following space, so `## Title` renders flush.
           if (node.name === "HeaderMark" && hideTo < doc.length && doc.sliceString(hideTo, hideTo + 1) === " ") hideTo += 1;
@@ -141,7 +226,7 @@ function buildLiveDecorations(view: EditorView): DecorationSet {
           const text = doc.sliceString(node.from, node.to);
           if (!/^[-*+]$/.test(text)) return;
           const line = doc.lineAt(node.from);
-          if (selectionTouches(state, line.from, line.to)) return;
+          if (selectionTouches(view, line.from, line.to)) return;
           decos.push(Decoration.replace({ widget: BULLET }).range(node.from, node.to));
         }
       },
@@ -157,7 +242,7 @@ const livePreview = ViewPlugin.fromClass(
       this.decorations = buildLiveDecorations(view);
     }
     update(u: ViewUpdate): void {
-      if (u.docChanged || u.selectionSet || u.viewportChanged) this.decorations = buildLiveDecorations(u.view);
+      if (u.docChanged || u.selectionSet || u.viewportChanged || u.focusChanged) this.decorations = buildLiveDecorations(u.view);
     }
   },
   { decorations: (v) => v.decorations },
@@ -233,6 +318,10 @@ const editorTheme = EditorView.theme({
   ".cm-cursor": { borderLeftColor: "var(--text)" },
   ".cm-selectionBackground": { backgroundColor: "var(--accent-dim) !important" },
   ".cm-md-bullet": { color: "var(--muted)" },
+  // The picture sits in the text as a picture: as wide as it wants up to the editor.
+  ".cm-md-image": { display: "inline-block", maxWidth: "100%", verticalAlign: "top" },
+  ".cm-md-image img": { display: "block", maxWidth: "100%", height: "auto", borderRadius: "6px" },
+  ".cm-md-image.is-missing": { color: "var(--muted)", fontStyle: "italic" },
   // Zero-width, so the caret keeps the first character's place (see emptyDocPlaceholder);
   // the line clips it rather than let it overflow, which a narrow editor would scroll.
   ".cm-md-placeholder": { overflow: "hidden" },

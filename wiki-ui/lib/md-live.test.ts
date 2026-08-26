@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ownLinePadding } from "./md-live";
+import { ownLinePadding, parseImageSource } from "./md-live";
 
 describe("ownLinePadding", () => {
   it("adds nothing on an empty line", () => {
@@ -17,5 +17,26 @@ describe("ownLinePadding", () => {
 
   it("treats indentation as empty — a list item's marker is not words", () => {
     expect(ownLinePadding("   ", "  ")).toEqual({ lead: "", trail: "" });
+  });
+});
+
+describe("parseImageSource", () => {
+  it("reads a pasted attachment image", () => {
+    expect(parseImageSource(`![screenshot](attachment:${"d".repeat(64)})`)).toEqual({
+      alt: "screenshot",
+      ref: `attachment:${"d".repeat(64)}`,
+    });
+  });
+
+  it("reads an ordinary URL, title and all", () => {
+    expect(parseImageSource('![](https://example.com/a.png "A")')).toEqual({ alt: "", ref: "https://example.com/a.png" });
+  });
+
+  it("is null for the upload placeholder, which has no ref yet", () => {
+    expect(parseImageSource("![uploading a.png… #1]()")).toBeNull();
+  });
+
+  it("is null for a link, which is not an image", () => {
+    expect(parseImageSource("[a](https://example.com)")).toBeNull();
   });
 });

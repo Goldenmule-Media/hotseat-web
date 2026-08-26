@@ -11,11 +11,13 @@ import { useEffect, useRef } from "react";
 import { Annotation, Compartment, Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import {
+  imagePreviewExtension,
   imageUploadExtension,
   liveEditorBase,
   liveEditorTermsExtension,
   typewriterExtension,
   type EditorTermRef,
+  type ImageResolver,
 } from "../lib/md-live";
 
 /** Marks a dispatch that is REPLAYING the external `value` into the document. CodeMirror
@@ -35,6 +37,7 @@ export function MarkdownEditor({
   typewriter,
   focusSignal,
   onUploadImage,
+  onResolveImage,
 }: {
   value: string;
   onChange: (text: string) => void;
@@ -56,6 +59,9 @@ export function MarkdownEditor({
   /** Upload a pasted or dropped image and return its `attachment:<sha>` ref. Omitted =
    *  the editor takes no files, and a paste falls through to CodeMirror's default. */
   onUploadImage?: (file: File) => Promise<string>;
+  /** Resolve an image's ref to a loadable `src`, so images render as pictures rather than
+   *  as their markup. Omitted = they stay markup. */
+  onResolveImage?: ImageResolver;
 }): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -66,10 +72,12 @@ export function MarkdownEditor({
   const onBlurRef = useRef(onBlur);
   const onTermClickRef = useRef(onTermClick);
   const onUploadImageRef = useRef(onUploadImage);
+  const onResolveImageRef = useRef(onResolveImage);
   onChangeRef.current = onChange;
   onBlurRef.current = onBlur;
   onTermClickRef.current = onTermClick;
   onUploadImageRef.current = onUploadImage;
+  onResolveImageRef.current = onResolveImage;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -97,6 +105,7 @@ export function MarkdownEditor({
         // Reads the ref, so an editor mounted before its uploader is ready still works —
         // and one with no uploader lets the paste fall through untouched.
         imageUploadExtension(() => onUploadImageRef.current),
+        imagePreviewExtension(() => onResolveImageRef.current),
         termsComp.current.of(liveEditorTermsExtension({ terms, onTermClick: (id) => onTermClickRef.current(id) })),
         typewriterComp.current.of(typewriter === true ? typewriterExtension() : []),
         EditorView.updateListener.of((u) => {
