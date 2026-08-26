@@ -479,6 +479,17 @@ function makeApi(conn: PortConn): WikiHostApi {
         throw toWikiErrorDTO(e);
       }
     },
+    async pageScalar(ws: WorkspaceId, page: PageId, sectionKey: string, field: string) {
+      const host = await ensureHost(ws);
+      try {
+        const h = await host.handle();
+        const state = await (await h.page(page)).state();
+        const f = state.sections.find((s) => s.key === sectionKey)?.fields[field];
+        return f !== undefined && f.kind === "scalar" ? String(f.value) : "";
+      } catch {
+        return "";
+      }
+    },
     async listSectionElements(ws: WorkspaceId, page: PageId, sectionKey: string) {
       const host = await ensureHost(ws);
       try {

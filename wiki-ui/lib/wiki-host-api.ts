@@ -183,6 +183,11 @@ export interface WikiHostApi {
   /** The elements of a section's list field (first list field under `sectionKey`), read
    *  from the folded page state. Empty when the section (or a list field) is absent. */
   listSectionElements(ws: WorkspaceId, page: PageId, sectionKey: string): Promise<readonly SectionElementSummary[]>;
+  /** ONE scalar field's value as a string, from the folded page state — for a stored
+   *  DISPLAY MODE the editor has to reflect (which of two render configs is live). Empty
+   *  string when the section, the field, or the page is absent, which is the same thing a
+   *  freshly materialized scalar reads as. */
+  pageScalar(ws: WorkspaceId, page: PageId, sectionKey: string, field: string): Promise<string>;
 
   mutate(ws: WorkspaceId, page: PageId, command: string, args: Record<string, unknown>): Promise<void>;
   /** Create a page (plus any `requiredChildren`, recursively) as ONE atomic commit and

@@ -15,10 +15,11 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import type { PageId, WorkspaceId } from "wiki";
 import { fsmOf } from "../lib/host-client";
-import { useLiveWorkspace, usePage, usePageMutations, useStructuralMutator } from "../lib/live";
+import { useLiveWorkspace, usePage, usePageMutations, usePageMutator, usePageScalar, useStructuralMutator } from "../lib/live";
 import { resolveAttachmentsIn } from "../lib/attachments";
 import { renderMarkdown } from "../lib/markdown";
 import * as perf from "../lib/perf";
+import { contentsModeOf } from "../lib/contents-mode";
 import { defOf, typesRenderingOwnChildren } from "../lib/models";
 import { pageHref } from "../lib/routes";
 import { clearScrollTarget, scrollToTerms, useScrollTarget } from "../lib/search-scroll";
@@ -29,6 +30,7 @@ import { GLOSSARY_PAGE_TYPE } from "../lib/glossary";
 import { RESTATE_PAGE_TYPE } from "../lib/restate";
 import { STUDY_PAGE_TYPE } from "../lib/study";
 import { isStudioView, preferredViewMode, rememberViewMode, type StudioView, type ViewMode } from "../lib/view-mode";
+import { CreatePageModal } from "./CreatePageModal";
 import { FsmGraph } from "./FsmGraph";
 import { ArticleStudio } from "./ArticleStudio";
 import { GlossaryStudio } from "./GlossaryStudio";
@@ -196,6 +198,20 @@ export function PageView({
   // The page TYPE's content schema (sections/fields/mutableIn), read synchronously from the
   // build-time-bundled page types — no worker round-trip (see lib/models.ts defOf).
   const def = useMemo(() => defOf(pageType), [pageType]);
+
+  // A type that can INLINE its children declares how to toggle it (which field, which
+  // command, which values). Null for every type that cannot — no `toc` literal here.
+  const contentsMode = useMemo(() => contentsModeOf(def), [def]);
+  const modeField = useMemo(() => {
+    const s = def?.render.sections.find((x) => x.section === "@children-content");
+    const f = s?.when?.field;
+    const dot = f === undefined ? -1 : f.indexOf(".");
+    return dot < 0 || f === undefined ? null : { section: f.slice(0, dot), key: f.slice(dot + 1) };
+  }, [def]);
+  const modeValue = usePageScalar(workspaceId, pageId, modeField?.section ?? null, modeField?.key ?? null);
+  const inlined = contentsMode !== null && modeValue === contentsMode.inline;
+  const modeMutator = usePageMutator(workspaceId, pageId);
+  const [addChildOpen, setAddChildOpen] = useState(false);
 
   const currentStatus = node?.status ?? fsm?.initial ?? "";
   // The header always shows the current status; a terminal (sealed/final) status gets the
@@ -436,6 +452,39 @@ export function PageView({
         <p className="muted">Loading page…</p>
       ) : (
         <>
+          {contentsMode !== null && (
+            <div className="contents-controls">
+              <div className="mode-toggle" role="group" aria-label="How to show child pages">
+                {[
+                  { value: contentsMode.links, label: "List" },
+                  { value: contentsMode.inline, label: "Feed" },
+                ].map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    aria-pressed={inlined === (opt.value === contentsMode.inline)}
+                    disabled={modeMutator.pending}
+                    onClick={() => {
+                      void modeMutator.run(contentsMode.command, { [contentsMode.arg]: opt.value });
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <button type="button" onClick={() => setAddChildOpen(true)}>
+                + New page here
+              </button>
+              {modeMutator.error !== null && <span className="error">{modeMutator.error}</span>}
+            </div>
+          )}
+          {addChildOpen && (
+            <CreatePageModal
+              workspaceId={workspaceId}
+              initialParentId={pageId}
+              onClose={() => setAddChildOpen(false)}
+            />
+          )}
           {/* eslint-disable-next-line react/no-danger */}
           <article
             ref={articleRef}

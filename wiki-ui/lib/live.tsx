@@ -404,6 +404,39 @@ export function usePageMutations(workspaceId: WorkspaceId, pageId: PageId): Page
   return state;
 }
 
+/**
+ * One scalar off the open page, re-read whenever a commit lands. Used for a stored DISPLAY
+ * MODE the editor must reflect: the render picks a config from this same field, so the
+ * toggle and the page agree without the component knowing which field it is.
+ */
+export function usePageScalar(
+  workspaceId: WorkspaceId,
+  pageId: PageId,
+  section: string | null,
+  field: string | null,
+): string {
+  const ws = useLiveWorkspace(workspaceId);
+  const [value, setValue] = useState("");
+
+  useEffect(() => {
+    if (typeof window === "undefined" || section === null || field === null) return;
+    let cancelled = false;
+    getHost()
+      .then((h) => h.pageScalar(workspaceId, pageId, section, field))
+      .then((v) => {
+        if (!cancelled) setValue(v);
+      })
+      .catch(() => {
+        if (!cancelled) setValue("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, pageId, section, field, ws.lastEventAt]);
+
+  return value;
+}
+
 export interface PageMutator {
   /** Run a page-scoped command; resolves `true` on commit, `false` on a rejected write (with
    *  {@link PageMutator.error} set). The committed event flows back through the worker's tail,

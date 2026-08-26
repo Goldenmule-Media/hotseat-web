@@ -62,6 +62,7 @@ export interface WikiHost {
   renderElement(ws: WorkspaceId, page: PageId, sectionKey: string, elementId: string): Promise<string>;
   renderSectionElements(ws: WorkspaceId, page: PageId, sectionKey: string): Promise<readonly RenderedElement[]>;
   listSectionElements(ws: WorkspaceId, page: PageId, sectionKey: string): Promise<readonly SectionElementSummary[]>;
+  pageScalar(ws: WorkspaceId, page: PageId, sectionKey: string, field: string): Promise<string>;
   mutate(ws: WorkspaceId, page: PageId, command: string, args: Record<string, unknown>): Promise<void>;
   createPage(ws: WorkspaceId, type: string, title: string, parentId: PageId | null): Promise<PageId>;
   setPageTitle(ws: WorkspaceId, page: PageId, title: string): Promise<void>;
@@ -221,6 +222,8 @@ async function connect(): Promise<WikiHost> {
       perf.rpc("renderSectionElements", page, guard(remote.renderSectionElements(ws, page, sectionKey))),
     listSectionElements: (ws, page, sectionKey) =>
       perf.rpc("listSectionElements", page, guard(remote.listSectionElements(ws, page, sectionKey))),
+    pageScalar: (ws, page, sectionKey, field) =>
+      perf.rpc("pageScalar", page, guard(remote.pageScalar(ws, page, sectionKey, field))),
     mutate: (ws, page, command, args) => guard(remote.mutate(ws, page, command, args)),
     createPage: (ws, type, title, parentId) => guard(remote.createPage(ws, type, title, parentId)),
     setPageTitle: (ws, page, title) => guard(remote.setPageTitle(ws, page, title)),

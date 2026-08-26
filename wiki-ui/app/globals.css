@@ -3435,3 +3435,41 @@ button.restate-card-lead:hover {
 .article-doc-short {
   min-height: 5rem;
 }
+
+/* Child-display controls on a type that can inline its children (see lib/contents-mode). */
+.contents-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.contents-controls .mode-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.contents-controls .mode-toggle button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 4px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.contents-controls .mode-toggle button + button {
+  border-left: 1px solid var(--border);
+}
+.contents-controls .mode-toggle button[aria-pressed="true"] {
+  background: var(--border);
+  color: var(--fg);
+}
+.contents-controls .mode-toggle button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.contents-controls .error {
+  color: var(--red);
+  font-size: 13px;
+}
