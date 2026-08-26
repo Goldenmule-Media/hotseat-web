@@ -1067,9 +1067,23 @@ export type DeclarativeCommandMap = Readonly<Record<string, DeclarativeCommand>>
 // ────────────────────────────────────────────────────────────────────────────
 
 export interface SectionRender {
-  /** A page section key, the engine pseudo-sections `@references`/`@children`, or — when
-   *  `derived` is set — ignored (the body comes from the named {@link DerivedList}). */
+  /** A page section key, the engine pseudo-sections `@references`/`@children`/
+   *  `@children-content`, or — when `derived` is set — ignored (the body comes from the
+   *  named {@link DerivedList}).
+   *
+   *  `@children` lists the child pages as links. `@children-content` INLINES each child's
+   *  fully rendered Markdown instead, newest first by `createdAt`, with its headings
+   *  demoted so the child's title sits under this section — a page that shows what is in
+   *  its children rather than just their names. Archived children are omitted from both. */
   readonly section?: string;
+  /**
+   * Render this section only when a page scalar matches — `field` is `"<section>.<field>"`.
+   * The one thing a static render config cannot otherwise express is a display mode the
+   * PAGE stores and a person toggles, so two configs can name the same content and let
+   * stored state pick between them. A `field` naming a missing section/field never
+   * matches, so an unset mode falls through to whichever config tests for the default.
+   */
+  readonly when?: { readonly field: string; readonly equals: string; readonly orUnset?: boolean };
   /** Render this section's body from a model-declared {@link DerivedList} rather
    *  than a page field — a projection of cross-page state (e.g. the plan's steps). */
   readonly derived?: string;

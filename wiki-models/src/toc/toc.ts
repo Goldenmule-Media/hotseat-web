@@ -139,6 +139,17 @@ export const Toc = definePageType({
       mutableIn: ["active"],
       fields: { items: { kind: "list", element: "entry", ordered: true } },
     },
+    // How this TOC shows its children. `links` (the default) is an index — curated,
+    // grouped, ordered. `inline` is a FEED: every child rendered in full, newest first,
+    // so a page of dated notes reads as one document instead of a list of names. The mode
+    // is page state rather than a second page type, because it is a view of the same
+    // children and a person flips it in the editor.
+    display: {
+      name: "Display",
+      required: true,
+      mutableIn: ["active"],
+      fields: { contents: { kind: "scalar", schema: zodSchema(z.enum(["links", "inline"])) } },
+    },
   },
   elements: {
     group: {
@@ -151,6 +162,13 @@ export const Toc = definePageType({
   sectionSet: { mode: "closed" },
   derived: { contents },
   commands: {
+    /** Flip between the curated link index and the inline feed. */
+    setContentsMode: {
+      args: zodSchema(z.object({ mode: z.enum(["links", "inline"]) })),
+      description: "Show child pages as a curated list of links, or inline their full content newest-first.",
+      target: { section: "display", field: "contents" },
+      set: { contents: arg("mode") },
+    },
     /** Set the lead paragraph shown above the contents. */
     setOverview: {
       args: zodSchema(z.object({ text: z.string() })),
@@ -295,7 +313,20 @@ export const Toc = definePageType({
     graphSections: false,
     sections: [
       { section: "overview", heading: "Overview", field: "body", as: "block", placeholder: "_No overview yet._" },
-      { derived: "contents", heading: "Contents", placeholder: "_No pages yet._" },
+      // Two configs over the same children; the stored mode picks one. `inline` must be
+      // tested explicitly so an unset display falls through to the curated link list.
+      {
+        section: "@children-content",
+        heading: "Contents",
+        placeholder: "_No pages yet._",
+        when: { field: "display.contents", equals: "inline" },
+      },
+      {
+        derived: "contents",
+        heading: "Contents",
+        placeholder: "_No pages yet._",
+        when: { field: "display.contents", equals: "links", orUnset: true },
+      },
     ],
   },
 });

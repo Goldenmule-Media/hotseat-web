@@ -368,7 +368,7 @@ function renderFieldBody(
 // Page rendering
 // ────────────────────────────────────────────────────────────────────────────
 
-export function renderPage(state: IWorkspaceState, pageId: PageId, registry: Registry): string {
+export function renderPage(state: IWorkspaceState, pageId: PageId, registry: Registry, depth = 0): string {
   const node = state.pages.get(pageId);
   if (node === undefined) {
     return joinBlocks([heading(1, "Unknown page"), placeholder("_Page not found._")]);
@@ -387,6 +387,15 @@ export function renderPage(state: IWorkspaceState, pageId: PageId, registry: Reg
   blocks.push(statusBadge(node.status));
 
   for (const sr of config.sections) {
+    // A stored display mode can select between two configs naming the same content.
+    if (sr.when !== undefined && !whenMatches(node, sr.when)) continue;
+    // Child pages inlined in full, newest first — a feed rather than an index.
+    if (sr.section === "@children-content") {
+      blocks.push(
+        section(heading(2, sr.heading ?? "Contents"), renderChildContent(node.id, state, registry, ctx, sr.placeholder, depth)),
+      );
+      continue;
+    }
     // A DERIVED checklist: a model projection of folded state (e.g. the plan's steps +
     // local progress), not a page field. Rendered byte-stably.
     if (sr.derived !== undefined) {
@@ -534,6 +543,66 @@ export function renderPageElement(
 // ────────────────────────────────────────────────────────────────────────────
 // Workspace rendering
 // ────────────────────────────────────────────────────────────────────────────
+
+/** How deep `@children-content` will inline before falling back to a link list. */
+const MAX_INLINE_DEPTH = 2;
+
+/** Does the page scalar named by `"<section>.<field>"` select this render config? */
+function whenMatches(node: IPageNode, when: { field: string; equals: string; orUnset?: boolean }): boolean {
+  const dot = when.field.indexOf(".");
+  if (dot < 0) return false;
+  const f = node.sections.find((x) => x.key === when.field.slice(0, dot))?.fields[when.field.slice(dot + 1)];
+  const value = f !== undefined && f.kind === "scalar" ? String(f.value) : "";
+  return value === when.equals || (when.orUnset === true && value.length === 0);
+}
+
+/**
+ * Demote every ATX heading by `by` levels, clamped at H6 — so an inlined child's `# Title`
+ * sits below the section heading that contains it. Fence-aware: a `#` inside a code block
+ * is content, not a heading, and must survive untouched.
+ */
+function demoteHeadings(markdown: string, by: number): string {
+  let fence: string | null = null;
+  return markdown
+    .split("\n")
+    .map((line) => {
+      const open = /^\s*(`{3,}|~{3,})/.exec(line);
+      if (open !== null) {
+        if (fence === null) fence = open[1][0];
+        else if (line.trimStart().startsWith(fence.repeat(3))) fence = null;
+        return line;
+      }
+      if (fence !== null) return line;
+      const h = /^(#{1,6})(\s)/.exec(line);
+      return h === null ? line : "#".repeat(Math.min(6, h[1].length + by)) + h[2] + line.slice(h[0].length);
+    })
+    .join("\n");
+}
+
+/**
+ * Every non-archived child rendered IN FULL, newest first by `createdAt`. Ties break on
+ * page id so equal timestamps — a bulk import stamps many — still order deterministically.
+ * Past {@link MAX_INLINE_DEPTH} it degrades to the link list rather than recursing, so a
+ * feed of feeds terminates.
+ */
+function renderChildContent(
+  id: PageId,
+  state: IWorkspaceState,
+  registry: Registry,
+  ctx: IRenderCtx,
+  ph: string | undefined,
+  depth: number,
+): string {
+  const children = ctx.childrenOf(id).filter((c) => !ctx.archivedOf(c));
+  if (children.length === 0) return ph ?? placeholder();
+  if (depth >= MAX_INLINE_DEPTH) return renderChildList(id, ctx);
+  const ordered = [...children].sort((a, b) => {
+    const at = state.pages.get(a)?.createdAt ?? "";
+    const bt = state.pages.get(b)?.createdAt ?? "";
+    return at === bt ? String(a).localeCompare(String(b)) : bt.localeCompare(at);
+  });
+  return joinBlocks(ordered.map((c) => demoteHeadings(renderPage(state, c, registry, depth + 1), 2)));
+}
 
 export function renderWorkspace(state: IWorkspaceState, registry: Registry): string {
   const ctx = buildRenderCtx(state, registry);
