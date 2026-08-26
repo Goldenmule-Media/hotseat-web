@@ -12,12 +12,13 @@
  *  live, precondition-aware mutation overlay. */
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import type { PageId, WorkspaceId } from "wiki";
 import { fsmOf } from "../lib/host-client";
 import { useLiveWorkspace, usePage, usePageMutations, useStructuralMutator } from "../lib/live";
 import { resolveAttachmentsIn } from "../lib/attachments";
 import { renderMarkdown } from "../lib/markdown";
+import * as perf from "../lib/perf";
 import { defOf, typesRenderingOwnChildren } from "../lib/models";
 import { pageHref } from "../lib/routes";
 import { clearScrollTarget, scrollToTerms, useScrollTarget } from "../lib/search-scroll";
@@ -62,9 +63,14 @@ export function PageView({
   const [copied, setCopied] = useState(false);
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const ws = useLiveWorkspace(workspaceId);
-  const { markdown, loading, error, unknownType } = usePage(workspaceId, pageId);
+  const { markdown, loading, error, unknownType, pageId: contentPageId } = usePage(workspaceId, pageId);
   const { descriptors } = usePageMutations(workspaceId, pageId);
   const structural = useStructuralMutator(workspaceId);
+
+  // The route segment for this page has committed. Layout effect, and keyed on the params
+  // rather than on mount: App Router UPDATES this component across a [pageId] change, it does
+  // not remount it.
+  useLayoutEffect(() => perf.routeCommit(workspaceId, pageId), [workspaceId, pageId]);
 
   const node = findNode(ws.tree, pageId);
   const pageType = node?.type;
@@ -123,12 +129,34 @@ export function PageView({
     return { title: null, body: markdown };
   }, [markdown]);
 
-  const html = useMemo(() => renderMarkdown(body, workspaceId), [body, workspaceId]);
+  const html = useMemo(
+    () => perf.timeMarkdown(contentPageId ?? pageId, body.length, () => renderMarkdown(body, workspaceId)),
+    [body, workspaceId, contentPageId, pageId],
+  );
+
+  const articleRef = useRef<HTMLElement>(null);
+
+  // Paint completion. Double rAF: the first callback runs before the frame carrying this commit
+  // is painted, the second at the start of the next one — i.e. after presentation. That
+  // over-reports by up to one frame, uniformly, so comparisons stay valid.
+  useEffect(() => {
+    if (contentPageId === null) return;
+    let second = 0;
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(() => {
+        // Only the content view paints an <article>; a studio/model view is a different render.
+        if (articleRef.current !== null) perf.painted(contentPageId, html.length);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(first);
+      cancelAnimationFrame(second);
+    };
+  }, [contentPageId, html]);
 
   // Scroll-to-match: when a search result for THIS page is chosen, the palette parks a
   // target; once the body is rendered we scroll to and highlight the matched text, then
   // clear it so it fires once. Only meaningful in the content view.
-  const articleRef = useRef<HTMLElement>(null);
   const scrollTarget = useScrollTarget();
   useEffect(() => {
     if (mode !== "content") return;
@@ -409,7 +437,13 @@ export function PageView({
       ) : (
         <>
           {/* eslint-disable-next-line react/no-danger */}
-          <article ref={articleRef} className="markdown" onClick={onClick} dangerouslySetInnerHTML={{ __html: html }} />
+          <article
+            ref={articleRef}
+            className="markdown"
+            data-page-id={contentPageId ?? undefined}
+            onClick={onClick}
+            dangerouslySetInnerHTML={{ __html: html }}
+          />
           {children.length > 0 && (
             <nav className="child-links" aria-label="Child pages">
               <h2>Child pages</h2>

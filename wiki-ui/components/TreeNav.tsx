@@ -18,6 +18,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { ITreeNode, PageId, WorkspaceId } from "wiki";
+import * as perf from "../lib/perf";
 import { pageHref } from "../lib/routes";
 import { useChildOrder, type ChildOrder } from "../lib/useChildOrder";
 import { useCollapsed, type CollapsedState } from "../lib/useCollapsed";
@@ -156,8 +157,11 @@ function TreeItem({
   // The WHOLE row is one click target (no separate caret hit area): a row that isn't the
   // current page just SELECTS it; a row that already is toggles its expand/collapse.
   const activate = (): void => {
-    if (!isActive) router.push(href);
-    else if (hasChildren) ctx.collapse.toggle(id);
+    if (!isActive) {
+      // Stamped inside our own handler, so the measured click excludes event dispatch.
+      perf.navStart(ctx.workspaceId, id, ctx.activePageId);
+      router.push(href);
+    } else if (hasChildren) ctx.collapse.toggle(id);
   };
 
   return (
@@ -166,6 +170,7 @@ function TreeItem({
         className={`tree-row${isActive ? " active" : ""}${isDragging ? " dragging" : ""}${
           intent !== null ? ` drop-${zone}` : ""
         }`}
+        data-page-id={id}
         role="link"
         tabIndex={0}
         aria-current={isActive ? "page" : undefined}

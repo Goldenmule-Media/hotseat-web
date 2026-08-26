@@ -21,6 +21,7 @@
 import * as Comlink from "comlink";
 import type { FsmDescriptor, IMutationDescriptor, IWorkspaceSummary, PageId, SearchHit, WorkspaceId } from "wiki";
 import { getToken, notifyUnauthorized } from "./auth";
+import * as perf from "./perf";
 import {
   classifyError,
   type HostSearchOpts,
@@ -130,6 +131,8 @@ export function getHost(): Promise<WikiHost> {
 }
 
 async function connect(): Promise<WikiHost> {
+  perf.installBridge();
+  perf.bootMark("connectStart");
   if (!isHostSupported()) throw new UnsupportedBrowserError();
 
   let worker: SharedWorker;
@@ -146,6 +149,7 @@ async function connect(): Promise<WikiHost> {
     );
   }
 
+  perf.bootMark("workerCtorAt");
   worker.port.start();
   const remote = Comlink.wrap<WikiHostApi>(worker.port);
   remoteRef = remote;
@@ -156,7 +160,9 @@ async function connect(): Promise<WikiHost> {
   const token = getToken();
   if (token !== null) await remote.setAuthToken(token);
 
+  perf.bootMark("handshakeStart");
   const { fsm } = await remote.handshake();
+  perf.bootMark("handshakeEnd");
   for (const [type, descriptor] of Object.entries(fsm)) fsmCache.set(type, descriptor);
   fsmReadyFlag = true;
 
@@ -207,11 +213,14 @@ async function connect(): Promise<WikiHost> {
     search: (query, opts) => guard(remote.search(query, opts)),
     primeSearchIndex: () => guard(remote.primeSearchIndex()),
     ensureWorkspace: (ws) => guard(remote.ensureWorkspace(ws)),
-    toMarkdown: (ws, page) => guard(remote.toMarkdown(ws, page)),
-    describeMutations: (ws, page) => guard(remote.describeMutations(ws, page)),
-    renderElement: (ws, page, sectionKey, elementId) => guard(remote.renderElement(ws, page, sectionKey, elementId)),
-    renderSectionElements: (ws, page, sectionKey) => guard(remote.renderSectionElements(ws, page, sectionKey)),
-    listSectionElements: (ws, page, sectionKey) => guard(remote.listSectionElements(ws, page, sectionKey)),
+    toMarkdown: (ws, page) => perf.rpc("toMarkdown", page, guard(remote.toMarkdown(ws, page))),
+    describeMutations: (ws, page) => perf.rpc("describeMutations", page, guard(remote.describeMutations(ws, page))),
+    renderElement: (ws, page, sectionKey, elementId) =>
+      perf.rpc("renderElement", page, guard(remote.renderElement(ws, page, sectionKey, elementId))),
+    renderSectionElements: (ws, page, sectionKey) =>
+      perf.rpc("renderSectionElements", page, guard(remote.renderSectionElements(ws, page, sectionKey))),
+    listSectionElements: (ws, page, sectionKey) =>
+      perf.rpc("listSectionElements", page, guard(remote.listSectionElements(ws, page, sectionKey))),
     mutate: (ws, page, command, args) => guard(remote.mutate(ws, page, command, args)),
     createPage: (ws, type, title, parentId) => guard(remote.createPage(ws, type, title, parentId)),
     setPageTitle: (ws, page, title) => guard(remote.setPageTitle(ws, page, title)),

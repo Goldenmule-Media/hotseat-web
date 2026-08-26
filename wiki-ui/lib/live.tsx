@@ -147,9 +147,15 @@ export interface PageContent {
   readonly error: string | null;
   /** The server has a page type this build's bundle does not know. */
   readonly unknownType: boolean;
+  /**
+   * The page `markdown` was rendered FOR. During a navigation this LAGS the requested page:
+   * the previous page's body is deliberately kept on screen while the next one loads, and this
+   * is the only thing that says so — the route and the props have already moved on.
+   */
+  readonly pageId: PageId | null;
 }
 
-const PAGE_PENDING: PageContent = { markdown: null, loading: true, error: null, unknownType: false };
+const PAGE_PENDING: PageContent = { markdown: null, loading: true, error: null, unknownType: false, pageId: null };
 
 export function usePage(workspaceId: WorkspaceId, pageId: PageId): PageContent {
   const ws = useLiveWorkspace(workspaceId);
@@ -163,12 +169,19 @@ export function usePage(workspaceId: WorkspaceId, pageId: PageId): PageContent {
     getHost()
       .then((h) => h.toMarkdown(workspaceId, pageId))
       .then((md) => {
-        if (!cancelled) setContent({ markdown: md, loading: false, error: null, unknownType: false });
+        // `pageId` comes from the effect closure — the page this read was ISSUED for.
+        if (!cancelled) setContent({ markdown: md, loading: false, error: null, unknownType: false, pageId });
       })
       .catch((e: unknown) => {
         if (cancelled) return;
         const err = classifyError(e);
-        setContent({ markdown: null, loading: false, error: err.message, unknownType: err.kind === "unknown-page-type" });
+        setContent({
+          markdown: null,
+          loading: false,
+          error: err.message,
+          unknownType: err.kind === "unknown-page-type",
+          pageId,
+        });
       });
     return () => {
       cancelled = true;
