@@ -15,3 +15,5 @@ next-env.d.ts
 /bench/fixture/manifest.json
 /bench/results
 /.next-bench
+/test-results
+/playwright-report
