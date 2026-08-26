@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ownLinePadding, parseImageSource } from "./md-live";
+import { isBlockImage, ownLinePadding, parseImageSource } from "./md-live";
 
 describe("ownLinePadding", () => {
   it("adds nothing on an empty line", () => {
@@ -38,5 +38,24 @@ describe("parseImageSource", () => {
 
   it("is null for a link, which is not an image", () => {
     expect(parseImageSource("[a](https://example.com)")).toBeNull();
+  });
+});
+
+describe("isBlockImage", () => {
+  it("is a block image alone on its line", () => {
+    expect(isBlockImage("", "")).toBe(true);
+    expect(isBlockImage("   ", "  ")).toBe(true);
+  });
+
+  it("is a block image under a quote or a list marker — block-md strips those", () => {
+    expect(isBlockImage("> ", "")).toBe(true);
+    expect(isBlockImage(">> ", "")).toBe(true);
+    expect(isBlockImage("- ", "")).toBe(true);
+    expect(isBlockImage("  1. ", "")).toBe(true);
+  });
+
+  it("is not one when it shares the line with words", () => {
+    expect(isBlockImage("as shown here: ", "")).toBe(false);
+    expect(isBlockImage("", " — and that is that")).toBe(false);
   });
 });

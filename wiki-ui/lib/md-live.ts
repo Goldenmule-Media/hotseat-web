@@ -62,14 +62,20 @@ export function imagePreviewExtension(resolve: () => ImageResolver | undefined):
   return imageResolver.of(resolve);
 }
 
-/** `![alt](ref)` or `![alt](ref "title")` — the same shape the engine reifies into an
- *  image block (core/block-md `IMAGE_LINE`), so what draws as a picture here is exactly
- *  what renders as one on the page. */
+/** `![alt](ref)` or `![alt](ref "title")` — the shape of core/block-md's `IMAGE_LINE`. */
 const IMAGE_SOURCE = /^!\[([^\]]*)\]\(([^\s()]+)(?:\s+"[^"]*")?\)$/;
 
 export function parseImageSource(text: string): { readonly alt: string; readonly ref: string } | null {
   const m = IMAGE_SOURCE.exec(text);
   return m === null ? null : { alt: m[1]!, ref: m[2]! };
+}
+
+/** Block position — an image OWNING its line — is the only place the engine reifies an
+ *  image block; inline `![...]` is literal text by design. Drawing a picture anywhere
+ *  else would show the writer something the page will never render. A quote's `>` and a
+ *  list item's marker count as nothing: block-md strips them and parses what is left. */
+export function isBlockImage(before: string, after: string): boolean {
+  return after.trim() === "" && /^\s*(?:>\s*)*(?:(?:[-*]|\d{1,9}\.)\s+)?$/.test(before);
 }
 
 class ImageWidget extends WidgetType {
@@ -182,6 +188,9 @@ function constructOf(node: SyntaxNodeRef, parents: readonly string[]): { from: n
 function imageAt(view: EditorView, from: number, to: number): ImageWidget | null {
   const resolve = view.state.facet(imageResolver)();
   if (resolve === undefined || selectionTouches(view, from, to)) return null;
+  const line = view.state.doc.lineAt(from);
+  // Wrapped across lines, or sharing one with words: not an image block, so not a picture.
+  if (to > line.to || !isBlockImage(line.text.slice(0, from - line.from), line.text.slice(to - line.from))) return null;
   const image = parseImageSource(view.state.doc.sliceString(from, to));
   return image === null ? null : new ImageWidget(image.ref, image.alt, resolve);
 }
