@@ -13,7 +13,10 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "bench:seed": "tsx bench/fixture/server.ts",
+    "bench:build": "npm run copy-pglite-assets && NEXT_DIST_DIR=.next-bench next build",
+    "bench": "playwright test -c bench/playwright.config.ts"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.4",
@@ -36,10 +39,12 @@
     "wiki-models": "file:../wiki-models"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/dagre": "^0.7.54",
     "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "tsx": "^4.23.12",
     "typescript": "^5.7.3",
     "vitest": "^4.1.8"
   },

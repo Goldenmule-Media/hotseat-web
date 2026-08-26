@@ -1,5 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // The benchmark harness needs a PRODUCTION build (dev compiles on demand, ships dev React,
+  // and Strict Mode double-invokes effects), but a plain `next build` would overwrite the
+  // `.next/` of the always-running `next dev` and kill it. Both `build` and `start` read this,
+  // so the bench runs entirely inside `.next-bench/` and never touches the dev server's output.
+  distDir: process.env.NEXT_DIST_DIR ?? ".next",
   // `wiki` and `wiki-models` are published as extensionless TypeScript SOURCE
   // (their package `exports` point at `./src/**/*.ts`, moduleResolution: Bundler).
   // Next must transpile them; webpack/turbopack resolve extensionless `.ts`
