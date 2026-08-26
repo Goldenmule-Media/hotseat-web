@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { bootMark, navStart, painted, reset, routeCommit, rpc, take, timeMarkdown } from "./perf";
+import { bootMark, navStart, painted, peek, reset, routeCommit, rpc, take, timeMarkdown } from "./perf";
 
 const WS = "ws:bench";
 const A = "document:a";
@@ -90,5 +90,23 @@ describe("perf", () => {
     const first = take().boot!.connectStart;
     bootMark("connectStart");
     expect(take().boot!.connectStart).toBe(first);
+  });
+});
+
+describe("peek", () => {
+  it("reads a complete navigation without consuming it", async () => {
+    reset();
+    navStart(WS, A, null);
+    painted(A, 1);
+    expect(peek().navs).toHaveLength(1);
+    expect(peek().navs).toHaveLength(1); // still there
+    expect(take().navs).toHaveLength(1);
+    expect(peek().navs).toHaveLength(0);
+  });
+
+  it("hides a navigation that has not painted yet", () => {
+    reset();
+    navStart(WS, A, null);
+    expect(peek().navs).toHaveLength(0);
   });
 });

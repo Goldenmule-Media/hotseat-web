@@ -209,6 +209,13 @@ export function bootMark(field: Exclude<keyof BootRecord, "timeOrigin">): void {
 
 // ── the reading surface ─────────────────────────────────────────────────────────
 
+/** Read without draining — for eyeballing state in DevTools, and for polling until a
+ *  navigation completes without consuming the record you are waiting for. */
+export function peek(): PerfDump {
+  const navs = current !== null && current.complete ? [...done, current] : [...done];
+  return { navs, stray: [...stray], boot: bootRec };
+}
+
 /** Drain every finished navigation. A complete open record is included and then closed out. */
 export function take(): PerfDump {
   const navs = done;
@@ -233,5 +240,5 @@ export function reset(): void {
 /** Expose `take`/`reset` on `window` for DevTools and the Playwright harness. Idempotent. */
 export function installBridge(): void {
   if (typeof window === "undefined") return;
-  (window as unknown as { __wikiPerf?: unknown }).__wikiPerf = { take, reset };
+  (window as unknown as { __wikiPerf?: unknown }).__wikiPerf = { take, peek, reset };
 }
