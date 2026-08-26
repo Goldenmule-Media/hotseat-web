@@ -93,6 +93,16 @@ npm run dev      # http://localhost:3000
 Open the app and pick a workspace. Edits from any other client (e.g. the `wiki` MCP
 tools) stream in live — and you can drive a page's FSM transitions right in the browser.
 
+## Measuring navigation latency
+
+The app carries always-on `performance` instrumentation for the sidebar-click-to-painted path
+(`lib/perf.ts`). To see it by hand: click around, then run `await window.__wikiPerf.peek()` in
+the console, or open a DevTools performance recording and read the Timings track.
+
+`npm run bench` runs the same spans as a Playwright benchmark over a deterministic seeded
+corpus and writes per-commit JSON — safe to run while `next dev` is up, because it builds and
+serves out of `.next-bench`. See [`bench/README.md`](bench/README.md).
+
 ## Authentication
 
 Auth is **optional and server-driven**; the UI holds **no secrets** and needs no extra

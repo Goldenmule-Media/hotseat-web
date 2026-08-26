@@ -25,6 +25,7 @@ const files = args.filter((a) => !a.startsWith("--"));
 
 function latest(n) {
   const all = readdirSync(RESULTS).filter((f) => f.endsWith(".json")).sort();
+  if (n === 2 && all.length === 1) return [join(HERE, "baseline.json"), join(RESULTS, all[0])];
   if (all.length < n) {
     console.error(`need ${n} runs in bench/results/, found ${all.length}`);
     process.exit(2);
