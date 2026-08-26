@@ -14,6 +14,10 @@ const REGRESSION_PCT = 15;
 // A percentage alone cries wolf on the sub-millisecond spans (0.1 → 0.2ms is "+100%"), and
 // run-to-run drift on this harness is a millisecond or two. Flag only moves that clear both.
 const REGRESSION_MS = 2;
+// A p50 over a handful of frame-quantized samples is not a stable statistic — commitToPaint
+// lands on one frame boundary or the next. Small scenarios still PRINT their deltas; they just
+// don't get to call anything a regression.
+const REGRESSION_MIN_N = 10;
 
 const args = process.argv.slice(2);
 const fail = args.includes("--fail");
@@ -60,7 +64,7 @@ for (const sb of b.scenarios) {
     if (stA === undefined) continue;
     const delta = stB.p50 - stA.p50;
     const pct = stA.p50 === 0 ? 0 : (delta / stA.p50) * 100;
-    const bad = pct > REGRESSION_PCT && delta > REGRESSION_MS;
+    const bad = sa.n >= REGRESSION_MIN_N && sb.n >= REGRESSION_MIN_N && pct > REGRESSION_PCT && delta > REGRESSION_MS;
     if (bad) regressed++;
     const flag = bad ? "  ← regression" : "";
     console.log(
