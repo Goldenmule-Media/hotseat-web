@@ -262,6 +262,16 @@ export function liveEditorTermsExtension(config: LiveEditorConfig): Extension {
 }
 
 /**
+ * The newlines that put an inserted image on a line of its OWN. An image is a block: the
+ * engine only reifies one that owns its whole line (core/block-md `IMAGE_LINE`), and an
+ * inline `![...]` is literal text by design — so a paste dropped mid-sentence would stay
+ * markup forever, in the editor and in the rendered page alike.
+ */
+export function ownLinePadding(before: string, after: string): { readonly lead: string; readonly trail: string } {
+  return { lead: before.trim() === "" ? "" : "\n", trail: after.trim() === "" ? "" : "\n" };
+}
+
+/**
  * Paste or drop an image file to upload it and get a Markdown image back.
  *
  * A placeholder goes in immediately and is replaced when the upload resolves, so a slow
@@ -284,9 +294,13 @@ export function imageUploadExtension(
     for (const file of images) {
       const token = `![uploading ${file.name}… #${++seq}]()`;
       const at = view.state.selection.main;
+      const doc = view.state.doc;
+      const head = doc.lineAt(at.from);
+      const tail = doc.lineAt(at.to);
+      const { lead, trail } = ownLinePadding(head.text.slice(0, at.from - head.from), tail.text.slice(at.to - tail.from));
       view.dispatch({
-        changes: { from: at.from, to: at.to, insert: token },
-        selection: { anchor: at.from + token.length },
+        changes: { from: at.from, to: at.to, insert: `${lead}${token}${trail}` },
+        selection: { anchor: at.from + lead.length + token.length },
       });
       void upload(file)
         .then((ref) => `![${file.name.replace(/\.[^.]+$/, "")}](${ref})`)
