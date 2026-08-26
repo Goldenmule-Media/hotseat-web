@@ -9,3 +9,9 @@ next-env.d.ts
 # PGlite wasm/data assets copied from node_modules by scripts/copy-pglite-assets.mjs
 # (the SharedWorker fetches them from /pglite/* — regenerated on predev/prebuild).
 /public/pglite
+
+# Benchmark harness: the seeded corpus's resolved page ids (regenerated on every seed),
+# per-run timing results, and the bench prod build (kept out of the dev server's .next).
+/bench/fixture/manifest.json
+/bench/results
+/.next-bench

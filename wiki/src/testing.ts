@@ -12,7 +12,7 @@
  * are pure counters, so reducers/deciders/renderers stay deterministic. The only
  * non-determinism is the server's port, which is irrelevant to engine output.
  */
-import { DurableStreamTestServer } from "@durable-streams/server";
+import { DurableStreamTestServer, type TestServerOptions } from "@durable-streams/server";
 
 import type { IPageType, IStreamHeaders, IWiki } from "./api";
 import { createWiki } from "./core/wiki";
@@ -77,10 +77,12 @@ function deterministicIds(): () => string {
 
 /**
  * Start a fresh in-memory {@link DurableStreamTestServer} on an ephemeral port.
- * Resolves once the server is listening.
+ * Resolves once the server is listening. `opts` overrides the defaults — a FIXED
+ * `port` for a harness whose client bakes the URL in at build time, or a `dataDir`
+ * for file-backed storage.
  */
-export async function startTestServer(): Promise<ITestServer> {
-  const server = new DurableStreamTestServer({ port: 0 });
+export async function startTestServer(opts?: TestServerOptions): Promise<ITestServer> {
+  const server = new DurableStreamTestServer({ port: 0, ...opts });
   const url = await server.start();
   return {
     url,
