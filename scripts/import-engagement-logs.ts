@@ -44,8 +44,10 @@ import { join, relative, resolve, sep } from "node:path";
 import { createWiki } from "wiki";
 import type { IStreamConfig, IWorkspaceHandle, WorkspaceId } from "wiki";
 import { resolveAuthorization } from "wiki/auth-client";
-import engagementPageTypes from "wiki-models/engagement";
-// The folder tree is `toc` pages, so the importer's engine must know that type too.
+// The importer's OWN engine must register every type it creates: `toc` for the folders and
+// the threads, `document` for the entries. A missing one is rejected by the local registry
+// before any write, which is loud but only at the moment it first creates that type.
+import documentPageTypes from "wiki-models/document";
 import tocPageTypes from "wiki-models/toc";
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -58,6 +60,7 @@ interface Flags {
   streamUrl: string;
   namespace: string;
   apply: boolean;
+  createWorkspace: string | undefined;
   limit: number;
   only: string | undefined;
   token: string | undefined;
@@ -77,6 +80,7 @@ function parseFlags(argv: readonly string[]): Flags {
     streamUrl: flag("stream-url") ?? process.env.WIKI_STREAM_URL ?? "http://127.0.0.1:4437",
     namespace: flag("namespace") ?? process.env.WIKI_NAMESPACE ?? "default",
     apply: argv.includes("--apply"),
+    createWorkspace: flag("create-workspace"),
     limit: Number(flag("limit") ?? "0") || 0,
     only: flag("only"),
     token: flag("token") ?? process.env.WIKI_TOKEN,
@@ -415,28 +419,13 @@ function parseFile(text: string): Parsed {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Classification
-// ────────────────────────────────────────────────────────────────────────────
-
-type Kind = "person" | "series" | "org" | "vendor" | "candidate" | "event" | "client";
-
-function classify(c: { dir: string }): Kind {
-  const d = c.dir;
-  if (/\/Interviews(\/|$)/.test("/" + d)) return "candidate";
-  if (/1 on 1s|Personnel|Coworkers|HR|Recommendations|Training/.test(d)) return "person";
-  if (/External Relationships/.test(d)) return "vendor";
-  if (/Meetings|C-Staff/.test(d)) return "series";
-  return "series";
-}
-
-// ────────────────────────────────────────────────────────────────────────────
 // Import
 // ────────────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
   const flags = parseFlags(process.argv.slice(2));
-  if (flags.workspace.length === 0) {
-    console.error("--workspace <ws:…> is required (create one first).");
+  if (flags.workspace.length === 0 && flags.createWorkspace === undefined) {
+    console.error("--workspace <ws:…> or --create-workspace <name> is required.");
     process.exit(2);
   }
 
@@ -458,13 +447,18 @@ async function main(): Promise<void> {
     namespace: flags.namespace,
     ...(authorization !== undefined ? { headers: { authorization } } : {}),
   };
-  const wiki = createWiki({ stream, pageTypes: [...engagementPageTypes, ...tocPageTypes], clock: () => now });
+  const wiki = createWiki({ stream, pageTypes: [...tocPageTypes, ...documentPageTypes], clock: () => now });
 
-  const ws: IWorkspaceHandle = await wiki.openWorkspace(flags.workspace as WorkspaceId);
+  // One command end to end: making the workspace is part of the import, not a preceding
+  // ad-hoc step whose id has to be copied between shells.
+  const ws: IWorkspaceHandle =
+    flags.createWorkspace !== undefined
+      ? await wiki.createWorkspace({ name: flags.createWorkspace })
+      : await wiki.openWorkspace(flags.workspace as WorkspaceId);
+  if (flags.createWorkspace !== undefined) console.log(`created workspace ${ws.id}`);
 
   // Idempotency + placement: remember where each already-imported page lives, so a re-run
   // both skips it AND can move it if the folder tree changed.
-  const already = new Map<string, { id: string; parent: string | null }>();
   const tocByPath = new Map<string, string>();
   type Node = { id: string; type?: string; title?: string; children?: readonly Node[] };
   const walk = (n: Node, parent: string | null, out: { node: Node; parent: string | null }[] = []) => {
@@ -476,14 +470,7 @@ async function main(): Promise<void> {
   const seen = walk(rootNode, null);
   const rootId = rootNode.id;
   for (const { node, parent } of seen) {
-    const at = parent === rootId ? null : parent;
-    if (node.type === "engagement-log") {
-      const state = await (await ws.page(node.id as never)).state();
-      const src = state.sections.find((x) => x.key === "provenance")?.fields["source"];
-      if (src !== undefined && src.kind === "scalar" && String(src.value).length > 0) {
-        already.set(String(src.value), { id: node.id, parent: at });
-      }
-    } else if (node.type === "toc") {
+    if (node.type === "toc") {
       // Rebuild each toc's path from its ancestry, so a re-run reuses the existing tree
       // instead of minting a second "Interviews" beside the first.
       const chain: string[] = [];
@@ -520,7 +507,7 @@ async function main(): Promise<void> {
         foldersPlanned.add(path);
         continue;
       }
-      const id = (await ws.createPage("toc", { title: segment, parentId: parent as never })).value;
+      const id: string = (await ws.createPage("toc", { title: segment, parentId: parent as never })).value;
       tocByPath.set(path, id);
       foldersPlanned.add(path);
       parent = id;
@@ -531,6 +518,8 @@ async function main(): Promise<void> {
   let created = 0;
   let skipped = 0;
   let moved = 0;
+  let entriesWritten = 0;
+  const entryTitles = new Set<string>();
   let entryTotal = 0;
   let actionTotal = 0;
   const byFormat: Record<string, number> = {};
@@ -539,16 +528,8 @@ async function main(): Promise<void> {
 
   for (const th of list) {
     const source = th.files.map((f) => f.rel).join("; ");
-    const existing = already.get(source);
-    if (existing !== undefined) {
+    if (tocByPath.has(`${th.dir}/${th.title}`)) {
       skipped++;
-      // Converge an earlier flat import onto the folder tree without re-importing:
-      // reparent in place, keeping the page's id and its whole event history.
-      const home = await folderFor(th.dir);
-      if (flags.apply && home !== null && existing.parent !== home) {
-        await ws.reparent(existing.id as never, home as never);
-        moved++;
-      }
       continue;
     }
     // Merge every file of a thread into one page, then re-sort the union: a thread split
@@ -570,42 +551,66 @@ async function main(): Promise<void> {
 
     if (!flags.apply) continue;
 
+    // The thread is a `toc` in FEED mode; each entry is a `document` child. Nothing about a
+    // dated collection of notes needed a bespoke page type — that was the whole lesson.
     now = parsed.created !== undefined ? `${parsed.created}T12:00:00.000Z` : new Date().toISOString();
     const home = await folderFor(th.dir);
-    const pageId = (await ws.createPage("engagement-log", { title: th.title, parentId: home as never })).value;
-
-    // One atomic batch per page: the whole thread lands or none of it does.
-    const batch: { command: string; args?: Record<string, unknown> }[] = [
-      { command: "setKind", args: { kind: classify(th) } },
-      { command: "setSource", args: { source } },
-    ];
-    if (th.employer.length > 0) batch.push({ command: "setOrg", args: { org: th.employer } });
-    if (parsed.standing !== undefined) batch.push({ command: "setStanding", args: { markdown: parsed.standing } });
-    // OLDEST FIRST: recordEntry inserts at index 0, so this order puts the newest on top.
-    for (const e of parsed.entries) {
-      batch.push({
-        command: "recordEntry",
-        args: {
-          date: e.iso ?? e.date,
-          ...(e.attendees !== undefined ? { attendees: e.attendees } : {}),
-          ...(e.prep !== undefined ? { prep: e.prep } : {}),
-          ...(e.notes.length > 0 ? { notes: e.notes } : {}),
-        },
-      });
-    }
-    for (const a of parsed.actionItems) {
-      batch.push({ command: "addActionItem", args: { text: a.text, ...(a.on !== undefined ? { on: a.on } : {}) } });
-    }
+    let threadId: string;
     try {
-      await ws.mutateMany(pageId, batch as never);
+      threadId = (await ws.createPage("toc", { title: th.title, parentId: home as never })).value;
+      const head: { command: string; args?: Record<string, unknown> }[] = [
+        { command: "setContentsMode", args: { mode: "inline" } },
+      ];
+      // The persistent header — a roster, an On Deck list, a profile — is the thread's
+      // overview, not one of its dated entries.
+      const overview = [parsed.standing, `Imported from \`${source}\`.`]
+        .filter((x): x is string => x !== undefined && x.length > 0)
+        .join("\n\n");
+      head.push({ command: "setOverview", args: { text: overview } });
+      await ws.mutateMany(threadId as never, head as never);
       created++;
     } catch (err) {
-      problems.push(`write failed: ${source} — ${(err as Error).message}`);
+      problems.push(`thread failed: ${source} — ${(err as Error).message}`);
+      continue;
+    }
+
+    // Entries, oldest first — each child's createdAt IS its entry date, which is what the
+    // feed orders on, so the clock is moved per entry rather than per thread.
+    for (const e of parsed.entries) {
+      const date = e.iso ?? e.date;
+      now = e.iso !== undefined ? `${e.iso}T12:00:00.000Z` : now;
+      const body = [
+        e.attendees !== undefined ? `**Attendees:** ${e.attendees}` : "",
+        e.prep !== undefined ? `**Prep:**\n\n${e.prep}` : "",
+        e.notes,
+        // The action items this entry produced, back in the entry they came from.
+        parsed.actionItems.filter((a) => a.on === e.date || a.on === e.iso).length > 0
+          ? "**Action items:**\n\n" +
+            parsed.actionItems
+              .filter((a) => a.on === e.date || a.on === e.iso)
+              .map((a) => `- [ ] ${a.text}`)
+              .join("\n")
+          : "",
+      ]
+        .filter((x) => x.length > 0)
+        .join("\n\n");
+      try {
+        // A sibling title must be unique, so a thread with two notes on one date
+        // disambiguates rather than losing the second.
+        let title = date;
+        for (let n = 2; entryTitles.has(`${threadId}/${title}`); n++) title = `${date} (${n})`;
+        entryTitles.add(`${threadId}/${title}`);
+        const entryId = (await ws.createPage("document", { title, parentId: threadId as never })).value;
+        if (body.length > 0) await ws.mutate(entryId as never, "setMarkdown" as never, { markdown: body } as never);
+        entriesWritten++;
+      } catch (err) {
+        problems.push(`entry failed: ${source} ${date} — ${(err as Error).message}`);
+      }
     }
   }
 
   console.log(`vault      ${flags.vault}`);
-  console.log(`workspace  ${flags.workspace}`);
+  console.log(`workspace  ${ws.id}`);
   console.log(`files      ${found.length}`);
   console.log(`threads    ${all.length}${flags.only !== undefined ? ` (filtered to ${list.length})` : ""}`);
   console.log(`formats    ${Object.entries(byFormat).map(([k, v]) => `${k}=${v}`).join("  ")}`);
@@ -614,7 +619,7 @@ async function main(): Promise<void> {
   console.log(`folders    ${foldersPlanned.size}`);
   console.log(
     flags.apply
-      ? `created    ${created}  (skipped ${skipped} already imported, moved ${moved} into folders)`
+      ? `created    ${created} threads + ${entriesWritten} entry pages  (skipped ${skipped}, moved ${moved})`
       : `DRY RUN — nothing written. Pass --apply.`,
   );
   if (problems.length > 0) {

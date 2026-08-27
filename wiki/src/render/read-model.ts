@@ -368,7 +368,13 @@ function renderFieldBody(
 // Page rendering
 // ────────────────────────────────────────────────────────────────────────────
 
-export function renderPage(state: IWorkspaceState, pageId: PageId, registry: Registry, depth = 0): string {
+export function renderPage(
+  state: IWorkspaceState,
+  pageId: PageId,
+  registry: Registry,
+  depth = 0,
+  inlined = false,
+): string {
   const node = state.pages.get(pageId);
   if (node === undefined) {
     return joinBlocks([heading(1, "Unknown page"), placeholder("_Page not found._")]);
@@ -384,7 +390,11 @@ export function renderPage(state: IWorkspaceState, pageId: PageId, registry: Reg
 
   const blocks: string[] = [];
   blocks.push(heading(1, displayTitle(node, registry)));
-  blocks.push(statusBadge(node.status));
+  // An INLINED child is content inside someone else's page: its status badge and its empty
+  // graph sections are chrome that repeats once per entry, and a feed of hundreds drowns in
+  // it. The page still shows both when opened on its own.
+  if (!inlined) blocks.push(statusBadge(node.status));
+  const contentStart = blocks.length;
 
   for (const sr of config.sections) {
     // A stored display mode can select between two configs naming the same content.
@@ -437,9 +447,15 @@ export function renderPage(state: IWorkspaceState, pageId: PageId, registry: Reg
     blocks.push(section(heading(2, headingText), body));
   }
 
-  if (config.graphSections !== false) {
+  if (config.graphSections !== false && !inlined) {
     blocks.push(section(heading(2, "References"), renderReferences(node.id, ctx)));
     blocks.push(section(heading(2, "Child pages"), renderChildList(node.id, ctx)));
+  }
+
+  if (inlined) {
+    const kept = blocks.slice(contentStart).filter((b) => !isPlaceholderSection(b));
+    blocks.length = contentStart;
+    blocks.push(...(kept.length === 1 ? [stripSectionHeading(kept[0]!)] : kept));
   }
 
   return joinBlocks(blocks);
@@ -544,6 +560,30 @@ export function renderPageElement(
 // Workspace rendering
 // ────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Split a rendered section into its heading line and its body. `section()` joins the two
+ * with a SINGLE newline (the canonical contract puts no blank line between a heading and
+ * its body), so the split is the first newline — a body may itself contain blank lines.
+ */
+function splitSection(block: string): { heading: string; body: string } | null {
+  if (!block.startsWith("#")) return null;
+  const nl = block.indexOf("\n");
+  return nl < 0 ? { heading: block, body: "" } : { heading: block.slice(0, nl), body: block.slice(nl + 1) };
+}
+
+/** A rendered section whose body is only its placeholder — nothing to show. */
+function isPlaceholderSection(block: string): boolean {
+  const parts = splitSection(block);
+  if (parts === null) return false;
+  const body = parts.body.trim();
+  return !body.includes("\n") && /^_.*_$/.test(body);
+}
+
+/** Drop a rendered section's own heading, keeping its body. */
+function stripSectionHeading(block: string): string {
+  return splitSection(block)?.body ?? block;
+}
+
 /** How deep `@children-content` will inline before falling back to a link list. */
 const MAX_INLINE_DEPTH = 2;
 
@@ -601,7 +641,7 @@ function renderChildContent(
     const bt = state.pages.get(b)?.createdAt ?? "";
     return at === bt ? String(a).localeCompare(String(b)) : bt.localeCompare(at);
   });
-  return joinBlocks(ordered.map((c) => demoteHeadings(renderPage(state, c, registry, depth + 1), 2)));
+  return joinBlocks(ordered.map((c) => demoteHeadings(renderPage(state, c, registry, depth + 1, true), 2)));
 }
 
 export function renderWorkspace(state: IWorkspaceState, registry: Registry): string {

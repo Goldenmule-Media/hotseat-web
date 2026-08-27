@@ -17,7 +17,7 @@
  * decision record.
  */
 import type { BlockId, DeepReadonly, IBlock, IInline, Mark, PageId, PageState, SectionOp } from "wiki/authoring";
-import { definePageType, InvariantViolationError, z, zodSchema } from "wiki/authoring";
+import { definePageType, InvariantViolationError, parseBlocks, z, zodSchema } from "wiki/authoring";
 
 /** The one content address every command targets. */
 const BODY = { section: "body", field: "body" } as const;
@@ -175,6 +175,25 @@ export const Document = definePageType({
   },
   sectionSet: { mode: "closed" },
   commands: {
+    /**
+     * Replace the whole body from a Markdown string. The block-by-block commands are the
+     * authoring surface for a person editing one thing at a time; this is the surface for
+     * a WRITER that already has a document — an importer, a paste, a generated draft —
+     * where issuing thirty ops to rebuild a known body is only a way to get it wrong.
+     * `parseBlocks` reifies it into the same closed vocabulary those commands produce.
+     */
+    setMarkdown: {
+      description: "Replace the entire body with parsed Markdown (paragraphs, headings, lists, fences, quotes, tables).",
+      args: zodSchema(z.object({ markdown: z.string() })),
+      target: BODY,
+      produces: (_page, args, ctx) => [
+        {
+          op: "setField",
+          ...BODY,
+          value: { kind: "blocks", blocks: parseBlocks((args as { markdown: string }).markdown, ctx.newId) },
+        },
+      ],
+    },
     addParagraph: {
       description:
         "Append a paragraph of inline runs (pass `index` to insert at that position). A run is a plain string; " +

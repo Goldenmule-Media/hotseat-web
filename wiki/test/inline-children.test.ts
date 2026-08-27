@@ -143,6 +143,50 @@ describe("toc: inline child content", () => {
     expect(await ws.toMarkdown(inner)).toContain("deep body");
   });
 
+  it("drops the chrome an inlined child does not need — status, empty sections, lone heading", async () => {
+    const toc = (await ws.createPage("toc", { title: "Chrome", parentId: null })).value;
+    await child(toc, "An entry", "2024-12-01T00:00:00.000Z", "the body");
+    await ws.mutate(toc, "setContentsMode", { mode: "inline" });
+
+    const contents = block(await ws.toMarkdown(toc), "Contents");
+    expect(contents).toContain("the body");
+    // No per-entry status badge — a feed of hundreds would repeat it hundreds of times.
+    expect(contents).not.toContain("**Status:**");
+    // No empty References / Child pages sections.
+    expect(contents).not.toContain("References");
+    expect(contents).not.toContain("Child pages");
+    // A document's whole content is one section, and the entry's own title already heads
+    // it, so that section's heading is noise too.
+    expect(contents).not.toContain("Body");
+  });
+
+  it("still shows that chrome when the child is opened on its own", async () => {
+    const toc = (await ws.createPage("toc", { title: "Own page", parentId: null })).value;
+    const entry = await child(toc, "Standalone", "2024-12-03T00:00:00.000Z", "its body");
+    await ws.mutate(toc, "setContentsMode", { mode: "inline" });
+
+    // Suppression is a property of being INLINED, not of the page.
+    const own = await ws.toMarkdown(entry);
+    expect(own).toContain("**Status:**");
+    expect(own).toContain("## Body");
+    expect(own).toContain("its body");
+  });
+
+  it("keeps a body's own blank lines when it strips the section heading", async () => {
+    const toc = (await ws.createPage("toc", { title: "Blank lines", parentId: null })).value;
+    clock = "2024-12-02T00:00:00.000Z";
+    const note = (await ws.createPage("document", { title: "Two paragraphs", parentId: toc })).value;
+    await ws.mutate(note, "addParagraph", { inlines: ["first para"] });
+    await ws.mutate(note, "addParagraph", { inlines: ["second para"] });
+    await ws.mutate(toc, "setContentsMode", { mode: "inline" });
+
+    // The heading/body split is the FIRST newline, not the first blank line — splitting on
+    // the blank line would swallow everything before it.
+    const contents = block(await ws.toMarkdown(toc), "Contents");
+    expect(contents).toContain("first para");
+    expect(contents).toContain("second para");
+  });
+
   it("renders byte-identically for equal state", async () => {
     const mk = async (title: string): Promise<PageId> => {
       const t = (await ws.createPage("toc", { title, parentId: null })).value;
