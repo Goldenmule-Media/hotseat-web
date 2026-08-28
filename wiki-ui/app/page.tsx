@@ -45,10 +45,7 @@ export default function Home(): React.JSX.Element {
         ) : loading ? (
           <p className="muted">Loading…</p>
         ) : items.length === 0 ? (
-          <div className="ws-empty">
-            <p className="muted">No workspaces found in this namespace.</p>
-            <CreateWorkspaceForm />
-          </div>
+          <p className="muted">No workspaces found in this namespace.</p>
         ) : (
           <ul className="ws-list">
             {items.map((w) => (
@@ -58,6 +55,13 @@ export default function Home(): React.JSX.Element {
               </li>
             ))}
           </ul>
+        )}
+        {/* Creation is always available, not just as an empty-state bootstrap — but not while
+            the server is unreachable, where a write could only fail. */}
+        {error === null && !loading && (
+          <div className="ws-create-row">
+            <CreateWorkspaceForm />
+          </div>
         )}
       </section>
     </main>

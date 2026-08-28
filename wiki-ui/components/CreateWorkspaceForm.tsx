@@ -1,8 +1,8 @@
 "use client";
 
 /**
- * Bootstrap affordance shown in the landing page's empty state: create the first workspace from
- * the browser. The engine assigns the id and appends the catalog event; when auth is on we then
+ * Create a workspace from the browser, from the landing page (empty or not).
+ * The engine assigns the id and appends the catalog event; when auth is on we then
  * CLAIM the workspace (the engine's direct stream write doesn't run the gateway's owner hook the
  * MCP tool does), making the creator its owner. Navigates into the new workspace on success.
  */
