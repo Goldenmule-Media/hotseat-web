@@ -6,6 +6,8 @@ import {
   type Ingredient,
   ingredientsForStep,
   readIngredients,
+  readFiles,
+  readNotes,
   readSteps,
   shoppingList,
   stripHeading,
@@ -140,5 +142,36 @@ describe("titleFromBody", () => {
   it("truncates a long clause and never returns nothing", () => {
     expect(titleFromBody("x".repeat(90))).toHaveLength(58);
     expect(titleFromBody("   ")).toBe("Step");
+  });
+});
+
+describe("readFiles", () => {
+  const SHA = "a".repeat(64);
+
+  it("tells a linked document from an inline picture", () => {
+    const md = `# R\n\n## Files\n[Focaccia.pdf](attachment:${SHA})\n\n![the printed page](attachment:${"b".repeat(64)})\n\n## Notes\n_None._\n`;
+    expect(readFiles(md)).toEqual([
+      { ref: `attachment:${SHA}`, label: "Focaccia.pdf", isImage: false },
+      { ref: `attachment:${"b".repeat(64)}`, label: "the printed page", isImage: true },
+    ]);
+  });
+
+  it("does not reach outside the Files section", () => {
+    const md = `# R\n\n## Files\n_No files._\n\n## Notes\n### 1/24/24\nSee [this](https://example.com).\n`;
+    expect(readFiles(md)).toEqual([]);
+  });
+
+  it("is empty before the page has rendered", () => {
+    expect(readFiles(null)).toEqual([]);
+  });
+});
+
+describe("readNotes", () => {
+  it("pairs each label with its body, heading stripped", () => {
+    const notes = readNotes(
+      [summary("n1", "12/29/24", {})],
+      [{ id: "n1", markdown: "### 12/29/24\n\nForgot the brown sugar." }],
+    );
+    expect(notes[0]).toEqual({ id: "n1", title: "12/29/24", body: "Forgot the brown sugar." });
   });
 });

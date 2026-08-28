@@ -14,6 +14,7 @@
 import { combine, formatMeasure, type Measure } from "wiki-models/recipe";
 
 import type { SectionElementSummary } from "./live";
+import { sliceH2Section } from "./restate";
 
 export const RECIPE_PAGE_TYPE = "recipe";
 
@@ -171,4 +172,45 @@ export function titleFromBody(markdown: string): string {
   const trimmed = clause.replace(/[.;:]$/, "").trim();
   if (trimmed === "") return "Step";
   return trimmed.length > 60 ? `${trimmed.slice(0, 57).trimEnd()}…` : trimmed;
+}
+
+// ── notes ────────────────────────────────────────────────────────────────────
+
+export interface Note {
+  readonly id: string;
+  readonly title: string;
+  readonly body: string;
+}
+
+export function readNotes(
+  elements: readonly SectionElementSummary[],
+  rendered: readonly { readonly id: string; readonly markdown: string }[],
+): readonly Note[] {
+  const bodies = new Map(rendered.map((r) => [r.id, stripHeading(r.markdown)]));
+  return elements.map((el) => ({ id: el.id, title: el.title ?? "", body: bodies.get(el.id) ?? "" }));
+}
+
+// ── files ────────────────────────────────────────────────────────────────────
+
+export interface RecipeFile {
+  readonly ref: string;
+  readonly label: string;
+  /** A picture renders inline; anything else — the PDF the recipe was printed from — is a
+   *  link, and that syntactic difference is the only signal the render carries. */
+  readonly isImage: boolean;
+}
+
+/**
+ * The attached files, read back out of the rendered page. `files` is a `blocks` field, not
+ * a list, so there are no elements to summarize — the render is the only place the refs
+ * exist in one piece.
+ */
+export function readFiles(pageMarkdown: string | null): readonly RecipeFile[] {
+  const body = pageMarkdown === null ? null : sliceH2Section(pageMarkdown, "Files");
+  if (body === null) return [];
+  const out: RecipeFile[] = [];
+  for (const m of body.matchAll(/(!?)\[([^\]]*)\]\(([^)\s]+)\)/g)) {
+    out.push({ ref: m[3]!, label: m[2]! === "" ? m[3]! : m[2]!, isImage: m[1] === "!" });
+  }
+  return out;
 }

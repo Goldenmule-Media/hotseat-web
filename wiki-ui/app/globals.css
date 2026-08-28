@@ -3762,3 +3762,119 @@ button.restate-card-lead:hover {
 .recipe-step.has-pairing .recipe-step-n {
   color: var(--accent);
 }
+
+/* ── the original, and the attempt log ── */
+
+.recipe-files,
+.recipe-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.recipe-file-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.recipe-file-picker button {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 8px;
+}
+
+.recipe-file-picker button.active {
+  background: var(--accent-dim);
+  color: var(--text);
+}
+
+/* Tall enough to read a printed recipe page without scrolling the pane itself. */
+.recipe-viewer {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  height: 70vh;
+  min-height: 380px;
+  width: 100%;
+}
+
+.recipe-drop {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.recipe-drop button {
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 12px;
+}
+
+.recipe-drop button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.recipe-drop-error {
+  color: var(--red);
+  font-size: 12px;
+}
+
+.recipe-note {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.recipe-note-head {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.recipe-note-title {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text);
+  flex: 1 1 auto;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  min-width: 0;
+  padding: 2px 4px;
+}
+
+.recipe-note-title:hover {
+  border-color: var(--border);
+}
+
+.recipe-note-title:focus {
+  background: var(--bg);
+  border-color: var(--accent);
+  outline: none;
+}
+
+.recipe-note-head button {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  padding: 0 4px;
+}
+
+.recipe-note-head button:hover {
+  color: var(--red);
+}

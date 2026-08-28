@@ -453,7 +453,12 @@ export function PageView({
           pageMarkdown={markdown}
         />
       ) : mode === "recipe" && studio === "recipe" ? (
-        <RecipeStudio key={`${workspaceId}/${pageId}`} workspaceId={workspaceId} pageId={pageId} />
+        <RecipeStudio
+          key={`${workspaceId}/${pageId}`}
+          workspaceId={workspaceId}
+          pageId={pageId}
+          pageMarkdown={markdown}
+        />
       ) : loading && markdown === null ? (
         <p className="muted">Loading page…</p>
       ) : (
