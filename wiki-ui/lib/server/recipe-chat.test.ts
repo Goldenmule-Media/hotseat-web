@@ -103,9 +103,31 @@ describe("the prompt", () => {
 });
 
 describe("the output schema", () => {
-  it("names exactly the commands the allowlist accepts", () => {
-    expect(CHAT_OUTPUT_SCHEMA.properties.proposal.items.properties.command.enum).toEqual(proposableCommands());
+  const branches = CHAT_OUTPUT_SCHEMA.properties.proposal.items.anyOf as unknown as readonly {
+    properties: {
+      command: { const: string };
+      args: { properties: Record<string, unknown>; required: readonly string[] };
+    };
+  }[];
+
+  it("names exactly the commands the allowlist accepts, one branch each", () => {
+    expect(branches.map((b) => b.properties.command.const)).toEqual(proposableCommands());
     expect(proposableCommands()).toContain("addIngredient");
+  });
+
+  it("offers each command only the arguments it takes", () => {
+    // A live turn produced `reviseIngredient {ingredientId, stepId}` under a flat args bag.
+    // Per-command branches make a step argument on an ingredient command unrepresentable.
+    const branchOf = (name: string) => branches.find((b) => b.properties.command.const === name)!;
+    expect(Object.keys(branchOf("reviseIngredient").properties.args.properties)).not.toContain("stepId");
+    expect(Object.keys(branchOf("reviseStep").properties.args.properties)).not.toContain("ingredientId");
+    expect(Object.keys(branchOf("removeIngredient").properties.args.properties)).toEqual(["ingredientId"]);
+  });
+
+  it("requires the id and the mandatory arguments of each command", () => {
+    const branchOf = (name: string) => branches.find((b) => b.properties.command.const === name)!;
+    expect(branchOf("reviseStep").properties.args.required).toEqual(["stepId", "markdown"]);
+    expect(branchOf("addIngredient").properties.args.required).toEqual(["title"]);
   });
 });
 
@@ -264,5 +286,29 @@ describe("chatTimeoutMsFromEnv", () => {
     expect(chatTimeoutMsFromEnv({}, 1000)).toBe(1000);
     expect(chatTimeoutMsFromEnv({ WIKI_UI_CHAT_TIMEOUT_MS: "0" }, 1000)).toBe(1000);
     expect(chatTimeoutMsFromEnv({ WIKI_UI_CHAT_TIMEOUT_MS: "abc" }, 1000)).toBe(1000);
+  });
+});
+
+
+describe("validateOp — arguments belong to their command", () => {
+  it("drops an argument the command does not take", () => {
+    // The exact shape a live turn returned before the schema branched per command.
+    expect(validateOp({ command: "reviseIngredient", args: { ingredientId: "i3", stepId: "i3" } })).toBeNull();
+    expect(
+      validateOp({ command: "reviseIngredient", args: { ingredientId: "i3", stepId: "s1", title: "vegan butter" } }),
+    ).toEqual({ command: "reviseIngredient", args: { ingredientId: "i3", title: "vegan butter" } });
+  });
+
+  it("rejects a revision that revises nothing", () => {
+    // It would validate, render as "Change butter", then fail on Apply: the engine refuses a
+    // mutation that changes no field.
+    expect(validateOp({ command: "reviseIngredient", args: { ingredientId: "i3" } })).toBeNull();
+  });
+
+  it("still accepts a removal, which carries only its id", () => {
+    expect(validateOp({ command: "removeIngredient", args: { ingredientId: "i3" } })).toEqual({
+      command: "removeIngredient",
+      args: { ingredientId: "i3" },
+    });
   });
 });

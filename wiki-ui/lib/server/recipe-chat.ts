@@ -40,15 +40,38 @@ import { anthropicClient, CHAT_MODEL, describeAnthropicError } from "./anthropic
  * target. Deliberately a SUBSET of the model's surface: the chat changes a recipe's
  * content, and never its status, its files, or the order of anything.
  */
-const PROPOSABLE: Readonly<Record<string, { idArg?: string; required: readonly string[] }>> = {
-  addIngredient: { required: ["title"] },
-  reviseIngredient: { idArg: "ingredientId", required: [] },
-  removeIngredient: { idArg: "ingredientId", required: [] },
-  addStep: { required: ["title", "markdown"] },
-  reviseStep: { idArg: "stepId", required: ["markdown"] },
-  removeStep: { idArg: "stepId", required: [] },
-  addNote: { required: ["title", "markdown"] },
+interface CommandSpec {
+  /** The argument naming the row this command acts on. */
+  readonly idArg?: string;
+  /** Arguments the command cannot act without. */
+  readonly required: readonly string[];
+  /** Arguments it may carry. */
+  readonly optional: readonly string[];
+  /** A revision must actually revise something: at least one non-id argument. Without this a
+   *  bare `{ingredientId}` validates, renders as "Change butter", and then fails on Apply
+   *  because the engine refuses a mutation that changes no field. */
+  readonly mustChange?: true;
+}
+
+const PROPOSABLE: Readonly<Record<string, CommandSpec>> = {
+  addIngredient: { required: ["title"], optional: ["qty", "unit", "prep", "group"] },
+  reviseIngredient: {
+    idArg: "ingredientId",
+    required: [],
+    optional: ["title", "qty", "unit", "prep", "group"],
+    mustChange: true,
+  },
+  removeIngredient: { idArg: "ingredientId", required: [], optional: [] },
+  addStep: { required: ["title", "markdown"], optional: ["group"] },
+  reviseStep: { idArg: "stepId", required: ["markdown"], optional: ["title", "group"] },
+  removeStep: { idArg: "stepId", required: [], optional: [] },
+  addNote: { required: ["title", "markdown"], optional: [] },
 };
+
+/** Every argument one command accepts, id first. */
+function argKeysOf(spec: CommandSpec): string[] {
+  return [...(spec.idArg === undefined ? [] : [spec.idArg]), ...spec.required, ...spec.optional];
+}
 
 /** The command names the schema constrains the model to, derived so the two cannot drift. */
 export function proposableCommands(): string[] {
@@ -86,34 +109,40 @@ export interface RecipeSnapshot {
  * any command takes, because the API wants additionalProperties:false on every object; WHICH
  * keys a given command needs is {@link validateOp}'s judgement, not the schema's.
  */
+/**
+ * One schema branch per command, so `args` carries exactly the arguments THAT command takes.
+ *
+ * A single flat `args` bag holding every key any command accepts does not work: it gives the
+ * model no signal about which keys belong to which command, and a live turn produced
+ * `reviseIngredient {ingredientId, stepId}` — a step argument on an ingredient command, and
+ * no actual change. Branching per command makes the wrong key unrepresentable rather than
+ * merely invalid.
+ */
+function commandBranch(name: string, spec: CommandSpec): Record<string, unknown> {
+  const keys = argKeysOf(spec);
+  return {
+    type: "object",
+    properties: {
+      command: { const: name },
+      args: {
+        type: "object",
+        properties: Object.fromEntries(keys.map((key) => [key, { type: "string" }])),
+        required: [...(spec.idArg === undefined ? [] : [spec.idArg]), ...spec.required],
+        additionalProperties: false,
+      },
+    },
+    required: ["command", "args"],
+    additionalProperties: false,
+  };
+}
+
 export const CHAT_OUTPUT_SCHEMA = {
   type: "object",
   properties: {
     reply: { type: "string" },
     proposal: {
       type: "array",
-      items: {
-        type: "object",
-        properties: {
-          command: { enum: proposableCommands() },
-          args: {
-            type: "object",
-            properties: {
-              title: { type: "string" },
-              markdown: { type: "string" },
-              qty: { type: "string" },
-              unit: { type: "string" },
-              prep: { type: "string" },
-              group: { type: "string" },
-              ingredientId: { type: "string" },
-              stepId: { type: "string" },
-            },
-            additionalProperties: false,
-          },
-        },
-        required: ["command", "args"],
-        additionalProperties: false,
-      },
+      items: { anyOf: Object.entries(PROPOSABLE).map(([name, spec]) => commandBranch(name, spec)) },
     },
   },
   required: ["reply", "proposal"],
@@ -185,12 +214,17 @@ export function validateOp(raw: unknown): ProposedOp | null {
   if (spec === undefined) return null;
   const args = obj.args;
   if (args === null || typeof args !== "object" || Array.isArray(args)) return null;
+  // Keep only primitives, and only arguments THIS command takes — a stray `stepId` on an
+  // ingredient command is noise to drop, not grounds to throw the whole edit away.
+  const allowed = new Set(argKeysOf(spec));
   const clean: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
+    if (!allowed.has(key)) continue;
     if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") clean[key] = value;
   }
   if (spec.idArg !== undefined && asString(clean[spec.idArg]) === null) return null;
   for (const key of spec.required) if (asString(clean[key]) === null) return null;
+  if (spec.mustChange === true && !spec.optional.some((key) => clean[key] !== undefined)) return null;
   return { command, args: clean };
 }
 
