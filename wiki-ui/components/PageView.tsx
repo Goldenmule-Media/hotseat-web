@@ -457,6 +457,7 @@ export function PageView({
           key={`${workspaceId}/${pageId}`}
           workspaceId={workspaceId}
           pageId={pageId}
+          pageTitle={headerTitle ?? ""}
           pageMarkdown={markdown}
         />
       ) : loading && markdown === null ? (

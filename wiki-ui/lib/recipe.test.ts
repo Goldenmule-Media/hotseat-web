@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import type { SectionElementSummary } from "./wiki-host-api";
 import {
+  applyOverlay,
+  applyProposal,
+  describeOp,
   groupIngredients,
   type Ingredient,
   ingredientsForStep,
@@ -173,5 +176,86 @@ describe("readNotes", () => {
       [{ id: "n1", markdown: "### 12/29/24\n\nForgot the brown sugar." }],
     );
     expect(notes[0]).toEqual({ id: "n1", title: "12/29/24", body: "Forgot the brown sugar." });
+  });
+});
+
+describe("applyOverlay", () => {
+  const rows = [
+    ingredient({ id: "i1", name: "buttermilk", qty: "1", unit: "cup", group: "Wet" }),
+    ingredient({ id: "i2", name: "flour", qty: "3", unit: "cup", group: "Dry" }),
+  ];
+  const steps = [{ id: "s1", title: "Mix", group: "Dry", body: "Mix it." }];
+
+  it("marks a revision without touching the stored rows", () => {
+    const overlay = applyOverlay(rows, steps, [
+      { command: "reviseIngredient", args: { ingredientId: "i1", title: "soured milk" } },
+    ]);
+    expect(overlay.ingredients[0]).toMatchObject({ name: "soured milk", change: "changed" });
+    expect(rows[0]!.name).toBe("buttermilk");
+  });
+
+  it("mints a synthetic id for an addition, which never reaches the engine", () => {
+    const overlay = applyOverlay(rows, steps, [
+      { command: "addIngredient", args: { title: "vinegar", qty: "1", unit: "tbsp" } },
+    ]);
+    expect(overlay.ingredients).toHaveLength(3);
+    expect(overlay.ingredients[2]).toMatchObject({ name: "vinegar", change: "added" });
+    expect(overlay.ingredients[2]!.id).toMatch(/^proposed:/);
+  });
+
+  it("marks a removal rather than dropping the row, so the change is visible", () => {
+    const overlay = applyOverlay(rows, steps, [{ command: "removeIngredient", args: { ingredientId: "i2" } }]);
+    expect(overlay.ingredients).toHaveLength(2);
+    expect(overlay.ingredients[1]!.change).toBe("removed");
+  });
+
+  it("reports an op naming a row that is gone instead of silently skipping it", () => {
+    const overlay = applyOverlay(rows, steps, [{ command: "reviseIngredient", args: { ingredientId: "gone" } }]);
+    expect(overlay.unapplied).toHaveLength(1);
+    expect(overlay.ingredients).toEqual(rows);
+  });
+
+  it("is the identity when nothing is proposed", () => {
+    const overlay = applyOverlay(rows, steps, []);
+    expect(overlay.ingredients).toEqual(rows);
+    expect(overlay.steps).toEqual(steps);
+  });
+
+  it("revises and rewrites steps too", () => {
+    const overlay = applyOverlay(rows, steps, [
+      { command: "reviseStep", args: { stepId: "s1", markdown: "Whisk it." } },
+      { command: "addStep", args: { title: "Rest", markdown: "Wait an hour." } },
+    ]);
+    expect(overlay.steps[0]).toMatchObject({ body: "Whisk it.", change: "changed" });
+    expect(overlay.steps[1]).toMatchObject({ title: "Rest", change: "added" });
+  });
+});
+
+describe("applyProposal", () => {
+  it("replays every op and counts what the engine refused", async () => {
+    const seen: string[] = [];
+    const result = await applyProposal(
+      [
+        { command: "addIngredient", args: { title: "vinegar" } },
+        { command: "removeIngredient", args: { ingredientId: "i2" } },
+      ],
+      async (command) => {
+        seen.push(command);
+        return command !== "removeIngredient";
+      },
+    );
+    expect(seen).toEqual(["addIngredient", "removeIngredient"]);
+    expect(result).toEqual({ applied: 1, failed: 1 });
+  });
+});
+
+describe("describeOp", () => {
+  it("names the row a change is about, not its id", () => {
+    const rows = [ingredient({ id: "i1", name: "buttermilk" })];
+    expect(describeOp({ command: "reviseIngredient", args: { ingredientId: "i1", qty: "2", unit: "cup" } }, rows, []))
+      .toBe("Change buttermilk to 2 cup");
+    expect(describeOp({ command: "removeIngredient", args: { ingredientId: "i1" } }, rows, [])).toBe(
+      "Remove buttermilk",
+    );
   });
 });

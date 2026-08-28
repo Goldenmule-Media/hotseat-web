@@ -3878,3 +3878,114 @@ button.restate-card-lead:hover {
 .recipe-note-head button:hover {
   color: var(--red);
 }
+
+/* ── the chat, and a proposal held in memory ──
+   A proposed change is drawn INTO the recipe rather than beside it: the panes above show
+   what the recipe would become, and these marks say which rows moved. Nothing is saved
+   until Apply. */
+
+.recipe-ingredient.proposed-added,
+.recipe-step.proposed-added {
+  box-shadow: inset 2px 0 0 var(--green);
+}
+
+.recipe-ingredient.proposed-changed,
+.recipe-step.proposed-changed {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.recipe-ingredient.proposed-removed,
+.recipe-step.proposed-removed {
+  box-shadow: inset 2px 0 0 var(--red);
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
+.recipe-chat {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.recipe-chat-answer {
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.recipe-chat-error {
+  color: var(--red);
+  font-size: 13px;
+  margin: 0;
+}
+
+.recipe-proposal {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.recipe-proposal ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.recipe-proposal li {
+  font-size: 13px;
+}
+
+.recipe-proposal-note {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 6px 0 8px;
+}
+
+.recipe-proposal-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.recipe-proposal-actions button,
+.recipe-chat-ask button {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 12px;
+}
+
+.recipe-proposal-actions button.primary {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+}
+
+.recipe-proposal-actions button:disabled,
+.recipe-chat-ask button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.recipe-chat-ask {
+  display: flex;
+  gap: 6px;
+}
+
+.recipe-chat-ask input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  flex: 1 1 auto;
+  font: inherit;
+  font-size: 14px;
+  min-width: 0;
+  padding: 6px 10px;
+}

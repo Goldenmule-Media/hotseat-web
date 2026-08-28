@@ -13,6 +13,7 @@
  */
 import { combine, formatMeasure, type Measure } from "wiki-models/recipe";
 
+import { getToken, notifyUnauthorized } from "./auth";
 import type { SectionElementSummary } from "./live";
 import { sliceH2Section } from "./restate";
 
@@ -94,9 +95,9 @@ export function measureOf(ingredient: Ingredient): Measure {
 
 /** Ingredients bucketed by `group`, buckets in first-appearance order — the same order the
  *  model's projection uses, so the pane and the Markdown agree. Ungrouped is a bucket too. */
-export function groupIngredients(
-  ingredients: readonly Ingredient[],
-): readonly { readonly group: string; readonly items: readonly Ingredient[] }[] {
+export function groupIngredients<T extends { readonly group: string }>(
+  ingredients: readonly T[],
+): readonly { readonly group: string; readonly items: readonly T[] }[] {
   const order: string[] = [];
   for (const item of ingredients) if (!order.includes(item.group)) order.push(item.group);
   return order.map((group) => ({ group, items: ingredients.filter((i) => i.group === group) }));
@@ -213,4 +214,270 @@ export function readFiles(pageMarkdown: string | null): readonly RecipeFile[] {
     out.push({ ref: m[3]!, label: m[2]! === "" ? m[3]! : m[2]!, isImage: m[1] === "!" });
   }
   return out;
+}
+
+// ── the chat's proposal, applied in memory ───────────────────────────────────
+
+/** One edit the chat has proposed. The command name and args are the model's own, so
+ *  applying is a mechanical translation and never a re-interpretation. */
+export interface ProposedOp {
+  readonly command: string;
+  readonly args: Record<string, unknown>;
+}
+
+export type RowChange = "added" | "changed" | "removed";
+
+export interface OverlayIngredient extends Ingredient {
+  readonly change?: RowChange;
+}
+
+export interface OverlayStep extends Step {
+  readonly change?: RowChange;
+}
+
+export interface Overlay {
+  readonly ingredients: readonly OverlayIngredient[];
+  readonly steps: readonly OverlayStep[];
+  /** Ops that name a row this recipe no longer has — shown, never silently dropped. */
+  readonly unapplied: readonly ProposedOp[];
+}
+
+const str = (value: unknown): string | undefined =>
+  typeof value === "string" ? value : typeof value === "number" ? String(value) : undefined;
+
+/**
+ * The proposal applied to a COPY of the recipe — what the panes draw while a change is
+ * being considered. Nothing here touches the engine; `applyProposal` is the same list of
+ * ops replayed as real mutations once the human says so.
+ *
+ * A proposed row gets a synthetic `proposed:<n>` id. That id never reaches the engine: an
+ * `addIngredient` op carries no id at all, and applying it mints a real one.
+ */
+export function applyOverlay(
+  ingredients: readonly Ingredient[],
+  steps: readonly Step[],
+  ops: readonly ProposedOp[],
+): Overlay {
+  const nextIngredients: OverlayIngredient[] = [...ingredients];
+  const nextSteps: OverlayStep[] = [...steps];
+  const unapplied: ProposedOp[] = [];
+  let minted = 0;
+
+  const findBy = <T extends { id: string }>(rows: readonly T[], id: string | undefined): number =>
+    id === undefined ? -1 : rows.findIndex((r) => r.id === id);
+
+  for (const op of ops) {
+    const a = op.args;
+    switch (op.command) {
+      case "addIngredient":
+        nextIngredients.push({
+          id: `proposed:${(minted += 1)}`,
+          name: str(a.title) ?? "",
+          qty: str(a.qty) ?? "",
+          unit: str(a.unit) ?? "",
+          prep: str(a.prep) ?? "",
+          group: str(a.group) ?? "",
+          shopAs: str(a.shopAs) ?? "",
+          note: "",
+          stepId: "",
+          change: "added",
+        });
+        break;
+      case "reviseIngredient": {
+        const at = findBy(nextIngredients, str(a.ingredientId));
+        if (at === -1) {
+          unapplied.push(op);
+          break;
+        }
+        const row = nextIngredients[at]!;
+        nextIngredients[at] = {
+          ...row,
+          ...(a.title !== undefined ? { name: str(a.title) ?? "" } : {}),
+          ...(a.qty !== undefined ? { qty: str(a.qty) ?? "" } : {}),
+          ...(a.unit !== undefined ? { unit: str(a.unit) ?? "" } : {}),
+          ...(a.prep !== undefined ? { prep: str(a.prep) ?? "" } : {}),
+          ...(a.group !== undefined ? { group: str(a.group) ?? "" } : {}),
+          change: row.change ?? "changed",
+        };
+        break;
+      }
+      case "removeIngredient": {
+        const at = findBy(nextIngredients, str(a.ingredientId));
+        if (at === -1) unapplied.push(op);
+        else nextIngredients[at] = { ...nextIngredients[at]!, change: "removed" };
+        break;
+      }
+      case "addStep":
+        nextSteps.push({
+          id: `proposed:${(minted += 1)}`,
+          title: str(a.title) ?? "",
+          group: str(a.group) ?? "",
+          body: str(a.markdown) ?? "",
+          change: "added",
+        });
+        break;
+      case "reviseStep": {
+        const at = findBy(nextSteps, str(a.stepId));
+        if (at === -1) {
+          unapplied.push(op);
+          break;
+        }
+        const row = nextSteps[at]!;
+        nextSteps[at] = {
+          ...row,
+          ...(a.title !== undefined ? { title: str(a.title) ?? "" } : {}),
+          ...(a.markdown !== undefined ? { body: str(a.markdown) ?? "" } : {}),
+          change: row.change ?? "changed",
+        };
+        break;
+      }
+      case "removeStep": {
+        const at = findBy(nextSteps, str(a.stepId));
+        if (at === -1) unapplied.push(op);
+        else nextSteps[at] = { ...nextSteps[at]!, change: "removed" };
+        break;
+      }
+      case "addNote":
+        // A note changes neither pane, so it shows only in the chat's own summary.
+        break;
+      default:
+        unapplied.push(op);
+    }
+  }
+  return { ingredients: nextIngredients, steps: nextSteps, unapplied };
+}
+
+/** One line per op, for the "here is what this would do" list above Apply. */
+export function describeOp(op: ProposedOp, ingredients: readonly Ingredient[], steps: readonly Step[]): string {
+  const a = op.args;
+  const nameOf = (id: string | undefined): string =>
+    ingredients.find((i) => i.id === id)?.name ?? steps.find((s) => s.id === id)?.title ?? "it";
+  const measure = [str(a.qty), str(a.unit)].filter((p) => p !== undefined && p !== "").join(" ");
+  switch (op.command) {
+    case "addIngredient":
+      return `Add ${[measure, str(a.title)].filter((p) => p !== undefined && p !== "").join(" ")}`;
+    case "reviseIngredient":
+      return `Change ${nameOf(str(a.ingredientId))}${measure === "" ? "" : ` to ${measure}`}`;
+    case "removeIngredient":
+      return `Remove ${nameOf(str(a.ingredientId))}`;
+    case "addStep":
+      return `Add a step: ${str(a.title) ?? ""}`;
+    case "reviseStep":
+      return `Rewrite step: ${nameOf(str(a.stepId))}`;
+    case "removeStep":
+      return `Remove step: ${nameOf(str(a.stepId))}`;
+    case "addNote":
+      return `Add a note: ${str(a.title) ?? ""}`;
+    default:
+      return op.command;
+  }
+}
+
+/**
+ * The proposal as real mutations, in order. Adds come first among their own kind so a later
+ * op can never reference a row that has not been created; ops naming a row that has since
+ * disappeared are skipped rather than failing the batch, which is the same thing the
+ * overlay showed as unapplied.
+ */
+export async function applyProposal(
+  ops: readonly ProposedOp[],
+  run: (command: string, args: Record<string, unknown>) => Promise<boolean>,
+): Promise<{ applied: number; failed: number }> {
+  let applied = 0;
+  let failed = 0;
+  for (const op of ops) {
+    const ok = await run(op.command, op.args);
+    if (ok) applied += 1;
+    else failed += 1;
+  }
+  return { applied, failed };
+}
+
+// ── /api/recipe fetch wrappers (same-origin; bearer attached; 401 → sign-out) ──
+
+function recipeHeaders(json: boolean): Headers {
+  const headers = new Headers();
+  const token = getToken();
+  if (token !== null) headers.set("authorization", `Bearer ${token}`);
+  if (json) headers.set("content-type", "application/json");
+  return headers;
+}
+
+function sawUnauthorized(res: Response): boolean {
+  if (res.status !== 401) return false;
+  notifyUnauthorized();
+  return true;
+}
+
+function errText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+export interface ChatAnswer {
+  readonly reply: string;
+  readonly proposal: readonly ProposedOp[];
+  readonly sessionId?: string;
+}
+
+export type ChatResult = { ok: true; answer: ChatAnswer } | { ok: false; message: string };
+
+/** POST /api/recipe/chat. One JSON answer, nothing streamed. Never throws. */
+export async function askRecipeChat(req: {
+  title: string;
+  ingredients: readonly Ingredient[];
+  steps: readonly Step[];
+  question: string;
+  sessionId?: string;
+  signal?: AbortSignal;
+}): Promise<ChatResult> {
+  let res: Response;
+  try {
+    res = await fetch("/api/recipe/chat", {
+      method: "POST",
+      headers: recipeHeaders(true),
+      body: JSON.stringify({
+        recipe: {
+          title: req.title,
+          ingredients: req.ingredients.map((i) => ({
+            id: i.id,
+            name: i.name,
+            qty: i.qty,
+            unit: i.unit,
+            prep: i.prep,
+            group: i.group,
+          })),
+          steps: req.steps.map((s) => ({ id: s.id, title: s.title, group: s.group, body: s.body })),
+        },
+        question: req.question,
+        ...(req.sessionId !== undefined ? { sessionId: req.sessionId } : {}),
+      }),
+      signal: req.signal,
+    });
+  } catch (e) {
+    return { ok: false, message: req.signal?.aborted === true ? "cancelled" : errText(e) };
+  }
+  if (sawUnauthorized(res)) return { ok: false, message: "signed out (the chat route returned 401)" };
+  if (!res.ok) {
+    try {
+      const body = (await res.json()) as { error?: unknown };
+      if (typeof body.error === "string") return { ok: false, message: body.error };
+    } catch {
+      // non-JSON error body — fall through to the status message
+    }
+    return { ok: false, message: `the recipe chat failed (HTTP ${res.status})` };
+  }
+  try {
+    const body = (await res.json()) as { reply?: unknown; proposal?: unknown; sessionId?: unknown };
+    if (typeof body.reply !== "string") return { ok: false, message: "the recipe chat replied with no answer" };
+    return {
+      ok: true,
+      answer: {
+        reply: body.reply,
+        proposal: Array.isArray(body.proposal) ? (body.proposal as ProposedOp[]) : [],
+        ...(typeof body.sessionId === "string" ? { sessionId: body.sessionId } : {}),
+      },
+    };
+  } catch (e) {
+    return { ok: false, message: errText(e) };
+  }
 }

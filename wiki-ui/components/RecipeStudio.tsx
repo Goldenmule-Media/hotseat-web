@@ -24,6 +24,10 @@ import { convert, formatMeasure, toggleTarget, UNIT_TOKENS } from "wiki-models/r
 import { resolveAttachment, uploadAttachment } from "../lib/attachments";
 import { usePageMutator, useSectionDocument, useSectionElements } from "../lib/live";
 import {
+  applyOverlay,
+  applyProposal,
+  askRecipeChat,
+  describeOp,
   FILES_SECTION,
   groupIngredients,
   type Ingredient,
@@ -31,6 +35,10 @@ import {
   ingredientsForStep,
   measureOf,
   type Note,
+  type Overlay,
+  type OverlayIngredient,
+  type OverlayStep,
+  type ProposedOp,
   NOTES_SECTION,
   readFiles,
   readIngredients,
@@ -53,10 +61,12 @@ type Run = (command: string, args: Record<string, unknown>) => Promise<boolean>;
 export function RecipeStudio({
   workspaceId,
   pageId,
+  pageTitle,
   pageMarkdown,
 }: {
   workspaceId: WorkspaceId;
   pageId: PageId;
+  pageTitle: string;
   /** The whole page's rendered Markdown — `files` is a blocks field with no elements to
    *  summarize, so the render is where its attachment refs exist in one piece. */
   pageMarkdown: string | null;
@@ -70,7 +80,6 @@ export function RecipeStudio({
 
   const ingredients = useMemo(() => readIngredients(ingredientEls.elements), [ingredientEls.elements]);
   const steps = useMemo(() => readSteps(stepEls.elements, stepDoc.notes), [stepEls.elements, stepDoc.notes]);
-  const shopping = useMemo(() => shoppingList(ingredients), [ingredients]);
   const notes = useMemo(() => readNotes(noteEls.elements, noteDoc.notes), [noteEls.elements, noteDoc.notes]);
   const files = useMemo(() => readFiles(pageMarkdown), [pageMarkdown]);
   const documents = useMemo(() => files.filter((f) => !f.isImage), [files]);
@@ -78,17 +87,28 @@ export function RecipeStudio({
   const [leftTab, setLeftTab] = useState<LeftTab>("ingredients");
   const [rightTab, setRightTab] = useState<RightTab>("instructions");
   const [showGrams, setShowGrams] = useState(false);
+  /** The chat's proposal, held in memory. Nothing here has been written. */
+  const [proposal, setProposal] = useState<readonly ProposedOp[]>([]);
   /** Ingredient ids lit by whatever the pointer is over, on either side. */
   const [lit, setLit] = useState<readonly string[]>([]);
 
   const litSet = useMemo(() => new Set(lit), [lit]);
 
-  const highlightStep = useCallback(
-    (step: Step | null) => setLit(step === null ? [] : ingredientsForStep(ingredients, step)),
-    [ingredients],
+  // While a proposal is open the panes draw the PROPOSED recipe, so a change is judged by
+  // reading the recipe it would produce rather than a diff beside it. Nothing is written.
+  const overlay: Overlay = useMemo(() => applyOverlay(ingredients, steps, proposal), [ingredients, steps, proposal]);
+  const shownIngredients: readonly OverlayIngredient[] = overlay.ingredients;
+  const shownSteps: readonly OverlayStep[] = overlay.steps;
+  const groups = useMemo(() => groupIngredients(shownIngredients), [shownIngredients]);
+  const shopping = useMemo(
+    () => shoppingList(shownIngredients.filter((i) => i.change !== "removed")),
+    [shownIngredients],
   );
 
-  const groups = useMemo(() => groupIngredients(ingredients), [ingredients]);
+  const highlightStep = useCallback(
+    (step: Step | null) => setLit(step === null ? [] : ingredientsForStep(shownIngredients, step)),
+    [shownIngredients],
+  );
 
   return (
     <div className="recipe-studio">
@@ -123,7 +143,7 @@ export function RecipeStudio({
 
           {leftTab === "ingredients" ? (
             <div className="recipe-ingredients">
-              {ingredients.length === 0 && !ingredientEls.loading && (
+              {shownIngredients.length === 0 && !ingredientEls.loading && (
                 <p className="muted">No ingredients yet.</p>
               )}
               {groups.map(({ group, items }) => (
@@ -133,6 +153,7 @@ export function RecipeStudio({
                     <IngredientRow
                       key={item.id}
                       ingredient={item}
+                      change={item.change}
                       steps={steps}
                       showGrams={showGrams}
                       lit={litSet.has(item.id)}
@@ -189,14 +210,15 @@ export function RecipeStudio({
           {rightTab === "instructions" ? (
             <>
               <ol className="recipe-steps">
-                {steps.length === 0 && !stepEls.loading && <li className="muted">No steps yet.</li>}
-                {steps.map((step, index) => (
+                {shownSteps.length === 0 && !stepEls.loading && <li className="muted">No steps yet.</li>}
+                {shownSteps.map((step, index) => (
                   <StepCard
                     key={step.id}
                     step={step}
+                    change={step.change}
                     index={index}
-                    total={steps.length}
-                    paired={ingredientsForStep(ingredients, step).length > 0}
+                    total={shownSteps.length}
+                    paired={ingredientsForStep(shownIngredients, step).length > 0}
                     onHover={(on) => highlightStep(on ? step : null)}
                     run={run}
                   />
@@ -211,6 +233,15 @@ export function RecipeStudio({
           )}
         </section>
       </div>
+
+      <ChatBar
+        title={pageTitle}
+        ingredients={ingredients}
+        steps={steps}
+        proposal={proposal}
+        onPropose={setProposal}
+        run={run}
+      />
     </div>
   );
 }
@@ -235,6 +266,7 @@ function useCell(stored: string, commit: (text: string) => Promise<boolean>): {
 
 function IngredientRow({
   ingredient,
+  change,
   steps,
   showGrams,
   lit,
@@ -242,6 +274,9 @@ function IngredientRow({
   run,
 }: {
   ingredient: Ingredient;
+  /** Set while the chat's proposal is open — the row is styled, and frozen against edits
+   *  that would be written straight through underneath an unapplied change. */
+  change?: "added" | "changed" | "removed";
   steps: readonly Step[];
   showGrams: boolean;
   lit: boolean;
@@ -271,7 +306,7 @@ function IngredientRow({
 
   return (
     <div
-      className={`recipe-ingredient${lit ? " lit" : ""}`}
+      className={`recipe-ingredient${lit ? " lit" : ""}${change === undefined ? "" : ` proposed-${change}`}`}
       onPointerEnter={() => onHover(true)}
       onPointerLeave={() => onHover(false)}
     >
@@ -374,6 +409,7 @@ function AddIngredient({ run, groups }: { run: Run; groups: readonly string[] })
 
 function StepCard({
   step,
+  change,
   index,
   total,
   paired,
@@ -381,6 +417,7 @@ function StepCard({
   run,
 }: {
   step: Step;
+  change?: "added" | "changed" | "removed";
   index: number;
   total: number;
   paired: boolean;
@@ -403,7 +440,7 @@ function StepCard({
 
   return (
     <li
-      className={`recipe-step${paired ? " has-pairing" : ""}`}
+      className={`recipe-step${paired ? " has-pairing" : ""}${change === undefined ? "" : ` proposed-${change}`}`}
       onPointerEnter={() => onHover(true)}
       onPointerLeave={() => onHover(false)}
     >
@@ -678,5 +715,120 @@ function AddNote({ run }: { run: Run }): React.JSX.Element {
       />
       <button type="submit">Add note</button>
     </form>
+  );
+}
+
+// ── the chat ─────────────────────────────────────────────────────────────────
+
+/**
+ * A chat across the foot of both panes, because a substitution question is about the
+ * ingredients AND the method at once.
+ *
+ * A proposed change is applied to the panes IN MEMORY: the recipe above rearranges to what
+ * it would become, changed rows marked, and nothing has been written. Apply replays the
+ * same ops as real mutations; Discard forgets them. That is the whole contract, and it is
+ * why the proposal is a list of the model's own commands rather than free text — what you
+ * read is exactly what gets written.
+ */
+function ChatBar({
+  title,
+  ingredients,
+  steps,
+  proposal,
+  onPropose,
+  run,
+}: {
+  title: string;
+  ingredients: readonly Ingredient[];
+  steps: readonly Step[];
+  proposal: readonly ProposedOp[];
+  onPropose: (ops: readonly ProposedOp[]) => void;
+  run: Run;
+}): React.JSX.Element {
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [asking, setAsking] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const session = useRef<string | undefined>(undefined);
+
+  const ask = useCallback(async () => {
+    const text = question.trim();
+    if (text === "" || asking) return;
+    setAsking(true);
+    setProblem(null);
+    const result = await askRecipeChat({
+      title,
+      ingredients,
+      steps,
+      question: text,
+      ...(session.current !== undefined ? { sessionId: session.current } : {}),
+    });
+    setAsking(false);
+    if (!result.ok) {
+      setProblem(result.message);
+      return;
+    }
+    session.current = result.answer.sessionId ?? session.current;
+    setAnswer(result.answer.reply);
+    onPropose(result.answer.proposal);
+    setQuestion("");
+  }, [question, asking, title, ingredients, steps, onPropose]);
+
+  const apply = useCallback(async () => {
+    setApplying(true);
+    const { failed } = await applyProposal(proposal, run);
+    setApplying(false);
+    onPropose([]);
+    if (failed > 0) setProblem(`${failed} of those changes could not be applied.`);
+  }, [proposal, run, onPropose]);
+
+  return (
+    <section className="recipe-chat" aria-label="Ask about this recipe">
+      {answer !== null && <p className="recipe-chat-answer">{answer}</p>}
+      {problem !== null && (
+        <p className="recipe-chat-error" role="alert">
+          {problem}
+        </p>
+      )}
+
+      {proposal.length > 0 && (
+        <div className="recipe-proposal">
+          <ul>
+            {proposal.map((op, i) => (
+              <li key={`${op.command}:${i}`}>{describeOp(op, ingredients, steps)}</li>
+            ))}
+          </ul>
+          <p className="recipe-proposal-note">Shown above, not saved.</p>
+          <div className="recipe-proposal-actions">
+            <button type="button" className="primary" disabled={applying} onClick={() => void apply()}>
+              {applying ? "Applying…" : "Apply to recipe"}
+            </button>
+            <button type="button" disabled={applying} onClick={() => onPropose([])}>
+              Discard
+            </button>
+          </div>
+        </div>
+      )}
+
+      <form
+        className="recipe-chat-ask"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void ask();
+        }}
+      >
+        <input
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          placeholder="What can I use instead of buttermilk?"
+          aria-label="Ask about this recipe"
+          disabled={asking}
+        />
+        <button type="submit" disabled={asking || question.trim() === ""}>
+          {asking ? "Thinking…" : "Ask"}
+        </button>
+      </form>
+    </section>
   );
 }
