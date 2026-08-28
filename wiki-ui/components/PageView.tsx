@@ -27,6 +27,7 @@ import { findNode } from "../lib/tree";
 import { isTerminalStatus } from "../lib/fsm-graph";
 import { ARTICLE_PAGE_TYPE } from "../lib/article-notes";
 import { GLOSSARY_PAGE_TYPE } from "../lib/glossary";
+import { RECIPE_PAGE_TYPE } from "../lib/recipe";
 import { RESTATE_PAGE_TYPE } from "../lib/restate";
 import { STUDY_PAGE_TYPE } from "../lib/study";
 import { isStudioView, preferredViewMode, rememberViewMode, type StudioView, type ViewMode } from "../lib/view-mode";
@@ -34,6 +35,7 @@ import { CreatePageModal } from "./CreatePageModal";
 import { FsmGraph } from "./FsmGraph";
 import { ArticleStudio } from "./ArticleStudio";
 import { GlossaryStudio } from "./GlossaryStudio";
+import { RecipeStudio } from "./RecipeStudio";
 import { RestateStudio } from "./RestateStudio";
 import { StudyStudio } from "./StudyStudio";
 import { SchemaInspector } from "./SchemaInspector";
@@ -44,6 +46,7 @@ const STUDIO_OF: Readonly<Record<string, StudioView>> = {
   [STUDY_PAGE_TYPE]: "study",
   [GLOSSARY_PAGE_TYPE]: "glossary",
   [ARTICLE_PAGE_TYPE]: "article",
+  [RECIPE_PAGE_TYPE]: "recipe",
 };
 
 const STUDIO_LABEL: Readonly<Record<StudioView, string>> = {
@@ -51,6 +54,7 @@ const STUDIO_LABEL: Readonly<Record<StudioView, string>> = {
   study: "Study",
   glossary: "Glossary",
   article: "Notes",
+  recipe: "Cook",
 };
 
 export function PageView({
@@ -448,6 +452,8 @@ export function PageView({
           status={currentStatus}
           pageMarkdown={markdown}
         />
+      ) : mode === "recipe" && studio === "recipe" ? (
+        <RecipeStudio key={`${workspaceId}/${pageId}`} workspaceId={workspaceId} pageId={pageId} />
       ) : loading && markdown === null ? (
         <p className="muted">Loading page…</p>
       ) : (

@@ -3470,3 +3470,295 @@ button.restate-card-lead:hover {
   color: var(--red);
   font-size: 13px;
 }
+
+/* ── the Recipe Studio ────────────────────────────────────────────────────────
+   Two panes over a shared page: the ingredients (or the shopping list they add up
+   to) on the left, the method on the right. Hovering either side lights the rows
+   it corresponds to on the other, which is the whole reason the panes sit side by
+   side rather than stacking. */
+
+.recipe-studio {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.recipe-error {
+  color: var(--red);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.recipe-panes {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.9fr) minmax(320px, 1.1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 860px) {
+  .recipe-panes {
+    grid-template-columns: 1fr;
+  }
+}
+
+.recipe-pane {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.recipe-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.recipe-tabs button {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 10px;
+}
+
+.recipe-tabs button:hover {
+  color: var(--text);
+}
+
+.recipe-tabs button.active {
+  background: var(--accent-dim);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.recipe-grams {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 12px;
+  gap: 4px;
+  margin-left: auto;
+}
+
+/* ── ingredients ── */
+
+.recipe-ingredients,
+.recipe-shopping,
+.recipe-steps {
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.recipe-group-name {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  margin: 12px 0 4px;
+  text-transform: uppercase;
+}
+
+.recipe-group:first-child .recipe-group-name {
+  margin-top: 0;
+}
+
+.recipe-ingredient {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  display: flex;
+  gap: 4px;
+  padding: 2px 4px;
+}
+
+/* The pairing highlight. It has to be legible at a glance from across a kitchen,
+   so it is a filled row rather than an outline. */
+.recipe-ingredient.lit,
+.recipe-shopping li.lit {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+}
+
+.recipe-ingredient input {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  padding: 2px 4px;
+}
+
+.recipe-ingredient input:hover {
+  border-color: var(--border);
+}
+
+.recipe-ingredient input:focus {
+  background: var(--bg);
+  border-color: var(--accent);
+  outline: none;
+}
+
+.recipe-qty {
+  text-align: right;
+  width: 3.5em;
+}
+
+.recipe-unit {
+  width: 3.5em;
+}
+
+.recipe-name {
+  flex: 1 1 auto;
+  min-width: 5em;
+}
+
+.recipe-prep {
+  color: var(--muted);
+  flex: 0 1 8em;
+}
+
+.recipe-hint {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.recipe-paired {
+  color: var(--accent);
+  font-size: 10px;
+}
+
+.recipe-remove,
+.recipe-step-controls button {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  padding: 0 4px;
+}
+
+.recipe-remove:hover,
+.recipe-step-controls button:hover:not(:disabled) {
+  color: var(--red);
+}
+
+.recipe-step-controls button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.recipe-add {
+  display: flex;
+  gap: 6px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.recipe-add input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  flex: 1 1 auto;
+  font: inherit;
+  font-size: 14px;
+  min-width: 0;
+  padding: 5px 8px;
+}
+
+.recipe-add input:nth-of-type(2) {
+  flex: 0 0 7em;
+}
+
+.recipe-add button {
+  background: var(--accent-dim);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 12px;
+}
+
+/* ── shopping list ── */
+
+.recipe-shopping {
+  list-style: none;
+}
+
+.recipe-shopping li {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 14px;
+  padding: 3px 6px;
+}
+
+.recipe-total {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── steps ── */
+
+.recipe-steps {
+  list-style: none;
+}
+
+.recipe-step {
+  border-top: 1px solid var(--border);
+  padding: 10px 0;
+}
+
+.recipe-step:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.recipe-step-head {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.recipe-step-n {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 1.4em;
+  text-align: right;
+}
+
+.recipe-step-title {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text);
+  flex: 1 1 auto;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  min-width: 0;
+  padding: 2px 4px;
+}
+
+.recipe-step-title:hover {
+  border-color: var(--border);
+}
+
+.recipe-step-title:focus {
+  background: var(--bg);
+  border-color: var(--accent);
+  outline: none;
+}
+
+.recipe-step.has-pairing .recipe-step-n {
+  color: var(--accent);
+}
