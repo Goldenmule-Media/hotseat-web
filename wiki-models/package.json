@@ -15,7 +15,8 @@
     "./restatement-glossary": "./src/restatement-glossary/index.ts",
     "./spec-restatement": "./src/spec-restatement/index.ts",
     "./study": "./src/study/index.ts",
-    "./engagement": "./src/engagement/index.ts"
+    "./engagement": "./src/engagement/index.ts",
+    "./recipe": "./src/recipe/index.ts"
   },
   "files": [
     "dist"

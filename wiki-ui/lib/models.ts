@@ -12,6 +12,7 @@ import bugPageTypes from "wiki-models/bug";
 import documentPageTypes from "wiki-models/document";
 import engagementPageTypes from "wiki-models/engagement";
 import featurePageTypes from "wiki-models/feature";
+import recipePageTypes from "wiki-models/recipe";
 import restatementGlossaryPageTypes from "wiki-models/restatement-glossary";
 import securityPageTypes from "wiki-models/security";
 import specRestatementPageTypes from "wiki-models/spec-restatement";
@@ -31,6 +32,7 @@ export const pageTypes: readonly IPageType[] = [
   ...specRestatementPageTypes,
   ...restatementGlossaryPageTypes,
   ...studyPageTypes,
+  ...recipePageTypes,
 ];
 
 /**

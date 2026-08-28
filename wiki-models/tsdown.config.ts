@@ -26,6 +26,7 @@ export default defineConfig({
     "spec-restatement": "src/spec-restatement/index.ts",
     study: "src/study/index.ts",
     engagement: "src/engagement/index.ts",
+    recipe: "src/recipe/index.ts",
   },
   format: ["esm"],
   platform: "node",
