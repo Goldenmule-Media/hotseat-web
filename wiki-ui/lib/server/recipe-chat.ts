@@ -18,7 +18,7 @@
  * sends the prior turns back and this module assembles them into `messages[]`.
  *
  * The mitigation apparatus disappears because the threat does. The CLI's skip-permissions
- * flag, CRITIC_DISALLOWED_TOOLS, the always-on empty --mcp-config plus --strict-mcp-config,
+ * flag, its disallowed-tools list, the always-on empty --mcp-config plus --strict-mcp-config,
  * the scratch cwd, and the stripped child env all existed because a spawned `claude` could
  * otherwise discover a project .mcp.json and acquire authenticated wiki write tools. A
  * messages.create call with NO `tools` parameter has no tool access at all: no filesystem,
@@ -26,10 +26,9 @@
  * relocation of it. What does NOT change is validateOp's allowlist, which was never about
  * the transport.
  *
- * Billing moves from a Claude subscription to API credits FOR THE RECIPE CHAT ONLY.
- * lib/server/claude-cli.ts deliberately deletes ANTHROPIC_API_KEY from the child env so the
- * CLI bills the subscription, and that line stays. Setting the key for wiki-ui does not
- * alter what the Restate and Study critics bill.
+ * Billing is API credits. Every LLM call in this app went the same way — the Restate and
+ * Study critics followed — so there is no longer a local `claude` CLI anywhere in wiki-ui,
+ * and nothing here bills a subscription.
  */
 import type Anthropic from "@anthropic-ai/sdk";
 

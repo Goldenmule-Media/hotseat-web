@@ -18,7 +18,7 @@
  * a system or assistant turn.
  *
  * The mitigation apparatus disappears because the threat does. The CLI's skip-permissions
- * flag, CRITIC_DISALLOWED_TOOLS, the always-on empty --mcp-config plus --strict-mcp-config,
+ * flag, its disallowed-tools list, the always-on empty --mcp-config plus --strict-mcp-config,
  * the scratch cwd, and the stripped child env all existed because a spawned `claude` could
  * otherwise discover a project .mcp.json and acquire authenticated wiki write tools. A
  * messages.create call with NO `tools` parameter has no tool access at all: no filesystem,
