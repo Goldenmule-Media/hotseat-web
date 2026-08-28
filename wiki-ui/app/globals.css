@@ -3544,14 +3544,14 @@ button.restate-card-lead:hover {
 .recipe-shopping,
 .recipe-steps {
   margin: 0;
-  padding: 10px 12px;
+  padding: 6px 8px;
 }
 
 .recipe-group-name {
   color: var(--muted);
   font-size: 12px;
   letter-spacing: 0.04em;
-  margin: 12px 0 4px;
+  margin: 10px 0 2px;
   text-transform: uppercase;
 }
 
@@ -3559,13 +3559,15 @@ button.restate-card-lead:hover {
   margin-top: 0;
 }
 
+/* Rows are packed tight and the wrapping cells align on their first line, so a two-line
+   name pushes nothing else down. */
 .recipe-ingredient {
-  align-items: center;
+  align-items: flex-start;
   border: 1px solid transparent;
   border-radius: 6px;
   display: flex;
-  gap: 4px;
-  padding: 2px 4px;
+  gap: 2px;
+  padding: 1px 2px;
 }
 
 /* The pairing highlight. It has to be legible at a glance from across a kitchen,
@@ -3576,46 +3578,68 @@ button.restate-card-lead:hover {
   border-color: var(--accent);
 }
 
-.recipe-ingredient input {
+.recipe-ingredient input,
+.recipe-ingredient textarea {
   background: none;
   border: 1px solid transparent;
   border-radius: 4px;
   color: var(--text);
   font: inherit;
   font-size: 14px;
-  padding: 2px 4px;
+  line-height: 1.35;
+  padding: 1px 3px;
 }
 
-.recipe-ingredient input:hover {
+.recipe-ingredient textarea {
+  overflow: hidden;
+  overflow-wrap: break-word;
+  resize: none;
+}
+
+.recipe-ingredient input:hover,
+.recipe-ingredient textarea:hover {
   border-color: var(--border);
 }
 
-.recipe-ingredient input:focus {
+.recipe-ingredient input:focus,
+.recipe-ingredient textarea:focus {
   background: var(--bg);
   border-color: var(--accent);
   outline: none;
 }
 
 .recipe-qty {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
   text-align: right;
-  width: 3.5em;
+  width: 2.9em;
 }
 
+/* A unit longer than the column (package, clove) ellipsizes rather than vanishing. */
 .recipe-unit {
-  width: 3.5em;
+  flex: 0 0 auto;
+  text-overflow: ellipsis;
+  width: 3.4em;
 }
 
 .recipe-name {
-  flex: 1 1 auto;
-  min-width: 5em;
+  flex: 1 1 0;
+  min-width: 4em;
 }
 
 .recipe-prep {
   color: var(--muted);
-  flex: 0 1 8em;
+  flex: 0 1 6em;
+  min-width: 0;
+}
+
+/* An empty prep is the common case and gives its width back to the name. */
+.recipe-prep:placeholder-shown {
+  flex-basis: 2.6em;
 }
 
 .recipe-paired {
+  align-self: center;
   color: var(--accent);
   font-size: 10px;
 }
@@ -3643,7 +3667,7 @@ button.restate-card-lead:hover {
 .recipe-add {
   display: flex;
   gap: 6px;
-  padding: 10px 12px;
+  padding: 8px;
   border-top: 1px solid var(--border);
 }
 
@@ -4021,6 +4045,7 @@ button.restate-card-lead:hover {
 }
 
 .recipe-remove {
+  align-self: center;
   opacity: 0;
 }
 

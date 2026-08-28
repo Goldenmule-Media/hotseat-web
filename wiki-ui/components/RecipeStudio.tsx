@@ -17,7 +17,7 @@
  * quantity; the stored value stays exactly as the recipe wrote it, because a recipe that
  * says "3 ½ cups" should keep saying so.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PageId, WorkspaceId } from "wiki";
 import { UNIT_TOKENS } from "wiki-models/recipe";
 
@@ -306,6 +306,48 @@ function useCell(stored: string, commit: (text: string) => Promise<boolean>): {
   return { value: staged.value, onChange: (e) => staged.edit(e.target.value), onBlur };
 }
 
+/** A cell that wraps rather than clipping: an `<input>` hides a long ingredient name past
+ *  the right edge of a narrow pane, so name and prep are textareas grown to fit. Newlines
+ *  are folded to spaces on the way in and Enter commits, so it still behaves like a field. */
+function WrapCell({
+  className,
+  label,
+  placeholder,
+  cell,
+}: {
+  className: string;
+  label: string;
+  placeholder?: string;
+  cell: ReturnType<typeof useCell>;
+}): React.JSX.Element {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el === null) return;
+    el.style.height = "0px";
+    el.style.height = `${el.scrollHeight + 2}px`; // scrollHeight leaves out the transparent border
+  }, [cell.value]);
+
+  return (
+    <textarea
+      ref={ref}
+      rows={1}
+      className={className}
+      aria-label={label}
+      placeholder={placeholder}
+      value={cell.value}
+      onChange={(e) => cell.onChange({ target: { value: e.target.value.replace(/\s*\n\s*/g, " ") } })}
+      onBlur={cell.onBlur}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          e.currentTarget.blur();
+        }
+      }}
+    />
+  );
+}
+
 function IngredientRow({
   ingredient,
   change,
@@ -344,8 +386,8 @@ function IngredientRow({
     >
       <input className="recipe-qty" aria-label="Quantity" {...qty} />
       <input className="recipe-unit" aria-label="Unit" list="recipe-units" {...unit} />
-      <input className="recipe-name" aria-label="Ingredient" {...name} />
-      <input className="recipe-prep" aria-label="Preparation" placeholder="prep" {...prep} />
+      <WrapCell className="recipe-name" label="Ingredient" cell={name} />
+      <WrapCell className="recipe-prep" label="Preparation" placeholder="prep" cell={prep} />
       {pairedTo !== undefined && <span className="recipe-paired" title={`Used in: ${pairedTo.title}`}>◆</span>}
       <button
         type="button"
