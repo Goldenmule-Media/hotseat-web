@@ -163,6 +163,11 @@ export interface WikiHostApi {
   handshake(): Promise<HandshakeResult>;
 
   listWorkspaces(): Promise<readonly IWorkspaceSummary[]>;
+  /** ISO-8601 time each workspace last changed, keyed by id — the landing tiles' sort key.
+   *  A tail read per workspace (no fold), so it stays off the critical path: the tiles
+   *  render from `listWorkspaces` first and re-sort when this lands. Ids whose activity
+   *  can't be read are absent. */
+  workspaceActivity(ids: readonly WorkspaceId[]): Promise<Record<WorkspaceId, string>>;
   /** Create a new workspace (engine assigns the id) and return it. The engine appends the
    *  catalog event, so the next listWorkspaces sees it. Auth ownership is claimed tab-side. */
   createWorkspace(name: string): Promise<{ readonly workspaceId: WorkspaceId }>;

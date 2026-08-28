@@ -1,16 +1,21 @@
 "use client";
 
-/** Landing: list all workspaces (Q4) and link into them. */
+/** Landing: a tile per workspace, most recently changed first. */
 import Link from "next/link";
+import { useMemo } from "react";
 import { AccountMenu } from "../components/AccountMenu";
 import { BuildBadge } from "../components/BuildBadge";
 import { CreateWorkspaceForm } from "../components/CreateWorkspaceForm";
 import { SplashDocs } from "../components/SplashDocs";
 import { useWorkspaces } from "../lib/live";
 import { workspaceHref } from "../lib/routes";
+import { changedLabel, sortByActivity } from "../lib/workspace-tiles";
 
 export default function Home(): React.JSX.Element {
-  const { items, loading, error, refresh } = useWorkspaces();
+  const { items, activity, loading, error, refresh } = useWorkspaces();
+  const tiles = useMemo(() => sortByActivity(items, activity), [items, activity]);
+  // Read once per render, not per tile, so every label on the page agrees.
+  const now = Date.now();
 
   return (
     <main className="landing">
@@ -47,13 +52,22 @@ export default function Home(): React.JSX.Element {
         ) : items.length === 0 ? (
           <p className="muted">No workspaces found in this namespace.</p>
         ) : (
-          <ul className="ws-list">
-            {items.map((w) => (
-              <li key={w.id}>
-                <Link href={workspaceHref(w.id)}>{w.name}</Link>
-                <span className="muted"> · {w.status}</span>
-              </li>
-            ))}
+          <ul className="ws-tiles">
+            {tiles.map((w) => {
+              const changed = changedLabel(activity[w.id], now);
+              return (
+                <li key={w.id}>
+                  <Link className="ws-tile" href={workspaceHref(w.id)}>
+                    <span className="ws-tile-name">{w.name}</span>
+                    {changed !== undefined && (
+                      <span className="ws-tile-changed muted" title={activity[w.id]}>
+                        {changed}
+                      </span>
+                    )}
+                  </Link>
+                </li>
+              );
+            })}
           </ul>
         )}
         {/* Creation is always available, not just as an empty-state bootstrap — but not while

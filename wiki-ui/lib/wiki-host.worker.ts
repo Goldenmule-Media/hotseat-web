@@ -408,6 +408,14 @@ function makeApi(conn: PortConn): WikiHostApi {
         throw toWikiErrorDTO(e);
       }
     },
+    async workspaceActivity(ids: readonly WorkspaceId[]) {
+      const { wiki } = await boot();
+      try {
+        return await wiki.workspaceActivity(ids);
+      } catch (e) {
+        throw toWikiErrorDTO(e);
+      }
+    },
     async createWorkspace(name: string) {
       const { wiki } = await boot();
       try {

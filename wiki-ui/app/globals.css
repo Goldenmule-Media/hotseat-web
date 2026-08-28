@@ -52,24 +52,44 @@ code {
 
 /* ── landing ─────────────────────────────────────────────────────────────── */
 .landing {
-  max-width: 720px;
+  max-width: 880px;
   margin: 0 auto;
   padding: 48px 24px;
 }
 .landing-header h1 {
   margin: 0 0 4px;
 }
-.ws-list {
+.ws-tiles {
   list-style: none;
   padding: 0;
   margin: 12px 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
 }
-.ws-list li {
-  padding: 10px 12px;
+.ws-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 84px;
+  padding: 14px 16px;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  margin-bottom: 8px;
+  border-radius: 10px;
   background: var(--panel);
+  color: var(--text);
+}
+.ws-tile:hover {
+  border-color: var(--accent);
+  text-decoration: none;
+}
+.ws-tile-name {
+  font-weight: 600;
+  /* A long workspace name wraps rather than widening the tile past its grid track. */
+  overflow-wrap: anywhere;
+}
+.ws-tile-changed {
+  margin-top: auto;
+  font-size: 13px;
 }
 
 /* ── splash docs (collapsible onboarding sections) ───────────────────────────── */
