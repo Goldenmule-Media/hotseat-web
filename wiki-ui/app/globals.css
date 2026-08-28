@@ -3653,9 +3653,12 @@ button.restate-card-lead:hover {
   min-width: 0;
 }
 
-/* An empty prep is the common case and gives its width back to the name. */
+/* An empty prep is the common case and gives its width back to the name. It has to stay
+   wide enough for its own placeholder: a placeholder that wraps grows the textarea, and
+   every row in the list ends up two lines tall. */
 .recipe-prep:placeholder-shown {
-  flex-basis: 2.6em;
+  flex-basis: 3.6em;
+  white-space: nowrap;
 }
 
 .recipe-paired {
