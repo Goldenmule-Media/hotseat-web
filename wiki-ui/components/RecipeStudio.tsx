@@ -63,11 +63,13 @@ export function RecipeStudio({
   workspaceId,
   pageId,
   pageTitle,
+  status,
   pageMarkdown,
 }: {
   workspaceId: WorkspaceId;
   pageId: PageId;
   pageTitle: string;
+  status: string;
   /** The whole page's rendered Markdown — `files` is a blocks field with no elements to
    *  summarize, so the render is where its attachment refs exist in one piece. */
   pageMarkdown: string | null;
@@ -119,6 +121,27 @@ export function RecipeStudio({
           {error}
         </p>
       )}
+
+      {/* The one FSM edge a recipe has. It is the studio's job to offer it: the studio is
+          the default view, so without this the only way to mark a recipe made is the
+          generic model view, which is not where anyone is standing after cooking. */}
+      <div className="recipe-status">
+        {status === "made" ? (
+          <>
+            <span className="recipe-made">Made</span>
+            <button type="button" onClick={() => void run("reopen", {})}>
+              Not yet
+            </button>
+          </>
+        ) : (
+          <>
+            <span className="muted">Untried</span>
+            <button type="button" className="primary" onClick={() => void run("made", {})}>
+              I made this
+            </button>
+          </>
+        )}
+      </div>
 
       <div className="recipe-panes">
         <section className="recipe-pane recipe-pane-left" aria-label="Ingredients">
@@ -172,9 +195,8 @@ export function RecipeStudio({
                     onDismiss={() => setPendingGroups((names) => names.filter((n) => n !== name))}
                   />
                 ))}
-              <InlineAdd
-                label="+ group"
-                placeholder="Dough"
+              <InlineAddField
+                placeholder="+ group"
                 aria="Add a group"
                 onSubmit={(name) => {
                   const trimmed = name.trim();
@@ -374,11 +396,22 @@ function IngredientGroup({
     onDismiss?.();
   }, [items, run, onDismiss]);
 
+  const [adding, setAdding] = useState(false);
+
   return (
     <div className="recipe-group">
-      {group !== "" && (
-        <div className="recipe-group-head">
-          <h3 className="recipe-group-name">{group}</h3>
+      <div className="recipe-group-head">
+        <h3 className="recipe-group-name">{group}</h3>
+        <button
+          type="button"
+          className="recipe-group-add"
+          aria-label={group === "" ? "Add an ingredient" : `Add an ingredient to ${group}`}
+          title="Add an ingredient"
+          onClick={() => setAdding(true)}
+        >
+          +
+        </button>
+        {group !== "" && (
           <button
             type="button"
             className="recipe-group-remove"
@@ -388,8 +421,8 @@ function IngredientGroup({
           >
             ×
           </button>
-        </div>
-      )}
+        )}
+      </div>
       {items.map((item) => (
         <IngredientRow
           key={item.id}
@@ -401,38 +434,39 @@ function IngredientGroup({
           run={run}
         />
       ))}
-      <InlineAdd
-        label="+ ingredient"
-        placeholder="3.5 C all purpose flour"
-        aria={group === "" ? "Add an ingredient" : `Add an ingredient to ${group}`}
-        onSubmit={async (line) => {
-          const parsed = parseIngredientLine(line);
-          if (parsed.title === "") return false;
-          return run("addIngredient", { ...parsed, ...(group === "" ? {} : { group }) });
-        }}
-      />
+      {adding && (
+        <InlineAddField
+          placeholder="3.5 C all purpose flour"
+          aria={group === "" ? "Add an ingredient" : `Add an ingredient to ${group}`}
+          onCancel={() => setAdding(false)}
+          onSubmit={async (line) => {
+            const parsed = parseIngredientLine(line);
+            if (parsed.title === "") return false;
+            return run("addIngredient", { ...parsed, ...(group === "" ? {} : { group }) });
+          }}
+        />
+      )}
     </div>
   );
 }
 
 /**
- * A one-field add that is a link until you use it. The pane is a list to read from while
- * cooking, so an always-open form would put a text box between every group and the next.
- * Submitting keeps the field open for the line after it, which is how a list gets typed in.
+ * The add field itself. Submitting clears it but keeps it open, which is how a list gets
+ * typed in; an empty Escape or blur closes it where the caller allows closing.
  */
-function InlineAdd({
-  label,
+function InlineAddField({
   placeholder,
   aria,
   onSubmit,
+  onCancel,
 }: {
-  label: string;
   placeholder: string;
   aria: string;
   /** `true` when it took; the field then clears and stays open. */
   onSubmit: (text: string) => boolean | Promise<boolean>;
+  /** Omitted for a field that is always present, like the group adder. */
+  onCancel?: () => void;
 }): React.JSX.Element {
-  const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -444,14 +478,6 @@ function InlineAdd({
     if (ok) setText("");
   }, [text, busy, onSubmit]);
 
-  if (!open) {
-    return (
-      <button type="button" className="recipe-inline-open" onClick={() => setOpen(true)}>
-        {label}
-      </button>
-    );
-  }
-
   return (
     <form
       className="recipe-inline-add"
@@ -461,17 +487,16 @@ function InlineAdd({
       }}
     >
       <input
-        autoFocus
+        autoFocus={onCancel !== undefined}
         value={text}
         onChange={(e) => setText(e.target.value)}
         placeholder={placeholder}
         aria-label={aria}
         onKeyDown={(e) => {
-          // Escape closes an empty field, so the affordance folds back into a link.
-          if (e.key === "Escape" && text === "") setOpen(false);
+          if (e.key === "Escape" && text === "") onCancel?.();
         }}
         onBlur={() => {
-          if (text === "") setOpen(false);
+          if (text === "") onCancel?.();
         }}
       />
       <button type="submit" disabled={busy || text.trim() === ""}>

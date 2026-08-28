@@ -67,7 +67,11 @@ export async function checkRequestAuth(
   fetchFn: typeof fetch = fetch,
 ): Promise<AuthDecision> {
   const mode = await getAuthMode(fetchFn);
-  if (mode === "unreachable") return { ok: false, status: 503, message: "wiki server unreachable" };
+  // Name the URL that was probed. The default is loopback, so a deployment missing
+  // WIKI_STREAM_BASE_URL probes itself and the bare message reads like the wiki is down.
+  if (mode === "unreachable") {
+    return { ok: false, status: 503, message: `wiki server unreachable at ${wikiBaseUrl()}` };
+  }
   if (mode === "open") return { ok: true };
 
   if (authorization === null || !/^bearer\s+\S/i.test(authorization)) {
@@ -81,6 +85,6 @@ export async function checkRequestAuth(
     if (res.ok) return { ok: true };
     return { ok: false, status: 401, message: "invalid or expired token" };
   } catch {
-    return { ok: false, status: 503, message: "wiki server unreachable" };
+    return { ok: false, status: 503, message: `wiki server unreachable at ${wikiBaseUrl()}` };
   }
 }

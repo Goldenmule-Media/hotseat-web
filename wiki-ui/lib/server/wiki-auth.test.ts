@@ -73,7 +73,7 @@ describe("checkRequestAuth", () => {
 
   it("fails closed with 503 when the wiki server is unreachable", async () => {
     const out = await checkRequestAuth("Bearer tok", fetchStub(() => new TypeError("down")));
-    expect(out).toEqual({ ok: false, status: 503, message: "wiki server unreachable" });
+    expect(out).toEqual({ ok: false, status: 503, message: expect.stringContaining("wiki server unreachable") });
   });
 
   it("requires a bearer header when auth is on", async () => {

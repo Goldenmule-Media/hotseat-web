@@ -4077,3 +4077,60 @@ button.restate-card-lead:hover {
   cursor: default;
   opacity: 0.5;
 }
+
+/* ── the group header's controls, and the made/untried signal ── */
+
+.recipe-group-add {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  margin-left: auto;
+  opacity: 0;
+  padding: 0 4px;
+}
+
+.recipe-group:hover .recipe-group-add,
+.recipe-group-add:focus-visible {
+  opacity: 1;
+}
+
+.recipe-group-add:hover {
+  color: var(--accent);
+}
+
+/* The ungrouped bucket has no name, so its head is just the add control. */
+.recipe-group-head .recipe-group-name:empty {
+  margin: 0;
+}
+
+.recipe-status {
+  align-items: center;
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+}
+
+.recipe-made {
+  color: var(--green);
+  font-weight: 600;
+}
+
+.recipe-status button {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  padding: 3px 10px;
+}
+
+.recipe-status button.primary {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+}
