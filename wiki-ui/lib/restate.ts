@@ -222,9 +222,6 @@ export interface RestateDraft {
    *  restores what was typed there. An empty string is a real entry (a deliberately
    *  cleared box) — not "unseeded". */
   readonly drafts: Readonly<Record<string, string>>;
-  /** The page's ONE critique session: every section and every round resumes it, so the
-   *  critic accumulates the spec instead of meeting each section cold. */
-  readonly sessionId?: string;
 }
 
 function stringRecord(raw: unknown): Record<string, string> {
@@ -268,15 +265,13 @@ export function loadRestateDraft(store: KeyValueStore, workspaceId: string, page
     if (typeof p.draft === "string" && p.draft !== "" && legacy.length === 1 && drafts[legacy[0]] === undefined) {
       drafts[legacy[0]] = p.draft; // older still: one flat draft for the stored selection
     }
-    // Sessions from the per-section era (`sessions`, or `sessionId` + `sourceKey`) were
-    // opened under a different prompt contract — drop them and let the next critique open one.
-    const perSection = p.sessions !== undefined || p.sourceKey !== undefined;
-    const sessionId = !perSection && typeof p.sessionId === "string" ? p.sessionId : undefined;
-    if (selectedId === undefined && sessionId === undefined && Object.keys(drafts).length === 0) return null;
+    // `sessionId` / `sessions` / `sourceKey` are from the claude-CLI era, when a resumable
+    // session carried the critic's context. The critic is stateless now and its history
+    // lives with the verdicts, so a persisted session id is dead weight — dropped in silence.
+    if (selectedId === undefined && Object.keys(drafts).length === 0) return null;
     return {
       ...(selectedId !== undefined ? { selectedId } : {}),
       drafts,
-      ...(sessionId !== undefined ? { sessionId } : {}),
     };
   } catch {
     return null;
@@ -302,7 +297,7 @@ export function isEditable(
 }
 
 /**
- * Per-section state (drafts, critique sessions) filtered against the CURRENT section
+ * Per-section state (drafts, critique verdicts) filtered against the CURRENT section
  * list: an entry survives while its section still exists. Verified sections keep theirs
  * (unaccept puts the draft back within reach); only replaced/deleted sections drop one.
  */
@@ -422,7 +417,15 @@ export async function requestReview(specMarkdown: string, signal?: AbortSignal):
   return { ok: true, verdict: { summary: obj.summary, notes } };
 }
 
-export type CritiqueResult = { ok: true; verdict: CritiqueVerdict; sessionId?: string } | { ok: false; message: string };
+export type CritiqueResult = { ok: true; verdict: CritiqueVerdict } | { ok: false; message: string };
+
+/** One completed critique, kept by the studio and sent back as context on the next one.
+ *  The critic is stateless, so this history is the whole of what it remembers. */
+export interface CritiqueTurn {
+  readonly section: DraftSection;
+  readonly restatement: string;
+  readonly verdict: CritiqueVerdict;
+}
 
 /**
  * POST /api/restate/critique. The critic replies with one JSON verdict and nothing else,
@@ -431,8 +434,8 @@ export type CritiqueResult = { ok: true; verdict: CritiqueVerdict; sessionId?: s
 export async function requestCritique(req: {
   section: DraftSection;
   restatement: string;
-  /** The page's session id, if one is open; the reply carries the one to keep. */
-  sessionId?: string;
+  /** Earlier critiques of this page, oldest first — the route assigns the roles. */
+  history?: readonly CritiqueTurn[];
   signal?: AbortSignal;
 }): Promise<CritiqueResult> {
   let res: Response;
@@ -443,7 +446,7 @@ export async function requestCritique(req: {
       body: JSON.stringify({
         section: req.section,
         restatement: req.restatement,
-        ...(req.sessionId !== undefined ? { sessionId: req.sessionId } : {}),
+        history: req.history ?? [],
       }),
       signal: req.signal,
     });
@@ -461,5 +464,5 @@ export async function requestCritique(req: {
   const obj = body === null || typeof body !== "object" ? {} : (body as Record<string, unknown>);
   const verdict = asCritiqueVerdict(obj.verdict);
   if (verdict === null) return { ok: false, message: "critique returned an unusable verdict" };
-  return { ok: true, verdict, ...(typeof obj.sessionId === "string" ? { sessionId: obj.sessionId } : {}) };
+  return { ok: true, verdict };
 }

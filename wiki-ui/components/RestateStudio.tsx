@@ -20,9 +20,12 @@
  * selecting that section re-opens its panel. Per-section state is dropped only when the
  * section itself goes (replaced or deleted underneath you).
  *
- * ONE claude session serves the whole page (persisted alongside the drafts): every section
- * and every re-critique resumes it, so the critic accumulates the spec. That session is a
- * single mutable resource, so only ONE critique runs at a time.
+ * The critic is a stateless API call, so the page's critique HISTORY lives here: each
+ * completed exchange (section, restatement, verdict) is kept and sent back with the next
+ * critique, which is what lets the critic accumulate the spec instead of meeting every
+ * section cold. It is memory only, like the verdicts themselves — a reload starts the
+ * critic cold, and only the drafts persist. One critique runs at a time so that history
+ * stays a genuine sequence.
  *
  * The left panel also RESTRUCTURES the spec — add/join/split/reorder/delete, each a curated
  * model command. Structural controls never read the restatement selection: they belong to a
@@ -60,6 +63,7 @@ import {
   splitRenderedElement,
   splitTopLevelBlocks,
   type CritiqueGrade,
+  type CritiqueTurn,
   type CritiqueVerdict,
   type KeyValueStore,
   type RestateHealth,
@@ -131,6 +135,10 @@ function critiqueTag(c: CritiqueState | undefined, running: boolean): CritiqueTa
   if (c.verdict === null) return null;
   return c.unread ? "ready" : "seen";
 }
+
+/** How many past exchanges the tab keeps for the critic; the route sends the last few of
+ *  them, so a longer tail would never leave the browser. */
+const KEPT_CRITIQUE_TURNS = 6;
 
 const GRADE_LABEL: Record<CritiqueGrade, string> = {
   understood: "Understood",
@@ -701,12 +709,13 @@ export function RestateStudio({
   const [drafts, setDrafts] = useState<Readonly<Record<string, string>>>({});
   /** The last critique per section id — a run outlives the selection, so these are keyed. */
   const [critiques, setCritiques] = useState<Readonly<Record<string, CritiqueState>>>({});
-  /** The page's ONE critique session; every section and round resumes it. */
-  const [sessionId, setSessionId] = useState<string | undefined>(undefined);
+  /** The page's critique history, oldest first: the stateless critic remembers nothing, so
+   *  what it saw earlier is sent back with the next request. */
+  const [critiqueHistory, setCritiqueHistory] = useState<readonly CritiqueTurn[]>([]);
   const [restored, setRestored] = useState(false);
   const [health, setHealth] = useState<RestateHealth | null>(null);
-  /** The single in-flight critique (the session admits one at a time), and a generation
-   *  bumped whenever a run is superseded (new run, cancel, Accept, unmount). */
+  /** The single in-flight critique (one at a time keeps the history a sequence), and a
+   *  generation bumped whenever a run is superseded (new run, cancel, Accept, unmount). */
   const [critiqueRun, setCritiqueRun] = useState<{ id: string; startedAt: number } | null>(null);
   const critiqueAbort = useRef<AbortController | null>(null);
   const critiqueGen = useRef(0);
@@ -757,7 +766,6 @@ export function RestateStudio({
     if (saved !== null) {
       if (saved.selectedId !== undefined) setSelectedId(saved.selectedId);
       setDrafts(saved.drafts);
-      setSessionId(saved.sessionId);
     }
     setRestored(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -810,21 +818,20 @@ export function RestateStudio({
     setCritiques((c) => (c[selectedId] === undefined ? c : { ...c, [selectedId]: { ...c[selectedId], unread: false } }));
   }, [selectedId, critiques]);
 
-  // Persist {selectedId, drafts, sessionId}; an all-empty state clears the key.
+  // Persist {selectedId, drafts}; an all-empty state clears the key.
   useEffect(() => {
     if (!restored) return;
     const store = browserStore();
     if (store === null) return;
-    if (selectedId === null && sessionId === undefined && Object.keys(drafts).length === 0) {
+    if (selectedId === null && Object.keys(drafts).length === 0) {
       clearRestateDraft(store, workspaceId, pageId);
     } else {
       saveRestateDraft(store, workspaceId, pageId, {
         ...(selectedId !== null ? { selectedId } : {}),
         drafts,
-        ...(sessionId !== undefined ? { sessionId } : {}),
       });
     }
-  }, [restored, selectedId, drafts, sessionId, workspaceId, pageId]);
+  }, [restored, selectedId, drafts, workspaceId, pageId]);
 
   // Abandon in-flight critic/review calls when the studio unmounts.
   useEffect(() => {
@@ -1015,17 +1022,15 @@ export function RestateStudio({
       if (live()) land({ verdict: null, error: errText(e), unread: true });
       return;
     }
-    const out = await requestCritique({
-      section: { title: titleOf(el), markdown: source },
-      restatement,
-      sessionId,
-      signal: ctrl.signal,
-    });
+    const section = { title: titleOf(el), markdown: source };
+    const out = await requestCritique({ section, restatement, history: critiqueHistory, signal: ctrl.signal });
     if (!live()) return; // superseded by Accept / a newer run / a cancel
     if (out.ok) {
-      // The reply names the session to keep: the one just opened, or the fresh one the
-      // server fell back to when the stored id was dead.
-      if (out.sessionId !== undefined) setSessionId(out.sessionId);
+      // What the critic saw this time is what it will be told next time. Only the last few
+      // turns are sent, so keeping more than that would just grow the tab's memory.
+      setCritiqueHistory((h) =>
+        [...h, { section, restatement, verdict: out.verdict }].slice(-KEPT_CRITIQUE_TURNS),
+      );
       // unread is cleared on sight; it badges the card when you've moved on.
       land({ verdict: out.verdict, error: null, unread: true });
     } else if (ctrl.signal.aborted) {
@@ -1033,7 +1038,7 @@ export function RestateStudio({
     } else {
       land({ verdict: null, error: out.message, unread: true });
     }
-  }, [selectedId, selectedEl, drafts, sessionId, workspaceId, pageId]);
+  }, [selectedId, selectedEl, drafts, critiqueHistory, workspaceId, pageId]);
 
   const onRunReview = useCallback(async () => {
     if (specMarkdown === null) return;

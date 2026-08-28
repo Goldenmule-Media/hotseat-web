@@ -269,13 +269,9 @@ describe("restate draft persistence", () => {
     expect(restateStorageKey("ws-1", "spec-restatement:abc")).toBe("wiki.restate.ws-1.spec-restatement:abc");
   });
 
-  it("round-trips {selectedId, drafts, sessionId} through save/load", () => {
+  it("round-trips {selectedId, drafts} through save/load", () => {
     const store = memoryStore();
-    const state = {
-      selectedId: "a",
-      drafts: { a: "## X\n\nbody", b: "other section's draft" },
-      sessionId: "sess-9",
-    };
+    const state = { selectedId: "a", drafts: { a: "## X\n\nbody", b: "other section's draft" } };
     saveRestateDraft(store, "ws", "p", state);
     expect(loadRestateDraft(store, "ws", "p")).toEqual(state);
     // Another page's key is untouched.
@@ -288,10 +284,11 @@ describe("restate draft persistence", () => {
     expect(loadRestateDraft(store, "ws", "p")).toEqual({ selectedId: "a", drafts: { a: "" } });
   });
 
-  it("keeps the page session with nothing else selected or drafted", () => {
+  it("has nothing to restore when only a stored session id is left", () => {
+    // The critic keeps no session now; a page whose only stored state was one is empty.
     const store = memoryStore();
-    saveRestateDraft(store, "ws", "p", { drafts: {}, sessionId: "sess-9" });
-    expect(loadRestateDraft(store, "ws", "p")).toEqual({ drafts: {}, sessionId: "sess-9" });
+    store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ drafts: {}, sessionId: "sess-9" }));
+    expect(loadRestateDraft(store, "ws", "p")).toBeNull();
   });
 
   it("round-trips with no selection, and clears cleanly", () => {
@@ -322,10 +319,10 @@ describe("restate draft persistence", () => {
     expect(loadRestateDraft(store, "ws", "p")).toEqual({ selectedId: "a", drafts: { a: "old text" } });
   });
 
-  it("drops per-section-era sessions — they were opened under a different prompt contract", () => {
+  it("drops every stored session id — the critic no longer keeps one", () => {
     const store = memoryStore();
     const kept = { selectedId: "a", drafts: { a: "d" } };
-    for (const legacy of [{ sessions: { a: "sess-1" } }, { sessionId: "sess-1", sourceKey: "a" }]) {
+    for (const legacy of [{ sessions: { a: "sess-1" } }, { sessionId: "sess-1", sourceKey: "a" }, { sessionId: "sess-2" }]) {
       store.setItem(restateStorageKey("ws", "p"), JSON.stringify({ ...kept, ...legacy }));
       expect(loadRestateDraft(store, "ws", "p")).toEqual(kept);
     }
