@@ -104,3 +104,29 @@ describe("checkRequestAuth", () => {
     expect(await checkRequestAuth("Bearer tok", stub)).toMatchObject({ ok: false, status: 503 });
   });
 });
+
+describe("wikiBaseUrl", () => {
+  it("prefers the server-only name, then the public one", () => {
+    expect(wikiBaseUrl({ WIKI_STREAM_BASE_URL: "https://a.example", NEXT_PUBLIC_WIKI_STREAM_BASE_URL: "https://b.example" })).toBe(
+      "https://a.example",
+    );
+    expect(wikiBaseUrl({ NEXT_PUBLIC_WIKI_STREAM_BASE_URL: "https://b.example/" })).toBe("https://b.example");
+  });
+
+  it("falls back to loopback, which is only ever right in local dev", () => {
+    expect(wikiBaseUrl({})).toBe("http://127.0.0.1:4437");
+  });
+
+  it("reads process.env literally when given no override", () => {
+    // The literal read is what lets Next inline NEXT_PUBLIC_* at build time; an indirect
+    // read through a parameter is invisible to that substitution.
+    const before = process.env.WIKI_STREAM_BASE_URL;
+    process.env.WIKI_STREAM_BASE_URL = "https://inlined.example";
+    try {
+      expect(wikiBaseUrl()).toBe("https://inlined.example");
+    } finally {
+      if (before === undefined) delete process.env.WIKI_STREAM_BASE_URL;
+      else process.env.WIKI_STREAM_BASE_URL = before;
+    }
+  });
+});

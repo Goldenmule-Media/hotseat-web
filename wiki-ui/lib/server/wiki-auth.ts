@@ -10,9 +10,22 @@ export type AuthMode = "required" | "open" | "unreachable";
 
 export type AuthDecision = { ok: true } | { ok: false; status: 401 | 503; message: string };
 
-export function wikiBaseUrl(env: Record<string, string | undefined> = process.env): string {
-  const raw = env.WIKI_STREAM_BASE_URL ?? env.NEXT_PUBLIC_WIKI_STREAM_BASE_URL ?? "http://127.0.0.1:4437";
-  return raw.replace(/\/+$/, "");
+/**
+ * The wiki server these routes probe.
+ *
+ * The literal `process.env.X` reads are load-bearing. Next replaces `process.env.NEXT_PUBLIC_*`
+ * by TEXTUAL SUBSTITUTION at build time, which is the only way a build-time variable reaches a
+ * running server on a host that does not inject env vars into its runtime (Amplify). Reading
+ * the same name through a parameter (`env.NEXT_PUBLIC_…`) defeats that substitution, and the
+ * deployed route then falls through to loopback and reports the wiki server unreachable when
+ * nothing is wrong with the wiki. Pass `env` only from tests.
+ */
+export function wikiBaseUrl(env?: Record<string, string | undefined>): string {
+  const raw =
+    env !== undefined
+      ? (env.WIKI_STREAM_BASE_URL ?? env.NEXT_PUBLIC_WIKI_STREAM_BASE_URL)
+      : (process.env.WIKI_STREAM_BASE_URL ?? process.env.NEXT_PUBLIC_WIKI_STREAM_BASE_URL);
+  return (raw ?? "http://127.0.0.1:4437").replace(/\/+$/, "");
 }
 
 /** A definitive HTTP answer: 2xx `{enabled:true}` = gateway on; anything else (incl.
