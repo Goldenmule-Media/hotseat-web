@@ -1,6 +1,21 @@
+import type Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it } from "vitest";
 
-import { chatPrompt, MAX_PROPOSAL_OPS, validateChatReply, validateOp } from "./recipe-chat";
+import {
+  buildMessages,
+  CHAT_OUTPUT_SCHEMA,
+  chatSystemPrompt,
+  chatTimeoutMsFromEnv,
+  chatUserTurn,
+  MAX_HISTORY_TURNS,
+  MAX_PROPOSAL_OPS,
+  proposableCommands,
+  runRecipeChat,
+  validateChatReply,
+  validateOp,
+  type ChatTurn,
+  type CreateMessage,
+} from "./recipe-chat";
 
 const recipe = {
   title: "Burger Buns",
@@ -74,18 +89,180 @@ describe("validateChatReply", () => {
   });
 });
 
-describe("chatPrompt", () => {
-  it("carries the whole recipe, ids included, on the first turn", () => {
-    const prompt = chatPrompt(recipe, "what instead of buttermilk?", false);
-    expect(prompt).toContain('"id": "i1"');
-    expect(prompt).toContain("what instead of buttermilk?");
-    expect(prompt).toContain("addIngredient");
+describe("the prompt", () => {
+  it("carries the whole recipe, ids included, in the user turn", () => {
+    const turn = chatUserTurn(recipe, "what instead of buttermilk?");
+    expect(turn).toContain('"id": "i1"');
+    expect(turn).toContain("what instead of buttermilk?");
   });
 
-  it("still carries the whole recipe on a follow-up, since it may have changed", () => {
-    const prompt = chatPrompt(recipe, "and if I halve it?", true);
-    expect(prompt).toContain('"id": "i1"');
-    // The command contract is in the session, so the follow-up does not repeat it.
-    expect(prompt).not.toContain("reviseIngredient");
+  it("puts the command contract in the system prompt, not in the per-turn message", () => {
+    expect(chatSystemPrompt()).toContain("reviseIngredient");
+    expect(chatUserTurn(recipe, "and if I halve it?")).not.toContain("reviseIngredient");
+  });
+});
+
+describe("the output schema", () => {
+  it("names exactly the commands the allowlist accepts", () => {
+    expect(CHAT_OUTPUT_SCHEMA.properties.proposal.items.properties.command.enum).toEqual(proposableCommands());
+    expect(proposableCommands()).toContain("addIngredient");
+  });
+});
+
+const turn = (question: string, reply: string, proposal: ChatTurn["proposal"] = []): ChatTurn => ({
+  question,
+  reply,
+  proposal,
+});
+
+describe("buildMessages", () => {
+  it("sends the recipe exactly once, in the final user message", () => {
+    const messages = buildMessages(recipe, "and the sugar?", [turn("what instead of buttermilk?", "soured milk")]);
+    const carrying = messages.filter((m) => String(m.content).includes('"id": "i1"'));
+    expect(carrying).toHaveLength(1);
+    expect(carrying[0]).toBe(messages[messages.length - 1]);
+    expect(messages[messages.length - 1]?.role).toBe("user");
+  });
+
+  it("replays a past turn as the bare question and the model's own JSON", () => {
+    const proposal = [{ command: "addIngredient", args: { title: "vinegar" } }];
+    const messages = buildMessages(recipe, "and the sugar?", [turn("swap the buttermilk", "soured milk", proposal)]);
+    expect(messages[0]).toEqual({ role: "user", content: "swap the buttermilk" });
+    expect(messages[1]?.role).toBe("assistant");
+    expect(JSON.parse(String(messages[1]?.content))).toEqual({ reply: "soured milk", proposal });
+  });
+
+  it("alternates user and assistant, starting with user", () => {
+    const messages = buildMessages(recipe, "q3", [turn("q1", "a1"), turn("q2", "a2")]);
+    expect(messages.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant", "user"]);
+  });
+
+  it("keeps only the last few turns", () => {
+    const history = Array.from({ length: MAX_HISTORY_TURNS + 3 }, (_, i) => turn(`q${i}`, `a${i}`));
+    const messages = buildMessages(recipe, "now", history);
+    expect(messages).toHaveLength(MAX_HISTORY_TURNS * 2 + 1);
+    expect(messages[0]).toEqual({ role: "user", content: "q3" });
+  });
+
+  it("drops a malformed turn rather than sending half of it", () => {
+    const history = [
+      { question: "", reply: "a", proposal: [] },
+      { question: "q", reply: "", proposal: [] },
+      turn("real", "answer"),
+    ];
+    const messages = buildMessages(recipe, "now", history);
+    expect(messages.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
+    expect(messages[0]).toEqual({ role: "user", content: "real" });
+  });
+});
+
+function answer(
+  body: unknown,
+  stopReason: Anthropic.Message["stop_reason"] = "end_turn",
+): Anthropic.Message {
+  return {
+    id: "msg_test",
+    type: "message",
+    role: "assistant",
+    model: "claude-opus-5",
+    stop_reason: stopReason,
+    stop_sequence: null,
+    content: [
+      { type: "thinking", thinking: "weighing the acid", signature: "sig" },
+      { type: "text", text: typeof body === "string" ? body : JSON.stringify(body), citations: null },
+    ],
+    usage: { input_tokens: 1, output_tokens: 1 },
+  } as unknown as Anthropic.Message;
+}
+
+const replying = (message: Anthropic.Message): CreateMessage => async () => message;
+
+describe("runRecipeChat", () => {
+  it("reads the text block past the thinking block", async () => {
+    const out = await runRecipeChat({
+      recipe,
+      question: "what instead of buttermilk?",
+      create: replying(
+        answer({
+          reply: "Milk with a spoon of vinegar.",
+          proposal: [{ command: "reviseIngredient", args: { ingredientId: "i1", title: "soured milk" } }],
+        }),
+      ),
+    });
+    expect(out).toEqual({
+      ok: true,
+      value: {
+        reply: "Milk with a spoon of vinegar.",
+        proposal: [{ command: "reviseIngredient", args: { ingredientId: "i1", title: "soured milk" } }],
+      },
+    });
+  });
+
+  it("keeps the prose and drops an op the allowlist does not know", async () => {
+    const out = await runRecipeChat({
+      recipe,
+      question: "halve it",
+      create: replying(answer({ reply: "Halve everything.", proposal: [{ command: "launchMissiles", args: {} }] })),
+    });
+    expect(out).toEqual({ ok: true, value: { reply: "Halve everything.", proposal: [] } });
+  });
+
+  it("reports a refusal instead of parsing it", async () => {
+    const out = await runRecipeChat({ recipe, question: "x", create: replying(answer({ reply: "no" }, "refusal")) });
+    expect(out).toEqual({ ok: false, message: "the recipe chat declined to answer" });
+  });
+
+  it("reports a reply cut off at the length limit", async () => {
+    const out = await runRecipeChat({ recipe, question: "x", create: replying(answer('{"reply":', "max_tokens")) });
+    expect(out).toEqual({ ok: false, message: "the recipe chat ran past its length limit" });
+  });
+
+  it("reports text that is not JSON", async () => {
+    const out = await runRecipeChat({ recipe, question: "x", create: replying(answer("Use soured milk.")) });
+    expect(out).toEqual({ ok: false, message: "the recipe chat replied with no usable answer" });
+  });
+
+  it("passes the signal and the timeout through, and asks for no tools", async () => {
+    const controller = new AbortController();
+    let seen: { params: Anthropic.MessageCreateParamsNonStreaming; options?: Anthropic.RequestOptions } | null = null;
+    const create: CreateMessage = async (params, options) => {
+      seen = { params, options };
+      return answer({ reply: "ok", proposal: [] });
+    };
+    await runRecipeChat({
+      recipe,
+      question: "x",
+      timeoutMs: 12_345,
+      signal: controller.signal,
+      create,
+    });
+    const call = seen as unknown as { params: Record<string, unknown>; options: Record<string, unknown> };
+    expect(call.options.timeout).toBe(12_345);
+    expect(call.options.signal).toBe(controller.signal);
+    expect(call.params.model).toBe("claude-opus-5");
+    expect(call.params.thinking).toEqual({ type: "adaptive" });
+    expect(call.params).not.toHaveProperty("tools");
+  });
+
+  it("turns an API failure into one sentence", async () => {
+    const create: CreateMessage = async () => {
+      throw new Error("boom");
+    };
+    expect(await runRecipeChat({ recipe, question: "x", create })).toEqual({
+      ok: false,
+      message: "the recipe chat failed",
+    });
+  });
+});
+
+describe("chatTimeoutMsFromEnv", () => {
+  it("takes a positive number of milliseconds", () => {
+    expect(chatTimeoutMsFromEnv({ WIKI_UI_CHAT_TIMEOUT_MS: "5000" }, 1000)).toBe(5000);
+  });
+
+  it("falls back on anything else", () => {
+    expect(chatTimeoutMsFromEnv({}, 1000)).toBe(1000);
+    expect(chatTimeoutMsFromEnv({ WIKI_UI_CHAT_TIMEOUT_MS: "0" }, 1000)).toBe(1000);
+    expect(chatTimeoutMsFromEnv({ WIKI_UI_CHAT_TIMEOUT_MS: "abc" }, 1000)).toBe(1000);
   });
 });

@@ -27,6 +27,7 @@ import {
   applyOverlay,
   applyProposal,
   askRecipeChat,
+  type ChatTurn,
   describeOp,
   FILES_SECTION,
   groupIngredients,
@@ -750,7 +751,8 @@ function ChatBar({
   const [problem, setProblem] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
   const [applying, setApplying] = useState(false);
-  const session = useRef<string | undefined>(undefined);
+  // The conversation lives here: the route is stateless, so each ask replays the recent turns.
+  const history = useRef<ChatTurn[]>([]);
 
   const ask = useCallback(async () => {
     const text = question.trim();
@@ -762,14 +764,17 @@ function ChatBar({
       ingredients,
       steps,
       question: text,
-      ...(session.current !== undefined ? { sessionId: session.current } : {}),
+      history: history.current,
     });
     setAsking(false);
     if (!result.ok) {
       setProblem(result.message);
       return;
     }
-    session.current = result.answer.sessionId ?? session.current;
+    history.current = [
+      ...history.current,
+      { question: text, reply: result.answer.reply, proposal: result.answer.proposal },
+    ].slice(-6);
     setAnswer(result.answer.reply);
     onPropose(result.answer.proposal);
     setQuestion("");

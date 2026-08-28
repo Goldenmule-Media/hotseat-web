@@ -416,7 +416,14 @@ function errText(e: unknown): string {
 export interface ChatAnswer {
   readonly reply: string;
   readonly proposal: readonly ProposedOp[];
-  readonly sessionId?: string;
+}
+
+/** One earlier exchange. The server keeps no conversation state, so the studio carries the
+ *  history and sends it back; the server assigns the roles. */
+export interface ChatTurn {
+  readonly question: string;
+  readonly reply: string;
+  readonly proposal: readonly ProposedOp[];
 }
 
 export type ChatResult = { ok: true; answer: ChatAnswer } | { ok: false; message: string };
@@ -427,7 +434,7 @@ export async function askRecipeChat(req: {
   ingredients: readonly Ingredient[];
   steps: readonly Step[];
   question: string;
-  sessionId?: string;
+  history?: readonly ChatTurn[];
   signal?: AbortSignal;
 }): Promise<ChatResult> {
   let res: Response;
@@ -449,7 +456,7 @@ export async function askRecipeChat(req: {
           steps: req.steps.map((s) => ({ id: s.id, title: s.title, group: s.group, body: s.body })),
         },
         question: req.question,
-        ...(req.sessionId !== undefined ? { sessionId: req.sessionId } : {}),
+        history: req.history ?? [],
       }),
       signal: req.signal,
     });
@@ -467,14 +474,13 @@ export async function askRecipeChat(req: {
     return { ok: false, message: `the recipe chat failed (HTTP ${res.status})` };
   }
   try {
-    const body = (await res.json()) as { reply?: unknown; proposal?: unknown; sessionId?: unknown };
+    const body = (await res.json()) as { reply?: unknown; proposal?: unknown };
     if (typeof body.reply !== "string") return { ok: false, message: "the recipe chat replied with no answer" };
     return {
       ok: true,
       answer: {
         reply: body.reply,
         proposal: Array.isArray(body.proposal) ? (body.proposal as ProposedOp[]) : [],
-        ...(typeof body.sessionId === "string" ? { sessionId: body.sessionId } : {}),
       },
     };
   } catch (e) {
