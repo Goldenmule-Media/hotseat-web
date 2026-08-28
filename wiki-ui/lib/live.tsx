@@ -302,10 +302,6 @@ export function useSectionDocument(workspaceId: WorkspaceId, pageId: PageId, sec
 
 export interface WorkspaceList {
   readonly items: readonly IWorkspaceSummary[];
-  /** ISO-8601 time each workspace last changed, keyed by id — the landing tiles' sort key.
-   *  Fetched after `items` (a tail read per workspace), so it fills in a beat later; a
-   *  workspace whose activity could not be read is simply absent. */
-  readonly activity: Record<WorkspaceId, string>;
   readonly loading: boolean;
   readonly error: string | null;
   readonly refresh: () => void;
@@ -368,27 +364,36 @@ export function useWorkspaces(): WorkspaceList {
     [state.items, restricted],
   );
 
-  // Last-changed times, fetched once the list is known and again on every refresh (the
-  // button, or the focus listener above) — the ids alone would not change on a re-fetch.
+  return { items, loading: state.loading, error: state.error, refresh: () => setNonce((n) => n + 1) };
+}
+
+/**
+ * When each of `items` last changed (ISO-8601, keyed by id) — the landing tiles' sort key.
+ * A tail read per workspace, so it is deliberately NOT part of {@link useWorkspaces}: only
+ * the landing page pays for it, never every workspace page that shows a title. Re-runs
+ * whenever `useWorkspaces` hands over a fresh list (its refresh button, a tab re-focus).
+ * A workspace whose activity could not be read is simply absent.
+ */
+export function useWorkspaceActivity(items: readonly IWorkspaceSummary[]): Record<WorkspaceId, string> {
   const [activity, setActivity] = useState<Record<WorkspaceId, string>>({});
-  const ids = items.map((w) => w.id).join(",");
+
   useEffect(() => {
-    if (typeof window === "undefined" || ids === "") return;
+    if (typeof window === "undefined" || items.length === 0) return;
     let cancelled = false;
     getHost()
-      .then((h) => h.workspaceActivity(ids.split(",") as WorkspaceId[]))
+      .then((h) => h.workspaceActivity(items.map((w) => w.id)))
       .then((a) => {
         if (!cancelled) setActivity(a);
       })
       .catch(() => {
-        /* best-effort: without it the tiles keep their catalog order */
+        /* best-effort: without it the tiles keep their alphabetical order */
       });
     return () => {
       cancelled = true;
     };
-  }, [ids, nonce]);
+  }, [items]);
 
-  return { items, activity, loading: state.loading, error: state.error, refresh: () => setNonce((n) => n + 1) };
+  return activity;
 }
 
 export interface PageMutations {

@@ -7,12 +7,13 @@ import { AccountMenu } from "../components/AccountMenu";
 import { BuildBadge } from "../components/BuildBadge";
 import { CreateWorkspaceForm } from "../components/CreateWorkspaceForm";
 import { SplashDocs } from "../components/SplashDocs";
-import { useWorkspaces } from "../lib/live";
+import { useWorkspaceActivity, useWorkspaces } from "../lib/live";
 import { workspaceHref } from "../lib/routes";
 import { changedLabel, sortByActivity } from "../lib/workspace-tiles";
 
 export default function Home(): React.JSX.Element {
-  const { items, activity, loading, error, refresh } = useWorkspaces();
+  const { items, loading, error, refresh } = useWorkspaces();
+  const activity = useWorkspaceActivity(items);
   const tiles = useMemo(() => sortByActivity(items, activity), [items, activity]);
   // Read once per render, not per tile, so every label on the page agrees.
   const now = Date.now();
