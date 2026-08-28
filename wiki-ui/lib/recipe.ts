@@ -487,3 +487,37 @@ export async function askRecipeChat(req: {
     return { ok: false, message: errText(e) };
   }
 }
+
+/**
+ * One typed line into an ingredient's fields. Transcribing a recipe means typing
+ * "3.5 C all purpose flour", not filling three boxes, so the leading quantity and unit come
+ * off the front when they read as one. Anything that does not is left whole as the name —
+ * "Sesame seeds" is an ingredient, not a parse failure.
+ */
+export function parseIngredientLine(line: string): { title: string; qty?: string; unit?: string } {
+  const parts = line.trim().split(/\s+/).filter((p) => p !== "");
+  if (parts.length === 0) return { title: "" };
+  const numeric = (word: string): boolean => /^[\d./¼½¾⅓⅔⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞]+$/.test(word);
+  let qty = "";
+  let unit = "";
+  let rest = parts;
+  if (parts.length > 1 && numeric(parts[0]!)) {
+    qty = parts[0]!;
+    rest = parts.slice(1);
+    // "1 1/2 cups" — a second numeric word is still part of the quantity.
+    if (rest.length > 1 && numeric(rest[0]!)) {
+      qty = `${qty} ${rest[0]!}`;
+      rest = rest.slice(1);
+    }
+    // A unit only counts as one when a name follows it, so "2 eggs" keeps "eggs" as the name.
+    if (rest.length > 1) {
+      unit = rest[0]!;
+      rest = rest.slice(1);
+    }
+  }
+  return {
+    title: rest.join(" "),
+    ...(qty !== "" ? { qty } : {}),
+    ...(unit !== "" ? { unit } : {}),
+  };
+}

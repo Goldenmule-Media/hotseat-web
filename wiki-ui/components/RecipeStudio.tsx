@@ -19,7 +19,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PageId, WorkspaceId } from "wiki";
-import { convert, formatMeasure, toggleTarget, UNIT_TOKENS } from "wiki-models/recipe";
+import { UNIT_TOKENS } from "wiki-models/recipe";
 
 import { resolveAttachment, uploadAttachment } from "../lib/attachments";
 import { usePageMutator, useSectionDocument, useSectionElements } from "../lib/live";
@@ -34,9 +34,9 @@ import {
   type Ingredient,
   INGREDIENTS_SECTION,
   ingredientsForStep,
-  measureOf,
   type Note,
   type Overlay,
+  parseIngredientLine,
   type OverlayIngredient,
   type OverlayStep,
   type ProposedOp,
@@ -87,11 +87,12 @@ export function RecipeStudio({
 
   const [leftTab, setLeftTab] = useState<LeftTab>("ingredients");
   const [rightTab, setRightTab] = useState<RightTab>("instructions");
-  const [showGrams, setShowGrams] = useState(false);
   /** The chat's proposal, held in memory. Nothing here has been written. */
   const [proposal, setProposal] = useState<readonly ProposedOp[]>([]);
   /** Ingredient ids lit by whatever the pointer is over, on either side. */
   const [lit, setLit] = useState<readonly string[]>([]);
+  /** Groups the human has named but not yet filled — see the comment at their render. */
+  const [pendingGroups, setPendingGroups] = useState<readonly string[]>([]);
 
   const litSet = useMemo(() => new Set(lit), [lit]);
 
@@ -136,10 +137,6 @@ export function RecipeStudio({
             >
               Shopping list
             </button>
-            <label className="recipe-grams">
-              <input type="checkbox" checked={showGrams} onChange={(e) => setShowGrams(e.target.checked)} />
-              Grams
-            </label>
           </header>
 
           {leftTab === "ingredients" ? (
@@ -148,23 +145,44 @@ export function RecipeStudio({
                 <p className="muted">No ingredients yet.</p>
               )}
               {groups.map(({ group, items }) => (
-                <div className="recipe-group" key={group === "" ? "__ungrouped" : group}>
-                  {group !== "" && <h3 className="recipe-group-name">{group}</h3>}
-                  {items.map((item) => (
-                    <IngredientRow
-                      key={item.id}
-                      ingredient={item}
-                      change={item.change}
-                      steps={steps}
-                      showGrams={showGrams}
-                      lit={litSet.has(item.id)}
-                      onHover={(on) => setLit(on ? [item.id] : [])}
-                      run={run}
-                    />
-                  ))}
-                </div>
+                <IngredientGroup
+                  key={group === "" ? "__ungrouped" : group}
+                  group={group}
+                  items={items}
+                  steps={steps}
+                  lit={litSet}
+                  onHover={setLit}
+                  run={run}
+                />
               ))}
-              <AddIngredient run={run} groups={groups.map((g) => g.group).filter((g) => g !== "")} />
+              {/* A group with no ingredients yet exists only here: the model derives groups
+                  from the ingredients that name them, so there is nothing to create until
+                  the first one lands. */}
+              {pendingGroups
+                .filter((name) => !groups.some((g) => g.group === name))
+                .map((name) => (
+                  <IngredientGroup
+                    key={`pending:${name}`}
+                    group={name}
+                    items={[]}
+                    steps={steps}
+                    lit={litSet}
+                    onHover={setLit}
+                    run={run}
+                    onDismiss={() => setPendingGroups((names) => names.filter((n) => n !== name))}
+                  />
+                ))}
+              <InlineAdd
+                label="+ group"
+                placeholder="Dough"
+                aria="Add a group"
+                onSubmit={(name) => {
+                  const trimmed = name.trim();
+                  if (trimmed === "") return false;
+                  setPendingGroups((names) => (names.includes(trimmed) ? names : [...names, trimmed]));
+                  return true;
+                }}
+              />
             </div>
           ) : (
             <ul className="recipe-shopping">
@@ -176,7 +194,8 @@ export function RecipeStudio({
                   onPointerEnter={() => setLit(row.from)}
                   onPointerLeave={() => setLit([])}
                 >
-                  <span className="recipe-total">{row.total}</span> {row.label}
+                  <span className="recipe-shop-name">{row.label}</span>
+                  <span className="recipe-total">{row.total}</span>
                 </li>
               ))}
             </ul>
@@ -269,7 +288,6 @@ function IngredientRow({
   ingredient,
   change,
   steps,
-  showGrams,
   lit,
   onHover,
   run,
@@ -279,7 +297,6 @@ function IngredientRow({
    *  that would be written straight through underneath an unapplied change. */
   change?: "added" | "changed" | "removed";
   steps: readonly Step[];
-  showGrams: boolean;
   lit: boolean;
   onHover: (on: boolean) => void;
   run: Run;
@@ -294,14 +311,6 @@ function IngredientRow({
   const unit = useCell(ingredient.unit, revise("unit"));
   const prep = useCell(ingredient.prep, revise("prep"));
 
-  const hint = useMemo(() => {
-    if (!showGrams) return "";
-    const measure = measureOf(ingredient);
-    const target = toggleTarget(measure, ingredient.name);
-    if (target === null) return "";
-    const converted = convert(measure, target, ingredient.name);
-    return converted === null ? "" : `≈ ${formatMeasure(converted)}`;
-  }, [showGrams, ingredient]);
 
   const pairedTo = steps.find((s) => s.id === ingredient.stepId);
 
@@ -315,7 +324,6 @@ function IngredientRow({
       <input className="recipe-unit" aria-label="Unit" list="recipe-units" {...unit} />
       <input className="recipe-name" aria-label="Ingredient" {...name} />
       <input className="recipe-prep" aria-label="Preparation" placeholder="prep" {...prep} />
-      {hint !== "" && <span className="recipe-hint">{hint}</span>}
       {pairedTo !== undefined && <span className="recipe-paired" title={`Used in: ${pairedTo.title}`}>◆</span>}
       <button
         type="button"
@@ -335,73 +343,140 @@ function IngredientRow({
 }
 
 /**
- * One line in, one ingredient out. Typing "3.5 C all purpose flour" is how a recipe is
- * actually transcribed, so the row splits on the first two words when they read as a
- * quantity and a unit, and otherwise takes the whole line as the name.
+ * One group of ingredients, with its own add row.
+ *
+ * Adding belongs INSIDE the group rather than in one form at the foot of the pane: the group
+ * is then implied by where you are typing, which is one less field per ingredient and the
+ * difference between transcribing a recipe and filling in a form.
  */
-function AddIngredient({ run, groups }: { run: Run; groups: readonly string[] }): React.JSX.Element {
+function IngredientGroup({
+  group,
+  items,
+  steps,
+  lit,
+  onHover,
+  run,
+  onDismiss,
+}: {
+  group: string;
+  items: readonly OverlayIngredient[];
+  steps: readonly Step[];
+  lit: ReadonlySet<string>;
+  onHover: (ids: readonly string[]) => void;
+  run: Run;
+  /** Set only for a group that exists client-side and holds nothing yet. */
+  onDismiss?: () => void;
+}): React.JSX.Element {
+  /** Removing a group keeps its ingredients and ungroups them. Deleting someone's
+   *  ingredients because they renamed a heading would be a trap. */
+  const removeGroup = useCallback(async () => {
+    for (const item of items) await run("reviseIngredient", { ingredientId: item.id, group: "" });
+    onDismiss?.();
+  }, [items, run, onDismiss]);
+
+  return (
+    <div className="recipe-group">
+      {group !== "" && (
+        <div className="recipe-group-head">
+          <h3 className="recipe-group-name">{group}</h3>
+          <button
+            type="button"
+            className="recipe-group-remove"
+            aria-label={`Remove the ${group} group`}
+            title="Remove this group. Its ingredients stay, ungrouped."
+            onClick={() => void removeGroup()}
+          >
+            ×
+          </button>
+        </div>
+      )}
+      {items.map((item) => (
+        <IngredientRow
+          key={item.id}
+          ingredient={item}
+          change={item.change}
+          steps={steps}
+          lit={lit.has(item.id)}
+          onHover={(on) => onHover(on ? [item.id] : [])}
+          run={run}
+        />
+      ))}
+      <InlineAdd
+        label="+ ingredient"
+        placeholder="3.5 C all purpose flour"
+        aria={group === "" ? "Add an ingredient" : `Add an ingredient to ${group}`}
+        onSubmit={async (line) => {
+          const parsed = parseIngredientLine(line);
+          if (parsed.title === "") return false;
+          return run("addIngredient", { ...parsed, ...(group === "" ? {} : { group }) });
+        }}
+      />
+    </div>
+  );
+}
+
+/**
+ * A one-field add that is a link until you use it. The pane is a list to read from while
+ * cooking, so an always-open form would put a text box between every group and the next.
+ * Submitting keeps the field open for the line after it, which is how a list gets typed in.
+ */
+function InlineAdd({
+  label,
+  placeholder,
+  aria,
+  onSubmit,
+}: {
+  label: string;
+  placeholder: string;
+  aria: string;
+  /** `true` when it took; the field then clears and stays open. */
+  onSubmit: (text: string) => boolean | Promise<boolean>;
+}): React.JSX.Element {
+  const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
-  const [group, setGroup] = useState("");
+  const [busy, setBusy] = useState(false);
 
   const submit = useCallback(async () => {
-    const line = text.trim();
-    if (line === "") return;
-    const parts = line.split(/\s+/);
-    let qty = "";
-    let unit = "";
-    let rest = parts;
-    if (parts.length > 1 && /^[\d./¼½¾⅓⅔⅛⅜⅝⅞]+$/.test(parts[0]!)) {
-      qty = parts[0]!;
-      rest = parts.slice(1);
-      // "1 1/2 cups" — a second numeric word is still the quantity.
-      if (rest.length > 1 && /^[\d./¼½¾⅓⅔⅛⅜⅝⅞]+$/.test(rest[0]!)) {
-        qty = `${qty} ${rest[0]!}`;
-        rest = rest.slice(1);
-      }
-      if (rest.length > 1 && UNIT_TOKENS.includes(rest[0]!.toLowerCase().replace(/s$/, ""))) {
-        unit = rest[0]!;
-        rest = rest.slice(1);
-      } else if (rest.length > 1) {
-        unit = rest[0]!;
-        rest = rest.slice(1);
-      }
-    }
-    const ok = await run("addIngredient", {
-      title: rest.join(" "),
-      ...(qty !== "" ? { qty } : {}),
-      ...(unit !== "" ? { unit } : {}),
-      ...(group !== "" ? { group } : {}),
-    });
+    if (text.trim() === "" || busy) return;
+    setBusy(true);
+    const ok = await onSubmit(text);
+    setBusy(false);
     if (ok) setText("");
-  }, [text, group, run]);
+  }, [text, busy, onSubmit]);
+
+  if (!open) {
+    return (
+      <button type="button" className="recipe-inline-open" onClick={() => setOpen(true)}>
+        {label}
+      </button>
+    );
+  }
 
   return (
     <form
-      className="recipe-add"
+      className="recipe-inline-add"
       onSubmit={(e) => {
         e.preventDefault();
         void submit();
       }}
     >
       <input
+        autoFocus
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder="3.5 C all purpose flour"
-        aria-label="Add an ingredient"
+        placeholder={placeholder}
+        aria-label={aria}
+        onKeyDown={(e) => {
+          // Escape closes an empty field, so the affordance folds back into a link.
+          if (e.key === "Escape" && text === "") setOpen(false);
+        }}
+        onBlur={() => {
+          if (text === "") setOpen(false);
+        }}
       />
-      <input
-        value={group}
-        onChange={(e) => setGroup(e.target.value)}
-        placeholder="group"
-        aria-label="Group"
-        list="recipe-groups"
-      />
-      <datalist id="recipe-groups">
-        {groups.map((g) => (
-          <option key={g} value={g} />
-        ))}
-      </datalist>
-      <button type="submit">Add</button>
+      <button type="submit" disabled={busy || text.trim() === ""}>
+        Add
+      </button>
     </form>
   );
 }

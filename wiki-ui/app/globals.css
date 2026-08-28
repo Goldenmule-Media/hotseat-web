@@ -3538,15 +3538,6 @@ button.restate-card-lead:hover {
   color: var(--text);
 }
 
-.recipe-grams {
-  align-items: center;
-  color: var(--muted);
-  display: flex;
-  font-size: 12px;
-  gap: 4px;
-  margin-left: auto;
-}
-
 /* ── ingredients ── */
 
 .recipe-ingredients,
@@ -3624,12 +3615,6 @@ button.restate-card-lead:hover {
   flex: 0 1 8em;
 }
 
-.recipe-hint {
-  color: var(--muted);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
 .recipe-paired {
   color: var(--accent);
   font-size: 10px;
@@ -3696,15 +3681,26 @@ button.restate-card-lead:hover {
 }
 
 .recipe-shopping li {
+  align-items: baseline;
   border: 1px solid transparent;
   border-radius: 6px;
+  display: flex;
   font-size: 14px;
+  gap: 12px;
+  justify-content: space-between;
   padding: 3px 6px;
 }
 
+.recipe-shop-name {
+  min-width: 0;
+}
+
+/* Amounts line up as a column you can scan down, which is what a shopping list is for. */
 .recipe-total {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
 }
 
 /* ── steps ── */
@@ -3988,4 +3984,96 @@ button.restate-card-lead:hover {
   font-size: 14px;
   min-width: 0;
   padding: 6px 10px;
+}
+
+/* ── groups, and adding inside them ── */
+
+.recipe-group-head {
+  align-items: baseline;
+  display: flex;
+  gap: 6px;
+}
+
+.recipe-group-head .recipe-group-name {
+  flex: 1 1 auto;
+}
+
+.recipe-group-remove {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+  opacity: 0;
+  padding: 0 4px;
+}
+
+/* The remove controls stay out of the way until the row is under the pointer, but they
+   reserve their space, so nothing reflows when they appear. */
+.recipe-group:hover .recipe-group-remove,
+.recipe-group-remove:focus-visible {
+  opacity: 1;
+}
+
+.recipe-group-remove:hover {
+  color: var(--red);
+}
+
+.recipe-remove {
+  opacity: 0;
+}
+
+.recipe-ingredient:hover .recipe-remove,
+.recipe-remove:focus-visible {
+  opacity: 1;
+}
+
+.recipe-inline-open {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  padding: 3px 6px;
+  text-align: left;
+}
+
+.recipe-inline-open:hover {
+  color: var(--accent);
+}
+
+.recipe-inline-add {
+  display: flex;
+  gap: 6px;
+  padding: 2px 4px;
+}
+
+.recipe-inline-add input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  flex: 1 1 auto;
+  font: inherit;
+  font-size: 14px;
+  min-width: 0;
+  padding: 4px 8px;
+}
+
+.recipe-inline-add button {
+  background: var(--accent-dim);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 10px;
+}
+
+.recipe-inline-add button:disabled {
+  cursor: default;
+  opacity: 0.5;
 }

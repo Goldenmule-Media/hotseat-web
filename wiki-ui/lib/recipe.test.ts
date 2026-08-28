@@ -8,6 +8,7 @@ import {
   groupIngredients,
   type Ingredient,
   ingredientsForStep,
+  parseIngredientLine,
   readIngredients,
   readFiles,
   readNotes,
@@ -257,5 +258,33 @@ describe("describeOp", () => {
     expect(describeOp({ command: "removeIngredient", args: { ingredientId: "i1" } }, rows, [])).toBe(
       "Remove buttermilk",
     );
+  });
+});
+
+describe("parseIngredientLine", () => {
+  it("takes the quantity and unit off the front of a typed line", () => {
+    expect(parseIngredientLine("3.5 C all purpose flour")).toEqual({
+      title: "all purpose flour",
+      qty: "3.5",
+      unit: "C",
+    });
+  });
+
+  it("keeps a compound fraction together", () => {
+    expect(parseIngredientLine("1 1/4 tsp salt")).toEqual({ title: "salt", qty: "1 1/4", unit: "tsp" });
+    expect(parseIngredientLine("1 ½ tsp salt")).toEqual({ title: "salt", qty: "1 ½", unit: "tsp" });
+  });
+
+  it("leaves a line with no leading quantity whole", () => {
+    // "Sesame seeds" is an ingredient, not a parse failure.
+    expect(parseIngredientLine("Sesame seeds")).toEqual({ title: "Sesame seeds" });
+  });
+
+  it("does not eat the name as a unit when nothing follows it", () => {
+    expect(parseIngredientLine("2 eggs")).toEqual({ title: "eggs", qty: "2" });
+  });
+
+  it("is empty for an empty line", () => {
+    expect(parseIngredientLine("   ")).toEqual({ title: "" });
   });
 });
