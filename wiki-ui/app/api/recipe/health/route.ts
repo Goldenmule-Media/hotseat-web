@@ -8,5 +8,5 @@ export async function GET(request: Request): Promise<Response> {
   const auth = await checkRequestAuth(request.headers.get("authorization"));
   if (!auth.ok) return Response.json({ error: auth.message }, { status: auth.status });
 
-  return Response.json(decideAnthropicAvailability(process.env));
+  return Response.json(decideAnthropicAvailability());
 }

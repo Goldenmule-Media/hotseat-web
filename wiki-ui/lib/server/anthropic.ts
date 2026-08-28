@@ -11,14 +11,27 @@ import Anthropic from "@anthropic-ai/sdk";
 
 export const CHAT_MODEL = "claude-opus-5";
 
+/**
+ * A LITERAL `process.env` read, and it has to stay literal.
+ *
+ * The deployed artifact is `.next` alone, and the host exposes its configured variables to the
+ * BUILD but not to the SSR runtime, so no env file written during the build ever reaches a
+ * running route handler. `env` in next.config.mjs bridges that by substituting this expression
+ * at build time — a substitution that only matches `process.env.NAME` written out in full. The
+ * same value read through a parameter is invisible to it, which is how the deployed chat came
+ * to report an unset key while the key was plainly configured.
+ */
+const API_KEY = process.env.ANTHROPIC_API_KEY;
+
 export interface Availability {
   available: boolean;
   reason?: string;
 }
 
-/** Pure over an env record. Configured means a non-empty key, nothing more. */
-export function decideAnthropicAvailability(env: Record<string, string | undefined>): Availability {
-  const key = env.ANTHROPIC_API_KEY;
+/** Configured means a non-empty key, nothing more. Pass `env` only from tests; the default
+ *  path reads the inlined constant above. */
+export function decideAnthropicAvailability(env?: Record<string, string | undefined>): Availability {
+  const key = env !== undefined ? env.ANTHROPIC_API_KEY : API_KEY;
   if (key === undefined || key.trim() === "") {
     return { available: false, reason: "ANTHROPIC_API_KEY is not set (see wiki-ui/.env.example)" };
   }
@@ -32,11 +45,13 @@ let client: Anthropic | null = null;
  * that an unconfigured server answers with our sentence rather than an SDK constructor throw.
  */
 export function anthropicClient(): Anthropic | null {
-  if (!decideAnthropicAvailability(process.env).available) return null;
+  if (!decideAnthropicAvailability().available) return null;
   // The SDK retries timeouts as well as 429/5xx, and the wall clock is timeout × (retries + 1).
   // Someone is watching a spinner, so one retry is the whole budget. No client-level `timeout`:
   // that is a per-request option, which keeps WIKI_UI_CHAT_TIMEOUT_MS authoritative.
-  client ??= new Anthropic({ maxRetries: 1 });
+  // Passed explicitly: the SDK's own key lookup is a bracket access on process.env, which
+  // the build-time substitution cannot rewrite, so a zero-arg client would find nothing.
+  client ??= new Anthropic({ apiKey: API_KEY, maxRetries: 1 });
   return client;
 }
 

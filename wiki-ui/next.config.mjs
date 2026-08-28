@@ -5,6 +5,16 @@ const nextConfig = {
   // `.next/` of the always-running `next dev` and kill it. Both `build` and `start` read this,
   // so the bench runs entirely inside `.next-bench/` and never touches the dev server's output.
   distDir: process.env.NEXT_DIST_DIR ?? ".next",
+  // Server-only values baked into the build. The host exposes its configured variables to the
+  // BUILD but not to the SSR runtime, and the artifact is `.next` alone, so an env file written
+  // during the build never ships: inlining is the only path from a build-time value to a running
+  // route handler. Every name here is referenced ONLY under lib/server/, so none reaches a client
+  // bundle — the substitution lands where the name is written, and it is not written in client
+  // code. Absent values are omitted so a local build inlines nothing.
+  env: {
+    ...(process.env.ANTHROPIC_API_KEY !== undefined ? { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY } : {}),
+    ...(process.env.WIKI_STREAM_BASE_URL !== undefined ? { WIKI_STREAM_BASE_URL: process.env.WIKI_STREAM_BASE_URL } : {}),
+  },
   // `wiki` and `wiki-models` are published as extensionless TypeScript SOURCE
   // (their package `exports` point at `./src/**/*.ts`, moduleResolution: Bundler).
   // Next must transpile them; webpack/turbopack resolve extensionless `.ts`
