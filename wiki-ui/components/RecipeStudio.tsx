@@ -324,8 +324,21 @@ function WrapCell({
   useLayoutEffect(() => {
     const el = ref.current;
     if (el === null) return;
-    el.style.height = "0px";
-    el.style.height = `${el.scrollHeight + 2}px`; // scrollHeight leaves out the transparent border
+    let width = -1;
+    const fit = (): void => {
+      width = el.clientWidth;
+      el.style.height = "0px";
+      el.style.height = `${el.scrollHeight + 2}px`; // scrollHeight leaves out the transparent border
+    };
+    fit();
+    // The wrap changes with the column too: a prep field that stops showing its placeholder
+    // takes width back off the name beside it, with no edit to that name to fit against.
+    // Only width matters here — refitting on our own height change would loop.
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth !== width) fit();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
   }, [cell.value]);
 
   return (
