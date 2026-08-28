@@ -8,6 +8,10 @@
  *    stores exactly ONE message (the whole body). So each command's events are
  *    stored as ONE message = a JSON array `IEventEnvelope[]` (a "commit"). On read
  *    we flatten the array-messages back into a flat event sequence.
+ *  - Offsets have the shape `<chunk>_<byte>` (zero-padded), and a read at a byte INSIDE a
+ *    stored message returns that whole message — so reading from `tail - 1` yields exactly
+ *    the last commit. That is what makes {@link EventLog.readTail} cheap. Defensive: an
+ *    offset that doesn't parse degrades to "unknown" rather than a wrong answer.
  *  - `Stream-Seq` gives strict-greater optimistic concurrency. We set
  *    `seq = pad(expectedVersion)`; an equal-or-lower seq → HTTP 409 surfaced as a
  *    `FetchError` with `.status === 409`, which we translate into `StaleAppendError`
@@ -32,6 +36,21 @@ const START_OFFSET = "-1";
 
 /** OCC seq is the folded head, zero-padded so lexicographic == numeric ordering. */
 const pad = (n: number): string => String(n).padStart(20, "0");
+
+/** DS offset shape `<chunk>_<byte>` (see the module note). */
+const OFFSET_RE = /^(\d+)_(\d+)$/;
+
+/** The offset one byte before the tail — inside the last stored message, so a read from it
+ *  returns that message. `undefined` for an empty stream, a chunk boundary, or a shape we
+ *  don't recognise (a DS change then costs us the answer, never a wrong one). */
+function beforeTail(offset: string | undefined): string | undefined {
+  const m = offset !== undefined ? OFFSET_RE.exec(offset) : null;
+  if (m === null) return undefined;
+  const [, chunk, byteStr] = m as unknown as [string, string, string];
+  const byte = Number(byteStr);
+  if (!Number.isFinite(byte) || byte <= 0) return undefined;
+  return `${chunk}_${String(byte - 1).padStart(byteStr.length, "0")}`;
+}
 
 /** Configuration for an EventLog (mirrors {@link IStreamConfig}). */
 export interface EventLogConfig {
@@ -208,6 +227,23 @@ export class EventLog implements IEventLog {
     });
     const batches = await res.json();
     return { events: batches.flat(), nextCursor: res.offset };
+  }
+
+  async readTail(ws: WorkspaceId): Promise<IEventEnvelope[] | undefined> {
+    // HEAD + a cold read on the url — deliberately NOT handleFor(), which would create the
+    // stream: asking when a workspace last changed must never bring one into existence.
+    const head = await DurableStream.head({ url: this.urlFor(ws), ...this.headerOpts() });
+    if (!head.exists) return undefined;
+    const offset = beforeTail(head.offset);
+    if (offset === undefined) return undefined;
+    const res = await stream<IEventEnvelope[]>({
+      url: this.urlFor(ws),
+      offset,
+      live: false,
+      ...this.headerOpts(),
+    });
+    const batches = await res.json();
+    return batches.at(-1);
   }
 
   async readCommits(ws: WorkspaceId): Promise<IEventEnvelope[][]> {

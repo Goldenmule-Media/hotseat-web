@@ -262,6 +262,21 @@ class Wiki implements IWiki {
     return [...byId.values()].map((s) => ({ id: s.id, name: s.name, status: s.status }));
   }
 
+  async workspaceActivity(ids: readonly WorkspaceId[]): Promise<Record<WorkspaceId, string>> {
+    const out: Record<WorkspaceId, string> = {};
+    await Promise.all(
+      ids.map(async (id) => {
+        try {
+          const at = (await this.eventLog.readTail(id))?.at(-1)?.meta.occurredAt;
+          if (at !== undefined && at !== "") out[id] = at;
+        } catch {
+          /* best-effort: one unreadable stream must not sink a whole listing */
+        }
+      }),
+    );
+    return out;
+  }
+
   async close(): Promise<void> {
     for (const handle of this.open.values()) {
       handle.teardown();

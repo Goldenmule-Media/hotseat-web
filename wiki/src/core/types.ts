@@ -87,6 +87,12 @@ export interface IEventLog {
   /** Read flattened events from a coarse cursor (or the start when omitted). */
   read(ws: WorkspaceId, fromCursor?: string): Promise<ReadResult>;
   /**
+   * The stream's LAST commit alone (the events of the most recent append), read without
+   * folding or creating the stream — the cheap way to answer "when did this workspace last
+   * change?". `undefined` when the stream is absent, empty, or its tail cannot be located.
+   */
+  readTail(ws: WorkspaceId): Promise<IEventEnvelope[] | undefined>;
+  /**
    * Read the stream's COMMITS without flattening — each returned {@link Commit} is one
    * stored array-message (the events one command appended atomically). The commit
    * boundaries `read()` discards are load-bearing for faithful stream-to-stream

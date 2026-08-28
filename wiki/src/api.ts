@@ -361,6 +361,13 @@ export interface IWiki {
   createWorkspace(input: { name: string; id?: WorkspaceId }): Promise<IWorkspaceHandle>;
   openWorkspace(id: WorkspaceId): Promise<IWorkspaceHandle>;
   listWorkspaces(): Promise<readonly IWorkspaceSummary[]>;
+  /**
+   * When each workspace last changed — the `occurredAt` of the newest event in its
+   * stream, keyed by id, for "recently changed first" listings. Cheap by design: one
+   * HEAD + one tail read per id, never a fold, so a listing can call it for every
+   * workspace. Best-effort — an id whose activity cannot be read is simply absent.
+   */
+  workspaceActivity(ids: readonly WorkspaceId[]): Promise<Record<WorkspaceId, string>>;
   close(): Promise<void>;
   /**
    * The serializable status-FSM of a registered page TYPE — states +
