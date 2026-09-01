@@ -474,11 +474,10 @@ async function main(): Promise<void> {
     if (note.files.length > 1) merged++;
     const path = note.dir.length > 0 ? `${note.dir}/${note.title}` : note.title;
     const existing = byPath.get(path);
-    if (existing !== undefined && !existing.id.startsWith("(")) {
-      if (!(await isBlank(ws, existing.id as PageId))) {
-        skippedPages++;
-        continue;
-      }
+    const blank = existing !== undefined && !existing.id.startsWith("(") && (await isBlank(ws, existing.id as PageId));
+    if (existing !== undefined && !blank) {
+      skippedPages++;
+      continue;
     }
 
     // Merged halves are concatenated in `.N` order behind a divider: they are one note the
@@ -512,6 +511,13 @@ async function main(): Promise<void> {
       continue;
     }
     if (body.length === 0) empty++;
+    // A note that is nothing but an Evernote footer has no body to write. Once its page
+    // exists there is nothing a re-run could add, and `isBlank` would call it a refill
+    // every time — so it is left alone, and the report says so.
+    if (blank && body.length === 0) {
+      skippedPages++;
+      continue;
+    }
 
     const root = note.dir.split("/")[0] || "(root)";
     perRoot.set(root, (perRoot.get(root) ?? 0) + 1);
