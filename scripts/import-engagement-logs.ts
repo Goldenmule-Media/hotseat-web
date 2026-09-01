@@ -1,17 +1,19 @@
 /**
  * Import the Braindump vault's meeting / 1-on-1 / interview / vendor notes into a wiki
- * workspace as `engagement-log` pages.
+ * workspace: a `toc` tree mirroring the vault's folders, one `toc` per thread in inline
+ * FEED mode, and one `document` per dated entry. Nothing about a dated collection of notes
+ * needed a bespoke page type — that was the whole lesson.
  *
  * SAFE BY DEFAULT: parses everything, prints the plan, and writes NOTHING. Pass `--apply`
- * to commit. Re-running with `--apply` is idempotent — a page whose `provenance.source`
- * already names a file is skipped, so an interrupted run resumes rather than duplicating.
+ * to commit. Re-running with `--apply` skips a thread whose title already sits at its
+ * folder path, so an interrupted run resumes rather than duplicating — but the grain is
+ * the WHOLE thread, so a run interrupted mid-thread leaves that thread short its remaining
+ * entries. `import-vault.ts` is per-file for exactly that reason.
  *
  *   tsx scripts/import-engagement-logs.ts --vault ~/Documents/Braindump --workspace ws:…
  *   tsx scripts/import-engagement-logs.ts --vault … --workspace ws:… --apply
  *
- * Against the DEPLOYED server, once `engagement-log` has shipped there (the bundle is
- * bind-mounted from `~/wiki-server/models`, so it takes a `./deploy.sh` run — a page type
- * cannot be pushed to it remotely):
+ * Against the DEPLOYED server:
  *
  *   tsx scripts/import-engagement-logs.ts --stream-url https://hotseat.thegoldenmule.com \
  *     --workspace ws:… --apply
@@ -37,9 +39,9 @@
  * from `IWikiConfig.clock` — so the clock is a mutable box set to each file's own date
  * before its writes. Without that every imported page would claim to be created today.
  */
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, relative, resolve, sep } from "node:path";
+import { join, resolve } from "node:path";
 
 import { createWiki } from "wiki";
 import type { IStreamConfig, IWorkspaceHandle, WorkspaceId } from "wiki";
@@ -49,6 +51,9 @@ import { resolveAuthorization } from "wiki/auth-client";
 // before any write, which is loud but only at the moment it first creates that type.
 import documentPageTypes from "wiki-models/document";
 import tocPageTypes from "wiki-models/toc";
+
+import type { Candidate } from "./vault-source.js";
+import { DATED_NAME, engagementCandidates } from "./vault-source.js";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Flags
@@ -85,100 +90,6 @@ function parseFlags(argv: readonly string[]): Flags {
     only: flag("only"),
     token: flag("token") ?? process.env.WIKI_TOKEN,
   };
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Candidate selection
-// ────────────────────────────────────────────────────────────────────────────
-
-/** Directories whose contents are counterparty threads. */
-const THREAD_DIRS = new Set([
-  "Meetings",
-  "C-Staff",
-  "Personnel",
-  "1 on 1s",
-  "External Relationships",
-  "Interviews",
-  "Dedalord",
-  "HR",
-  "Coworkers",
-  "Recommendations",
-  "Training",
-]);
-
-/**
- * Files that sit in a thread directory but are NOT a thread — the folders leak. A
- * directory-driven import would otherwise create a person called "TRI Team Shape".
- * Matched on the basename, case-insensitively.
- */
-const NOT_A_THREAD = [
-  /^tri team shape$/i,
-  /^the case for a platform engineer$/i,
-  /^offer notes$/i,
-  /^pf review.*outline$/i,
-  /^self review/i,
-  /^.*\btemplate\b.*$/i,
-  /^interview questions$/i,
-  /^exit interview/i,
-  /^jd[ _:]/i,
-  /^untitled/i,
-];
-
-/** A trailing date on a filename: `Foo 8_3_20`, `Foo - 9_28_20`, `Foo: 1_19_2021`. */
-const DATED_NAME = /^(.{4,}?)[\s:—-]+\d{1,2}[ ._/-]\d{1,2}(?:[ ._/-]\d{2,4})?$/;
-
-/**
- * Undo the Evernote export's filename encoding. It could not put `:` or `<>` in a name, so
- * `Michael Voigt_ 1 on 1` is a colon, `Azumo __ Big Run Studios` is a "between these two"
- * thread, and a bare `Paul_Foster` is just a space. A trailing `.1`/`.2` is a collision
- * suffix, stripped so the halves fold into one thread.
- */
-function normalizeTitle(base: string): string {
-  return base
-    .replace(/\.\d+$/, "")
-    .replace(/\s*__\s*/g, " <> ")
-    .replace(/_\s+/g, ": ")
-    .replace(/_/g, " ")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-}
-
-interface Candidate {
-  path: string;
-  rel: string;
-  title: string;
-  employer: string;
-  dir: string;
-}
-
-function walk(dir: string, out: string[] = []): string[] {
-  for (const name of readdirSync(dir)) {
-    if (name.startsWith(".") || name === "_resources") continue;
-    const p = join(dir, name);
-    const st = statSync(p);
-    if (st.isDirectory()) walk(p, out);
-    else if (name.endsWith(".md")) out.push(p);
-  }
-  return out;
-}
-
-function candidates(vault: string): Candidate[] {
-  const jobs = join(vault, "Jobs");
-  const out: Candidate[] = [];
-  for (const p of walk(jobs)) {
-    const rel = relative(vault, p);
-    const parts = rel.split(sep);
-    if (!parts.some((seg) => THREAD_DIRS.has(seg))) continue;
-    // `Name.1.md` / `Name.2.md` are Evernote export collision suffixes, not distinct threads.
-    const base = parts[parts.length - 1].replace(/\.md$/, "");
-    const title = normalizeTitle(base);
-    if (NOT_A_THREAD.some((re) => re.test(base))) continue;
-    // `Jobs/<Employer>/…` — but `Jobs/Interviews/` is a thread directory at the top level,
-    // with no employer above it.
-    const employer = parts[1] !== undefined && !THREAD_DIRS.has(parts[1]) ? parts[1] : "";
-    out.push({ path: p, rel, title, employer, dir: parts.slice(0, -1).join("/") });
-  }
-  return out.sort((a, b) => a.rel.localeCompare(b.rel));
 }
 
 interface Thread {
@@ -429,7 +340,7 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  const found = candidates(flags.vault);
+  const found = engagementCandidates(flags.vault);
   const all = threads(found);
   const picked = flags.only !== undefined ? all.filter((t) => t.files.some((f) => f.rel.includes(flags.only!))) : all;
   const list = flags.limit > 0 ? picked.slice(0, flags.limit) : picked;
@@ -517,7 +428,6 @@ async function main(): Promise<void> {
 
   let created = 0;
   let skipped = 0;
-  let moved = 0;
   let entriesWritten = 0;
   const entryTitles = new Set<string>();
   let entryTotal = 0;
@@ -619,7 +529,7 @@ async function main(): Promise<void> {
   console.log(`folders    ${foldersPlanned.size}`);
   console.log(
     flags.apply
-      ? `created    ${created} threads + ${entriesWritten} entry pages  (skipped ${skipped}, moved ${moved})`
+      ? `created    ${created} threads + ${entriesWritten} entry pages  (skipped ${skipped})`
       : `DRY RUN — nothing written. Pass --apply.`,
   );
   if (problems.length > 0) {
