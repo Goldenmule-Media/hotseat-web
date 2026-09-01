@@ -206,6 +206,24 @@ const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 const FOOTER_LINE = /^[ \t]+(?:Created|Updated) at:.*$/gm;
 const FOOTER_DATE = /^[ \t]+Created at:[ \t]*(\d{4}-\d{2}-\d{2})/m;
 
+/**
+ * Fuse the ADJACENT emphasis runs a Google Docs export leaves behind:
+ * `**Responsibilities****:**` is `**Responsibilities**` followed immediately by `**:**`,
+ * and `_simpler problems__?_` is the same in italics. One bold phrase was cut into two,
+ * so deleting the seam restores it.
+ *
+ * This is not cosmetic. `parseInline` reads the orphaned half as literal text — its
+ * opening delimiter is not left-flanking after a closing one — and the engine then refuses
+ * the commit, because that text run is not a parse fixed point of itself. Five files in
+ * this vault fail to import without this.
+ *
+ * Both sides must be non-space, so the legitimate `__bold at a word boundary__` and two
+ * genuinely separate runs (`**a** **b**`) are left alone.
+ */
+function fuseAdjacentEmphasis(text: string): string {
+  return text.replace(/(?<=[^\s*])\*{4}(?=[^\s*])/g, "").replace(/(?<=[^\s_])__(?=[^\s_])/g, "");
+}
+
 /** Strip the YAML block 116 files carry, handing back its `date` for the clock. */
 function stripFrontmatter(text: string): { body: string; date: string | undefined } {
   const m = FRONTMATTER.exec(text);
@@ -474,8 +492,11 @@ async function main(): Promise<void> {
     if (note.files.length > 1) merged++;
     const path = note.dir.length > 0 ? `${note.dir}/${note.title}` : note.title;
     const existing = byPath.get(path);
-    const blank = existing !== undefined && !existing.id.startsWith("(") && (await isBlank(ws, existing.id as PageId));
-    if (existing !== undefined && !blank) {
+    // `--print` is a preview of what this importer WOULD emit, so it never consults the
+    // server: in an already-imported workspace the skip below would silence all of it.
+    const blank =
+      !flags.print && existing !== undefined && !existing.id.startsWith("(") && (await isBlank(ws, existing.id as PageId));
+    if (!flags.print && existing !== undefined && !blank) {
       skippedPages++;
       continue;
     }
@@ -485,7 +506,7 @@ async function main(): Promise<void> {
     const parts: string[] = [];
     let date: string | undefined;
     for (const file of note.files) {
-      const fm = stripFrontmatter(readFileSync(file, "utf8"));
+      const fm = stripFrontmatter(fuseAdjacentEmphasis(readFileSync(file, "utf8")));
       const ft = stripFooter(fm.body);
       date ??= fm.date ?? ft.date;
       // Upload before rewriting: the rewrite needs every ref to already exist, and an
