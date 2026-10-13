@@ -8,7 +8,7 @@ it reads the stream and authors nothing back.
 This repo's own [`docs/hotseat-wiki/`](../docs/hotseat-wiki/) is one such mirror.
 
 **Why it is a separate process.** Its roots are absolute paths that mean something only on the
-machine holding the disk, so emission — and its `workspaceId → root` map — is inherently local.
+machine holding the disk, so emission — and its `workspaceId (+ subtree) → root` map — is inherently local.
 That is why the server can be deployed remotely while the Markdown lands in your checkouts.
 
 ---
@@ -87,15 +87,23 @@ Mac, never server state (point elsewhere with `--config` / `WIKI_MIRROR_CONFIG`)
   "namespace": "default",
   "models": ["wiki-models/feature", "wiki-models/toc"],
   "emitters": [
-    { "workspaceId": "ws:...", "root": "/Users/you/projects/thing/docs" }
+    { "workspaceId": "ws:...", "root": "/Users/you/projects/thing/wiki-mirror" },
+    { "workspaceId": "ws:...", "root": "/Users/you/projects/game/wiki-mirror", "subtreeRootId": "toc:..." }
   ]
 }
 ```
 
-Easiest path is the menu-bar app's **Configure…**, which picks workspaces by name and folders with
-a file chooser. By hand, the rules the mirror enforces are: roots must be **absolute**, each
-workspace appears **once**, and no two workspaces share a root (one root is one writer — they would
-clobber each other's manifest).
+By convention a repo's mirror lives at **`<repo>/wiki-mirror/`**. This repo is the exception: its
+own wiki mirrors to `docs/hotseat-wiki/`, because `wiki-mirror/` is this package.
+
+An entry with a **`subtreeRootId`** mirrors one page and its descendants instead of the whole
+workspace, so a workspace with a page per project can feed each project's repo its own part.
+
+Easiest path is the menu-bar app's **Configure…**, which picks workspaces by name, subtree pages
+from the workspace's tree, and folders with a file chooser. By hand, the rules the mirror enforces
+are: roots must be **absolute**, each workspace + subtree pair appears **once**, and no two entries
+share a root or nest one root inside another (one root is one writer, and a mirror sweeps any file
+it owns that it no longer expects).
 
 It is read **once at startup**: restart the agent after editing it.
 
@@ -105,12 +113,14 @@ It is read **once at startup**: restart the agent after editing it.
 | `namespace` | must match the server's `WIKI_MCP_NAMESPACE` |
 | `models` | bundle specifiers to `import()` — resolved through `node_modules` |
 | `modelsDir` | a directory of bundles discovered one level deep — how a portable install carries its schema without `node_modules` |
-| `emitters` | `workspaceId → absolute root`, one tail loop each |
+| `emitters` | `workspaceId` + optional `subtreeRootId` → absolute `root`, one tail loop each |
 | `token` | a static bearer token; usually unnecessary, see below |
 | `healthPort` / `healthHost` | the local status endpoint (default `127.0.0.1:4440`) |
 | `probeIntervalMs` | how often to check the host is reachable and the tail is keeping pace |
 
-Resolution order is `flags → env WIKI_MIRROR_* → file → defaults`.
+Resolution order is `flags → env WIKI_MIRROR_* → file → defaults`. On the command line, one extra
+entry comes from `--workspace` + `--root`, optionally with `--subtree <pageId>`
+(`WIKI_MIRROR_WORKSPACE` / `WIKI_MIRROR_ROOT` / `WIKI_MIRROR_SUBTREE`).
 
 ## Sign in
 
@@ -143,22 +153,33 @@ curl -s localhost:4440/_mirror/status | python3 -m json.tool
 - **`server.reachable: false`** — the mirror is fine and cannot reach the host.
 - **a workspace with `lastReconcileError`** — the reason is in the message, and `nextRetryAt` says
   when it tries again. A failed emitter stays listed rather than vanishing, because an omitted entry
-  is indistinguishable from one you never configured.
+  is indistinguishable from one you never configured. A subtree entry whose page is gone reports
+  `subtree root … not found` and leaves its folder untouched.
 - **nothing answering at all** — the process is down: `./scripts/install-agent.sh --status`.
 
 Logs are at `~/Library/Logs/wiki-mirror/`. `GET /_mirror/workspaces` lists everything on the server
-with the root this machine mirrors it to.
+with every entry that mirrors it here, and `GET /_mirror/workspaces/{id}/tree` lists a workspace's
+pages to depth 3 (what the app's subtree picker reads). Status entries are keyed by `root`, and carry
+`subtreeRootId` and `subtreeTitle`.
 
 ## What lands on disk
 
-`<root>/<workspace>/<page tree>` — a folder plus `index.md` for a page with children. Every file is
-content-hashed, so a re-render that produces identical bytes writes nothing and the git diff stays
-honest. Writes are atomic (temp + rename), an on-disk `.wiki-md-manifest.json` records the applied
-version, and a wiped output directory self-heals on the next boot.
+The root **is** the mirror. A whole-workspace entry writes its top-level pages straight into
+`<root>/`; a subtree entry writes its page to `<root>/index.md` with the descendants beneath it, so
+renaming or moving that page moves no file. Below that, a page with children is a folder plus
+`index.md`. Attachments land in `<root>/.assets/`. Every file is content-hashed, so a re-render that
+produces identical bytes writes nothing and the git diff stays honest. Writes are atomic (temp +
+rename), and a wiped output directory self-heals on the next boot.
+
+`<root>/.wiki-md-manifest.json` records what the mirror owns. It is rewritten only when a file
+changes, so a subtree mirror stays quiet while the rest of its workspace is edited. A manifest
+written under another layout or subtree triggers a full rebuild that sweeps the old files, which is
+also how a mirror from before this layout moves out of its old `<workspace-name>/` folder.
 
 **Archiving never deletes a mirrored file**: an archived page moves to
-`<workspace>/.archived/<type>--<id>.md` and moves back when unarchived. Only a hard page delete
-removes one.
+`<root>/.archived/<type>--<id>.md` and moves back when unarchived. A page moved out of a subtree
+leaves that root and appears in whichever entry now covers it. Otherwise only a hard page delete
+removes a file.
 
 ## Design intent
 

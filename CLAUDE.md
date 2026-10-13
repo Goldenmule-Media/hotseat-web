@@ -110,7 +110,7 @@ Canonical doc: [`wiki-ui/README.md`](wiki-ui/README.md).
 mirror** and the headless, disk-writing sibling of `wiki-ui`. It tails a (possibly remote) `wiki-server`'s
 Durable Stream, folds + renders each commit with the embedded engine, and writes the deterministic Markdown
 tree to a local checkout — a parallel consumer of `wiki` (+ `wiki-models`) that imports **no**
-`wiki-mcp`/`wiki-server` internals and authors nothing back. Its `workspaceId → root` map is a per-machine
+`wiki-mcp`/`wiki-server` internals and authors nothing back. Its `workspaceId (+ subtree) → root` map is a per-machine
 local config file (`wiki-mirror.config.json`), never server state. This is what keeps `docs/hotseat-wiki/`
 current. Canonical doc: the *Local markdown mirror* feature spec
 ([`docs/hotseat-wiki/feature-specs/`](docs/hotseat-wiki/feature-specs/)).
@@ -223,15 +223,23 @@ its own. Full surface: [`architecture/wiki-server.md`](docs/hotseat-wiki/archite
   surface alone (no `wiki-mcp`/`wiki-server` internals; tails read-only, authors nothing back). Config is a
   **user-level local file** (`~/.wiki/wiki-mirror.config.json` by default — ONE per machine, shared by every
   project; override with `--config` / `WIKI_MIRROR_CONFIG`; resolved `flags → env WIKI_MIRROR_* → file →
-  defaults`) mapping each `workspaceId →` **absolute** root (one tail loop each) — per-machine state, never
-  stored on the shared server or a checkout. It is read once at startup; **restart to reconfigure**. Layout `<root>/<workspace>/<page tree>`
-  (folder + `index.md` per page-with-children), content-hashed so the git diff stays honest, atomic
-  temp+rename writes, an on-disk manifest (`.wiki-md-manifest.json`), and a boot back-fill that self-heals a
-  wiped output dir. **Archiving never deletes a mirrored file:** archiving a page (or the whole workspace)
-  moves its file to a stable id-named `<workspace>/.archived/<type>--<id>.md`, and unarchiving moves it back
-  to the tree; only a hard page delete removes a file. **This repo's own
-  [`docs/hotseat-wiki/`](docs/hotseat-wiki/) is one such mirror**, driven by `~/.wiki/wiki-mirror.config.json`.
-  Local-only trust (roots written verbatim, no sandboxing); single-writer per root (documented, not enforced).
+  defaults`) mapping each `workspaceId` — optionally with a `subtreeRootId` page, to mirror just that page
+  and its descendants — to an **absolute** root (one tail loop each). It is per-machine state, never
+  stored on the shared server or a checkout, and it is read once at startup; **restart to reconfigure**.
+  **The root is the mirror:** a whole-workspace entry writes its top-level pages straight into `<root>/`,
+  and a subtree entry writes its page to `<root>/index.md` with the descendants beneath it (folder +
+  `index.md` per page-with-children either way). **By convention a repo's root is `<repo>/wiki-mirror/`**;
+  this repo is the exception (`docs/hotseat-wiki/`, since `wiki-mirror/` is the package). Files are
+  content-hashed so the git diff stays honest, writes are atomic temp+rename, an on-disk manifest
+  (`.wiki-md-manifest.json`, rewritten only when a file changes) records what the mirror owns, and a boot
+  back-fill self-heals a wiped output dir. A manifest from another layout or subtree forces a rebuild that
+  sweeps the old files. **Archiving never deletes a mirrored file:** archiving a page (or the whole
+  workspace) moves its file to a stable id-named `<root>/.archived/<type>--<id>.md`, and unarchiving moves
+  it back to the tree; a page moved out of a subtree leaves that root, and only a hard page delete
+  otherwise removes a file. A subtree root that disappears fails the reconcile and leaves the root
+  untouched. **This repo's own [`docs/hotseat-wiki/`](docs/hotseat-wiki/) is one such mirror**, driven by
+  `~/.wiki/wiki-mirror.config.json`. Local-only trust (roots written verbatim, no sandboxing); one writer
+  per root, and config rejects repeated or nested roots.
 - **The mirror runs as a launchd service, watched from the menu bar.** `wiki-mirror/scripts/install-agent.sh`
   installs a user agent (`com.thegoldenmule.wiki-mirror`) that starts at login and restarts on a crash,
   running the checkout via `tsx` (`--mode source`), the built `dist/bin.js` (`--mode dist`), or a portable
