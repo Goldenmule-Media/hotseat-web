@@ -106,4 +106,24 @@ describe("mirrorView", () => {
     expect(v).toMatchObject({ state: "warn", label: "Mirror offline" });
     expect(v?.title).toContain("this workspace");
   });
+
+  it("prefers the whole-workspace entry when subtree entries also mirror the workspace", () => {
+    const v = view(
+      payload({
+        workspaces: [
+          workspace({ name: "Studio", root: "/games/war", subtreeRootId: "toc:war", subtreeTitle: "War", connected: false }),
+          workspace({ name: "Studio", root: "/studio", subtreeRootId: null }),
+        ],
+      }),
+    );
+    expect(v).toMatchObject({ state: "live" });
+    expect(v?.title).toContain("/studio");
+  });
+
+  it("names the subtree when only a subtree entry mirrors the workspace", () => {
+    const v = view(
+      payload({ workspaces: [workspace({ name: "Studio", root: "/games/war", subtreeRootId: "toc:war", subtreeTitle: "War" })] }),
+    );
+    expect(v?.title).toContain("Studio › War");
+  });
 });

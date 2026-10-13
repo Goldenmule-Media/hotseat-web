@@ -25,6 +25,9 @@ export interface MirrorWorkspaceStatus {
   readonly stuck?: boolean;
   /** When a failed emitter will be re-attempted (epoch ms). */
   readonly nextRetryAt?: number | null;
+  /** The page this entry mirrors with its descendants; null/absent for the whole workspace. */
+  readonly subtreeRootId?: string | null;
+  readonly subtreeTitle?: string;
 }
 
 /** Mirrors wiki-mirror's `GET /_mirror/status` payload. */
@@ -86,11 +89,14 @@ export function mirrorView(probe: MirrorProbe, workspaceId: string, healthUrl: s
     };
   }
 
-  const ws = probe.data.workspaces.find((w) => w.workspaceId === workspaceId);
+  // A workspace may be mirrored several times by subtree; the whole-workspace entry speaks for it.
+  const entries = probe.data.workspaces.filter((w) => w.workspaceId === workspaceId);
+  const ws = entries.find((w) => (w.subtreeRootId ?? null) === null) ?? entries[0];
   if (ws === undefined) {
     return { state: "absent", label: "Not mirrored", title: "A wiki-mirror is running but isn't mirroring this workspace" };
   }
-  const name = ws.name ?? "this workspace";
+  const base = ws.name ?? "this workspace";
+  const name = ws.subtreeTitle !== undefined ? `${base} › ${ws.subtreeTitle}` : base;
   // `??` normalizes an omitted field: a strict !== null against undefined renders "undefined".
   const failure = ws.lastReconcileError ?? null;
   if (failure !== null) {
