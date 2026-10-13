@@ -9,10 +9,13 @@
  * for content; an operator reaches for these.
  *
  * Today this is stream-to-stream workspace REPLICATION — copy a workspace's whole
- * event stream between Durable Streams servers (e.g. local↔remote migration). Future
+ * event stream between Durable Streams servers (e.g. local↔remote migration) — and the
+ * cross-workspace page MOVE saga, which drives the move steps on two handles. Future
  * operational ops (clone-to-a-new-id, export/import, bulk re-projection) belong here
  * too. The engine's other admin-flavored actions are deliberately `IWorkspaceHandle`
  * methods (`assignSerials`, `archive`/`unarchive`, `rename`) and stay there.
  */
 export { replicateWorkspace, ReplicationConflictError } from "./core/replicate";
 export type { ReplicateWorkspaceOptions, ReplicationReport } from "./core/replicate";
+export { movePages, resumePageMove } from "./core/move-saga";
+export type { BlobCopier, MovePagesOptions, MovePagesReport, ResumePageMoveOptions } from "./core/move-saga";

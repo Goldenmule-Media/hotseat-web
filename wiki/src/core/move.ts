@@ -31,6 +31,7 @@ import {
   PageMoveInProgressError,
   PageNotFoundError,
   ParentNotFoundError,
+  WorkspaceArchivedError,
 } from "./errors";
 import { validatePageContent } from "./ingestion";
 import type { Registry } from "./registry";
@@ -308,6 +309,8 @@ export const importPages: StructureHandler = (state, args, _services, registry) 
     const result: IPagesImportResult = { moveId: p.moveId, pageIds: prior.pageIds, alreadyImported: true, serials: {} };
     return { events: [], result };
   }
+  // Checked here rather than by the bus, so a repeated import still reports it landed.
+  if (state.status === "archived") throw new WorkspaceArchivedError(state.id);
   if (p.to !== state.id) throw new InvariantViolationError(`This move is for workspace "${p.to}", not "${state.id}".`);
   if (p.from === state.id) throw new InvariantViolationError("A workspace can't import its own pages.");
 
@@ -444,5 +447,6 @@ export const MOVE_HANDLERS: Readonly<Record<string, StructureHandler>> = {
   importPages,
 };
 
-/** Move steps that must still run on an archived workspace (so a move can always finish). */
-export const MOVE_FINISHERS: ReadonlySet<string> = new Set(["completePageMove", "abortPageMove"]);
+/** Move steps the bus lets through on an archived workspace: a move can always finish, and
+ *  `importPages` checks archival itself, after recognizing a repeat. */
+export const MOVE_FINISHERS: ReadonlySet<string> = new Set(["completePageMove", "abortPageMove", "importPages"]);
