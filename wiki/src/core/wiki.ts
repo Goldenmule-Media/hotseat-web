@@ -25,6 +25,7 @@ import type {
   IMutationDescriptor,
   IPageNode,
   IPageView,
+  IExternalLinkTarget,
   IReadOpts,
   IRelatedReader,
   ITreeNode,
@@ -593,12 +594,14 @@ class WorkspaceHandle implements IWorkspaceHandle {
     return this.structural("unarchivePage", { pageId }) as Promise<Committed<void>>;
   }
 
-  async link(from: PageId, to: PageId, role: string): Promise<Committed<void>> {
-    return this.structural("link", { from, to, role }) as Promise<Committed<void>>;
+  async link(from: PageId, to: PageId, role: string, target?: IExternalLinkTarget): Promise<Committed<void>> {
+    const args = target === undefined ? { from, to, role } : { from, to, role, workspace: target.workspace, title: target.title };
+    return this.structural("link", args) as Promise<Committed<void>>;
   }
 
-  async unlink(from: PageId, to: PageId, role: string): Promise<Committed<void>> {
-    return this.structural("unlink", { from, to, role }) as Promise<Committed<void>>;
+  async unlink(from: PageId, to: PageId, role: string, workspace?: WorkspaceId): Promise<Committed<void>> {
+    const args = workspace === undefined ? { from, to, role } : { from, to, role, workspace };
+    return this.structural("unlink", args) as Promise<Committed<void>>;
   }
 
   async moveItem(input: {

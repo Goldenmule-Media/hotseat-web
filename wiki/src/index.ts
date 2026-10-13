@@ -51,6 +51,7 @@ export type {
 
 // ── public runtime values from the type surface ──────────────────────────────
 export { ROOT } from "./api";
+export { crossWorkspaceHref, parseCrossWorkspaceHref } from "./render/cross-workspace-href";
 
 // ── public type surface (types only) ─────────────────────────────────────────
 export type {
@@ -75,6 +76,8 @@ export type {
   WorkspaceStatus,
   IPageNode,
   IWorkspaceState,
+  IWorkspaceLink,
+  IExternalLinkTarget,
   PageState,
   // content tree
   SectionId,

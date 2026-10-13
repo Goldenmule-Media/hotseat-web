@@ -124,7 +124,7 @@ export function affectedPageIds(
         // A link change ripples only to its endpoints (the `from` page's references section
         // embeds the target's title) — NOT to parents/backlinkers, so it is NOT structural.
         addPageId(touched, p["from"]);
-        addPageId(touched, p["to"]);
+        if (p["workspace"] === undefined) addPageId(touched, p["to"]);
         break;
       case "WorkspaceCreated":
       case "WorkspaceRenamed":
@@ -148,7 +148,7 @@ export function affectedPageIds(
       result.add(node.parentId as PageId);
     }
     // Any page linking TO this one shows its title in their references section.
-    for (const l of state.links) if (l.to === id) result.add(l.from);
+    for (const l of state.links) if (l.to === id && l.workspace === undefined) result.add(l.from);
   }
   return result;
 }

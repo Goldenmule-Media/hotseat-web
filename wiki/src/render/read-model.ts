@@ -25,6 +25,7 @@ import { ItemNotFoundError, PageNotFoundError, SectionNotFoundError } from "../c
 import { pageStateView } from "../core/workspace";
 import type { Registry } from "../core/registry";
 import { renderBlocks, type LabelResolver } from "./blocks";
+import { crossWorkspaceHref } from "./cross-workspace-href";
 import { bulletList, heading, joinBlocks, numbered, placeholder, section, statusBadge } from "./determinism";
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -39,8 +40,12 @@ export function buildRenderCtx(state: IWorkspaceState, _registry: Registry): IRe
     statusOf: (id) => nodeOf(id)?.status,
     archivedOf: (id) => nodeOf(id)?.archived === true,
     childrenOf: (id) => [...(state.children.get(id) ?? [])],
-    linksOf: (id) => state.links.filter((l) => l.from === id).map((l) => ({ to: l.to, role: l.role })),
-    backlinksOf: (id) => state.links.filter((l) => l.to === id).map((l) => ({ from: l.from, role: l.role })),
+    linksOf: (id) =>
+      state.links
+        .filter((l) => l.from === id)
+        .map((l) => (l.workspace === undefined ? { to: l.to, role: l.role } : { to: l.to, role: l.role, workspace: l.workspace, title: l.title })),
+    backlinksOf: (id) =>
+      state.links.filter((l) => l.to === id && l.workspace === undefined).map((l) => ({ from: l.from, role: l.role })),
     pageState: (id) => {
       const n = nodeOf(id);
       return n !== undefined ? (pageStateView(n) as DeepReadonly<PageState>) : undefined;
@@ -466,7 +471,13 @@ function renderReferences(id: PageId, ctx: IRenderCtx): string {
   if (links.length === 0) return placeholder();
   // The link target is a page → render it as a Markdown link (href = its stable page id;
   // label render-derived). Consistent with how page references render everywhere else.
-  return bulletList(links.map((l) => `${l.role} → [${ctx.titleOf(l.to) ?? l.to}](${l.to})`));
+  return bulletList(
+    links.map((l) =>
+      l.workspace === undefined
+        ? `${l.role} → [${ctx.titleOf(l.to) ?? l.to}](${l.to})`
+        : `${l.role} → [${l.title ?? l.to}](${crossWorkspaceHref(l.workspace, l.to)})`,
+    ),
+  );
 }
 
 function renderChildList(id: PageId, ctx: IRenderCtx): string {

@@ -11,6 +11,7 @@
  * the node. Pure & total: no host clock / RNG (time + ids ride in the envelopes).
  */
 import type {
+  IWorkspaceLink,
   IEventEnvelope,
   IPageNode,
   ISection,
@@ -103,6 +104,8 @@ interface LinkPayload {
   readonly from: PageId;
   readonly to: PageId;
   readonly role: string;
+  readonly workspace?: WorkspaceId;
+  readonly title?: string;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -211,6 +214,11 @@ function removeFromChildren(state: IWorkspaceState, key: PageId | RootId, id: Pa
   if (list === undefined) return;
   const idx = list.indexOf(id);
   if (idx !== -1) list.splice(idx, 1);
+}
+
+/** An edge's identity: endpoints, role, and the target's workspace (absent = local). */
+function sameEdge(l: IWorkspaceLink, p: LinkPayload): boolean {
+  return l.from === p.from && l.to === p.to && l.role === p.role && l.workspace === p.workspace;
 }
 
 function requireNode(state: IWorkspaceState, id: PageId): IPageNode {
@@ -393,20 +401,24 @@ function applyStructural(
 
     case "LinkAdded": {
       const p = event.payload as LinkPayload;
-      if (skipped.has(p.from) || skipped.has(p.to)) return state;
-      const exists = state.links.some(
-        (l) => l.from === p.from && l.to === p.to && l.role === p.role,
-      );
-      if (!exists) state.links.push({ from: p.from, to: p.to, role: p.role });
+      if (skipped.has(p.from) || (p.workspace === undefined && skipped.has(p.to))) return state;
+      const existing = state.links.find((l) => sameEdge(l, p));
+      if (existing === undefined) {
+        state.links.push(
+          p.workspace === undefined
+            ? { from: p.from, to: p.to, role: p.role }
+            : { from: p.from, to: p.to, role: p.role, workspace: p.workspace, title: p.title ?? p.to },
+        );
+      } else if (p.workspace !== undefined) {
+        existing.title = p.title ?? existing.title;
+      }
       return state;
     }
 
     case "LinkRemoved": {
       const p = event.payload as LinkPayload;
-      if (skipped.has(p.from) || skipped.has(p.to)) return state;
-      state.links = state.links.filter(
-        (l) => !(l.from === p.from && l.to === p.to && l.role === p.role),
-      );
+      if (skipped.has(p.from) || (p.workspace === undefined && skipped.has(p.to))) return state;
+      state.links = state.links.filter((l) => !sameEdge(l, p));
       return state;
     }
 

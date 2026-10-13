@@ -255,6 +255,27 @@ export interface IPageNode {
   updatedAt: string;
 }
 
+/**
+ * A graph edge `from -[role]-> to`. A cross-workspace edge names its target's `workspace`
+ * and carries a write-time `title` snapshot: the engine can't read another stream, so the
+ * label never resolves live and the render stays deterministic.
+ */
+export interface IWorkspaceLink {
+  from: PageId;
+  to: PageId;
+  role: string;
+  /** Absent = a page in this workspace. */
+  workspace?: WorkspaceId;
+  /** Present iff `workspace` is. */
+  title?: string;
+}
+
+/** The target of a cross-workspace {@link IWorkspaceHandle.link}. */
+export interface IExternalLinkTarget {
+  readonly workspace: WorkspaceId;
+  readonly title: string;
+}
+
 export interface IWorkspaceState {
   id: WorkspaceId;
   name: string;
@@ -264,7 +285,7 @@ export interface IWorkspaceState {
   /** ordered children → the tree (key is parent id or ROOT). */
   children: Map<PageId | RootId, PageId[]>;
   /** graph edges beyond the tree. */
-  links: { from: PageId; to: PageId; role: string }[];
+  links: IWorkspaceLink[];
   /**
    * Ids of pages the fold SKIPPED because their type is not in the registry (a retired
    * type — or one whose bundle has not loaded yet). Absent from `pages`, but "absent
@@ -490,8 +511,11 @@ export interface IWorkspaceHandle {
   setPageTitle(pageId: PageId, title: string): Promise<Committed<void>>;
   archivePage(pageId: PageId): Promise<Committed<void>>;
   unarchivePage(pageId: PageId): Promise<Committed<void>>;
-  link(from: PageId, to: PageId, role: string): Promise<Committed<void>>;
-  unlink(from: PageId, to: PageId, role: string): Promise<Committed<void>>;
+  /** Add a graph edge. Pass `target` to point at a page in ANOTHER workspace; its existence
+   *  isn't checked here (the host validates it), and `target.title` is the rendered label.
+   *  Re-linking an existing cross-workspace edge refreshes that label. */
+  link(from: PageId, to: PageId, role: string, target?: IExternalLinkTarget): Promise<Committed<void>>;
+  unlink(from: PageId, to: PageId, role: string, workspace?: WorkspaceId): Promise<Committed<void>>;
   /** Cross-page list-element move: remove from one page's `(section, field)` list and
    *  add to another's, in one atomic append. */
   moveItem(input: {
@@ -813,7 +837,14 @@ export interface IRenderCtx {
   /** Whether the page is archived (hidden from default views); orthogonal to `statusOf`. */
   archivedOf(id: PageId): boolean;
   childrenOf(id: PageId | RootId): readonly PageId[];
-  linksOf(id: PageId): readonly { readonly to: PageId; readonly role: string }[];
+  /** Outgoing edges; a cross-workspace one carries `workspace` + its `title` snapshot. */
+  linksOf(id: PageId): readonly {
+    readonly to: PageId;
+    readonly role: string;
+    readonly workspace?: WorkspaceId;
+    readonly title?: string;
+  }[];
+  /** Incoming edges from pages in this workspace. */
   backlinksOf(id: PageId): readonly { readonly from: PageId; readonly role: string }[];
   /**
    * Read another page's full folded state — the render-side twin of

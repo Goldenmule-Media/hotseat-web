@@ -43,7 +43,7 @@ export interface SerializedWorkspaceState {
   readonly version: number;
   readonly pages: IPageNode[];
   readonly children: [parent: PageOrRootKey, childIds: string[]][];
-  readonly links: { from: string; to: string; role: string }[];
+  readonly links: { from: string; to: string; role: string; workspace?: string; title?: string }[];
   /** Pages skipped as retired-type during the fold; optional — absent in older snapshots. */
   readonly retired?: string[];
 }

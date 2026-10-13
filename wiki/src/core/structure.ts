@@ -22,6 +22,7 @@ import {
   type PageId,
   type RootId,
   type SectionOp,
+  type WorkspaceId,
 } from "../api";
 import {
   CycleError,
@@ -438,29 +439,61 @@ export const unarchivePage: StructureHandler = (state, args) => {
 // link / unlink
 // ────────────────────────────────────────────────────────────────────────────
 
-/** Add a graph edge `from -[role]-> to`. Both endpoints must exist. */
+/**
+ * Add a graph edge `from -[role]-> to`. A local edge needs both endpoints here. A
+ * cross-workspace edge (`workspace` set) can only check `from`: the target lives in another
+ * stream, so the host validates it and supplies the `title` snapshot the render shows.
+ */
 export const link: StructureHandler = (state, args) => {
-  const { from, to, role } = args as { from: PageId; to: PageId; role: string };
+  const { from, to, role, workspace, title } = args as {
+    from: PageId;
+    to: PageId;
+    role: string;
+    workspace?: WorkspaceId;
+    title?: string;
+  };
 
   if (!state.pages.has(from)) throw new LinkTargetNotFoundError(from);
-  if (!state.pages.has(to)) throw new LinkTargetNotFoundError(to);
-
-  return {
-    events: [{ type: "LinkAdded", payload: { from, to, role } }],
-  };
+  if (workspace === undefined) {
+    if (!state.pages.has(to)) throw new LinkTargetNotFoundError(to);
+    return { events: [{ type: "LinkAdded", payload: { from, to, role } }] };
+  }
+  requireExternalWorkspace(state, workspace);
+  const label = typeof title === "string" ? title.trim() : "";
+  if (label.length === 0) {
+    throw new InvariantViolationError(`A cross-workspace link needs a non-empty title for "${to}".`);
+  }
+  return { events: [{ type: "LinkAdded", payload: { from, to, role, workspace, title: label } }] };
 };
 
-/** Remove a graph edge `from -[role]-> to`. Both endpoints must exist. */
+/** Remove a graph edge `from -[role]-> to` (in `workspace`, for a cross-workspace edge). */
 export const unlink: StructureHandler = (state, args) => {
-  const { from, to, role } = args as { from: PageId; to: PageId; role: string };
+  const { from, to, role, workspace } = args as {
+    from: PageId;
+    to: PageId;
+    role: string;
+    workspace?: WorkspaceId;
+  };
 
   if (!state.pages.has(from)) throw new LinkTargetNotFoundError(from);
-  if (!state.pages.has(to)) throw new LinkTargetNotFoundError(to);
-
-  return {
-    events: [{ type: "LinkRemoved", payload: { from, to, role } }],
-  };
+  if (workspace === undefined) {
+    if (!state.pages.has(to)) throw new LinkTargetNotFoundError(to);
+    return { events: [{ type: "LinkRemoved", payload: { from, to, role } }] };
+  }
+  requireExternalWorkspace(state, workspace);
+  return { events: [{ type: "LinkRemoved", payload: { from, to, role, workspace } }] };
 };
+
+function requireExternalWorkspace(state: IWorkspaceState, workspace: WorkspaceId): void {
+  if (typeof workspace !== "string" || workspace.length === 0) {
+    throw new InvariantViolationError("A cross-workspace link needs a target workspace id.");
+  }
+  if (workspace === state.id) {
+    throw new InvariantViolationError(
+      `"${workspace}" is this workspace; link to a page in it without a target workspace.`,
+    );
+  }
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // moveItem

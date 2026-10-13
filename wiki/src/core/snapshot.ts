@@ -30,7 +30,11 @@ export function serializeState(state: IWorkspaceState): SerializedWorkspaceState
     children.push([parent as string, [...(childIds as readonly string[])]]);
   }
 
-  const links = state.links.map((l) => ({ from: l.from as string, to: l.to as string, role: l.role }));
+  const links = state.links.map((l) =>
+    l.workspace === undefined
+      ? { from: l.from as string, to: l.to as string, role: l.role }
+      : { from: l.from as string, to: l.to as string, role: l.role, workspace: l.workspace as string, title: l.title },
+  );
 
   return {
     id: state.id,
@@ -58,7 +62,11 @@ export function deserializeState(ser: SerializedWorkspaceState): IWorkspaceState
     children.set(parent as PageId | RootId, [...childIds] as PageId[]);
   }
 
-  const links = ser.links.map((l) => ({ from: l.from as PageId, to: l.to as PageId, role: l.role }));
+  const links = ser.links.map((l) =>
+    l.workspace === undefined
+      ? { from: l.from as PageId, to: l.to as PageId, role: l.role }
+      : { from: l.from as PageId, to: l.to as PageId, role: l.role, workspace: l.workspace as WorkspaceId, title: l.title ?? l.to },
+  );
 
   return {
     id: ser.id,
