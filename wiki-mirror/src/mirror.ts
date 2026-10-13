@@ -2,7 +2,7 @@
  * The per-workspace tail loop — the slim, single-sink analog of wiki-mcp's `ProjectionService`,
  * built entirely on `wiki`'s PUBLIC surface (it imports no wiki-mcp internals). It opens a
  * workspace handle, subscribes to the live stream, and on each commit folds the history to
- * {@link IWorkspaceState}, renders every page to {@link SearchDoc}s, and hands them to the
+ * {@link IWorkspaceState}, renders every page in scope to {@link SearchDoc}s, and hands them to the
  * {@link MarkdownDiskProjector} as a whole-workspace rebuild.
  *
  * v1 re-folds the full history on every change (simplest + correct): the projector
@@ -10,18 +10,22 @@
  * rebuild is idempotent and a no-op when nothing changed. (Incremental `applyWorkspace` +
  * affected-only deltas are a later optimization if large workspaces show tail lag.)
  */
-import { foldWorkspace, renderSearchDocs } from "wiki";
-import type { IWorkspaceHandle, Unsubscribe, WorkspaceId } from "wiki";
+import { foldWorkspace, renderAffectedDocs } from "wiki";
+import type { IWorkspaceHandle, PageId, Unsubscribe, WorkspaceId } from "wiki";
 import { Registry } from "wiki/registry";
 
 import type { Logger } from "./logger.js";
-import type { MarkdownDiskProjector } from "./markdown-projection.js";
+import { pagesInScope, type MarkdownDiskProjector } from "./markdown-projection.js";
 
 /** A point-in-time health snapshot of one workspace's tail loop, surfaced over the health endpoint. */
 export interface MirrorWorkspaceStatus {
   readonly workspaceId: string;
-  /** Absolute on-disk mirror root. */
+  /** Absolute on-disk mirror root — the unique identity of an entry (one workspace may have several). */
   readonly root: string;
+  /** The page this entry mirrors with its descendants, or null for the whole workspace. */
+  readonly subtreeRootId: string | null;
+  /** That page's title as of the last reconcile; absent before one, or when unscoped. */
+  readonly subtreeTitle?: string;
   /** The version this mirror has written to disk (0 if never applied). */
   readonly appliedVersion: number;
   /** Epoch ms of the last successful reconcile, or null if none has completed. */
@@ -50,6 +54,7 @@ export class WorkspaceMirror {
   private lastReconcileAt: number | null = null;
   private lastReconcileError: string | null = null;
   private connected = false;
+  private subtreeTitle: string | undefined;
 
   constructor(
     private readonly handle: IWorkspaceHandle,
@@ -79,6 +84,8 @@ export class WorkspaceMirror {
     return {
       workspaceId: this.workspaceId,
       root: this.sink.root,
+      subtreeRootId: this.sink.subtreeRootId ?? null,
+      ...(this.subtreeTitle !== undefined ? { subtreeTitle: this.subtreeTitle } : {}),
       appliedVersion: await this.sink.appliedVersion(this.workspaceId),
       lastReconcileAt: this.lastReconcileAt,
       lastReconcileError: this.lastReconcileError,
@@ -133,7 +140,12 @@ export class WorkspaceMirror {
     const head = events[events.length - 1].version + 1;
     if ((await this.sink.appliedVersion(this.workspaceId)) >= head) return; // already current
     const state = foldWorkspace(events, this.registry);
-    const docs = renderSearchDocs(state, this.registry, {
+    const scope = this.sink.subtreeRootId;
+    if (scope !== undefined) {
+      const root = state.pages.get(scope as PageId);
+      if (root !== undefined) this.subtreeTitle = root.title;
+    }
+    const docs = renderAffectedDocs(state, pagesInScope(state, scope), this.registry, {
       onRenderError: (pageId, err) =>
         this.logger.warn("render: page failed to render (mirrored with empty body)", {
           workspace: this.workspaceId,

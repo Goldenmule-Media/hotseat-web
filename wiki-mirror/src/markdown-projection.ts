@@ -5,8 +5,12 @@
  * and mirrors a workspace's deterministic Markdown to a directory. In `wiki-mirror` it is no
  * longer a `RenderSink` registered on a shared projection tail — the {@link WorkspaceMirror}
  * tail loop owns it and calls {@link init}/{@link rebuild}/{@link applyDelta}/{@link fail}
- * directly — but its on-disk behavior (and manifest format) is byte-for-byte the old one, so an
- * existing mirror self-heals and continues rather than rebuilding from scratch.
+ * directly.
+ *
+ * Layout: the root IS the mirror. A whole-workspace mirror puts its top-level pages directly
+ * under `root`; a subtree mirror ({@link IMarkdownProjectionConfig.subtreeRootId}) writes that
+ * page to `root/index.md` with its descendants beneath it. `.archived/` and `.assets/` sit at
+ * `root` either way. A manifest written under another layout or scope rebuilds on first sight.
  *
  * Design:
  *  - **One render per commit.** The tail renders a commit's pages once and hands the resulting
@@ -42,12 +46,17 @@ import type { Logger } from "./logger.js";
 export interface IMarkdownProjectionConfig {
   /** Master switch — the projector is built only when this is true. @default false */
   readonly enabled: boolean;
-  /** Output directory; the projector writes ONLY under here (per-workspace subdirectories). */
+  /** Output directory; the projector writes ONLY under here, and the tree starts right at it. */
   readonly root: string;
   /** Allowlist of workspace ids to mirror, or `"all"` for every workspace in the namespace. */
   readonly workspaces: "all" | readonly string[];
   /** Tree layout: nested folders mirroring the page tree. `"flat"` is reserved for later. */
   readonly layout: "tree";
+  /**
+   * Mirror only this page and its descendants: the page renders to `<root>/index.md` and its
+   * descendants nest beneath it. Absent = the whole workspace, top-level pages at `<root>/`.
+   */
+  readonly subtreeRootId?: string;
 }
 
 /** One workspace's persisted state: applied version + every file written (path → hash, page → path). */
@@ -65,7 +74,14 @@ interface WorkspaceManifest {
    * simply means "none tracked yet" — the next rebuild populates it.
    */
   assets?: Record<string, string[]>;
+  /** {@link LAYOUT_VERSION} the files were written under; absent = the old workspace-slug layout. */
+  layout?: number;
+  /** The subtree root the files were written for, or null for the whole workspace. */
+  scope?: string | null;
 }
+
+/** Bumped when the path rule changes, so an old manifest rebuilds and sweeps its files. */
+const LAYOUT_VERSION = 2;
 
 /** The persisted manifest for the whole `root`: workspace id → its {@link WorkspaceManifest}. */
 type Manifest = Record<string, WorkspaceManifest>;
@@ -172,7 +188,7 @@ function withRootLock<T>(root: string, fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
-/** The directory archived pages' files live under, inside the workspace directory. */
+/** The directory archived pages' files live under, at the mirror root. */
 const ARCHIVED_DIR = ".archived";
 
 /** Where a workspace's attachment bytes land, beside `.archived` in the same tree. */
@@ -205,19 +221,21 @@ export function archivedFileName(pageId: string): string {
 }
 
 /**
- * The workspace-relative posix path for a page's Markdown. A live page maps onto the tree: a
+ * The root-relative posix path for a page's Markdown. A live page maps onto the tree: a
  * folder per ancestor slug, then the page's own slug as `index.md` if it has children else
- * `<slug>.md`. An effectively-archived page (itself, an ancestor, or the whole workspace
+ * `<slug>.md`. With a `subtreeRootId` the walk stops at that page, which itself is always
+ * `index.md`. An effectively-archived page (itself, an ancestor, or the whole workspace
  * archived) maps to a FLAT, stable, id-keyed `.archived/<id>.md` instead — so archiving moves
  * the file there rather than deleting it, and the path survives any later tree churn.
  */
-export function pageRelPath(pageId: PageId, state: IWorkspaceState): string {
+export function pageRelPath(pageId: PageId, state: IWorkspaceState, subtreeRootId?: string): string {
   if (effectivelyArchived(pageId, state)) return posix.join(ARCHIVED_DIR, archivedFileName(pageId));
+  if (pageId === subtreeRootId) return "index.md";
 
   const slugs: string[] = [];
   let cur: PageId | null = pageId;
   const seen = new Set<string>();
-  while (cur !== null && !seen.has(cur)) {
+  while (cur !== null && cur !== subtreeRootId && !seen.has(cur)) {
     seen.add(cur);
     if (state.pages.get(cur) === undefined) break;
     slugs.unshift(siblingSlug(cur, state));
@@ -227,10 +245,34 @@ export function pageRelPath(pageId: PageId, state: IWorkspaceState): string {
   return hasChildren(pageId, state) ? `${rel}/index.md` : `${rel}.md`;
 }
 
-/** The per-workspace subdirectory under `root` (workspace name slug, id-disambiguated if empty). */
-function workspaceDir(state: IWorkspaceState): string {
-  const base = slugify(state.name);
-  return base === "untitled" ? shortId(state.id) : base;
+/**
+ * Whether `pageId` is `subtreeRootId` or one of its descendants: true/false when the parent
+ * chain is whole, undefined when it breaks on a page the fold skipped (membership unknown).
+ */
+export function inSubtree(pageId: PageId, state: IWorkspaceState, subtreeRootId: string): boolean | undefined {
+  let cur: PageId | null = pageId;
+  const seen = new Set<string>();
+  while (cur !== null && !seen.has(cur)) {
+    if (cur === subtreeRootId) return true;
+    seen.add(cur);
+    const node = state.pages.get(cur);
+    if (node === undefined) return undefined;
+    cur = node.parentId as PageId | null;
+  }
+  return false;
+}
+
+/** The pages a mirror scoped to `subtreeRootId` writes (every page when unscoped). */
+export function pagesInScope(state: IWorkspaceState, subtreeRootId?: string): PageId[] {
+  const ids = [...state.pages.keys()];
+  return subtreeRootId === undefined ? ids : ids.filter((id) => inSubtree(id, state, subtreeRootId) === true);
+}
+
+/** Everything a manifest records except its version, for "did this rebuild change anything?". */
+function manifestFingerprint(m: WorkspaceManifest): string {
+  const sorted = <T>(r: Record<string, T> | undefined): [string, T][] =>
+    Object.entries(r ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return JSON.stringify([sorted(m.files), sorted(m.pages), sorted(m.assets), m.layout ?? null, m.scope ?? null]);
 }
 
 /**
@@ -261,6 +303,15 @@ export class MarkdownDiskProjector {
     return this.cfg.root;
   }
 
+  /** The page this mirror is scoped to, or undefined for the whole workspace. */
+  get subtreeRootId(): string | undefined {
+    return this.cfg.subtreeRootId;
+  }
+
+  private get scope(): string | null {
+    return this.cfg.subtreeRootId ?? null;
+  }
+
   /**
    * Load the persisted manifest (best-effort: a missing/corrupt manifest starts empty →
    * full rebuild), then VERIFY it against disk: a manifest entry whose file is missing —
@@ -284,6 +335,16 @@ export class MarkdownDiskProjector {
       return;
     }
     for (const [workspace, m] of Object.entries(this.manifest)) {
+      // A manifest from another layout or scope must not take the "already current" shortcut:
+      // the rebuild is what sweeps its old files and writes the new tree.
+      if (m.layout !== LAYOUT_VERSION || (m.scope ?? null) !== this.scope) {
+        m.version = 0;
+        this.logger.info("markdown-disk layout or scope changed; rebuilding", {
+          workspace,
+          from: m.scope ?? null,
+          to: this.scope,
+        });
+      }
       let stale = 0;
       for (const [rel, hash] of Object.entries(m.files)) {
         let ok = false;
@@ -347,7 +408,7 @@ export class MarkdownDiskProjector {
     state: IWorkspaceState,
   ): Promise<void> {
     const m = this.wsManifest(workspace);
-    const wsDir = workspaceDir(state);
+    const scope = this.cfg.subtreeRootId;
     let written = 0;
     const removedPaths: string[] = [];
 
@@ -362,14 +423,15 @@ export class MarkdownDiskProjector {
       }
     }
     for (const doc of docs) {
-      const rel = posix.join(wsDir, pageRelPath(doc.pageId as PageId, state));
+      if (scope !== undefined && inSubtree(doc.pageId as PageId, state, scope) !== true) continue;
+      const rel = pageRelPath(doc.pageId as PageId, state, scope);
       if (await this.writeIfChanged(rel, doc.body, m)) written++;
       m.pages[doc.pageId] = rel;
     }
 
     await this.removeFiles(removedPaths);
     m.version = version;
-    await this.persist();
+    if (written > 0 || removedPaths.length > 0) await this.persist();
     this.logger.info("markdown-disk applied", {
       workspace,
       version,
@@ -409,7 +471,16 @@ export class MarkdownDiskProjector {
     state: IWorkspaceState,
   ): Promise<void> {
     const m = this.wsManifest(workspace);
-    const wsDir = workspaceDir(state);
+    const scope = this.cfg.subtreeRootId;
+    // A vanished subtree root must never read as "everything below it was deleted": refuse,
+    // and leave the tree and manifest exactly as they are until the root comes back.
+    if (scope !== undefined && !state.pages.has(scope as PageId)) {
+      if (state.retired?.has(scope as PageId) === true) {
+        throw new Error(`subtree root ${scope} has a page type this mirror hasn't loaded`);
+      }
+      throw new Error(`subtree root ${scope} not found in workspace ${workspace}`);
+    }
+    const before = manifestFingerprint(m);
     const bodyByPage = new Map<string, string>(docs.map((d) => [d.pageId, d.body]));
 
     // Expected: every reliably-pathed page maps to a path — live pages onto the tree,
@@ -424,13 +495,18 @@ export class MarkdownDiskProjector {
         frozen.push(node.id);
         continue;
       }
-      const pageRel = pageRelPath(node.id as PageId, state);
-      expected.set(posix.join(wsDir, pageRel), { pageId: node.id, body: bodyByPage.get(node.id) ?? "" });
+      if (scope !== undefined) {
+        const member = inSubtree(node.id as PageId, state, scope);
+        if (member === undefined) frozen.push(node.id);
+        if (member !== true) continue;
+      }
+      const pageRel = pageRelPath(node.id as PageId, state, scope);
+      expected.set(pageRel, { pageId: node.id, body: bodyByPage.get(node.id) ?? "" });
     }
 
     // Attachments: download what the bodies reference and rewrite the refs to relative
     // paths. This MUTATES the bodies in `expected`, so it must run before they are written.
-    const { assetsByPage, written: assetsWritten } = await this.materializeAssets(workspace, wsDir, expected, m);
+    const { assetsByPage, written: assetsWritten } = await this.materializeAssets(workspace, expected, m);
 
     let written = 0;
     const nextPages: Record<string, string> = {};
@@ -480,8 +556,12 @@ export class MarkdownDiskProjector {
     m.files = nextFiles;
     m.pages = nextPages;
     m.assets = nextAssets;
+    m.layout = LAYOUT_VERSION;
+    m.scope = this.scope;
     m.version = version;
-    await this.persist();
+    // The version alone changing is not worth a write: the manifest is committed beside the
+    // mirror, and a scoped mirror would otherwise churn on every commit outside its subtree.
+    if (manifestFingerprint(m) !== before) await this.persist();
     this.logger.info("markdown-disk reconciled", {
       workspace,
       version,
@@ -551,7 +631,6 @@ export class MarkdownDiskProjector {
    */
   private async materializeAssets(
     workspace: WorkspaceId,
-    wsDir: string,
     expected: Map<string, { pageId: string; body: string }>,
     m: WorkspaceManifest,
   ): Promise<{ assetsByPage: Record<string, string[]>; written: number }> {
@@ -561,7 +640,7 @@ export class MarkdownDiskProjector {
     // Any asset already tracked for this workspace, indexed by its content hash, so a
     // second rebuild resolves refs without touching the network.
     const knownBySha = new Map<string, string>();
-    const assetPrefix = `${posix.join(wsDir, ASSETS_DIR)}/`;
+    const assetPrefix = `${ASSETS_DIR}/`;
     for (const rel of Object.keys(m.files)) {
       if (!rel.startsWith(assetPrefix)) continue;
       const sha = posix.basename(rel).split(".")[0]!;
@@ -570,10 +649,10 @@ export class MarkdownDiskProjector {
 
     let written = 0;
     const failed = new Set<string>();
-    for (const [pageAbsRel, entry] of expected) {
+    for (const [pageRel, entry] of expected) {
       const refs = attachmentRefsIn(entry.body);
       if (refs.length === 0) continue;
-      const pageDir = posix.dirname(posix.relative(wsDir, pageAbsRel));
+      const pageDir = posix.dirname(pageRel);
       const mine: string[] = [];
       let body = entry.body;
       for (const sha of refs) {
@@ -595,19 +674,19 @@ export class MarkdownDiskProjector {
             failed.add(sha);
             continue;
           }
-          rel = posix.join(wsDir, ASSETS_DIR, `${sha}${extForMime(found.meta.mime)}`);
+          rel = posix.join(ASSETS_DIR, `${sha}${extForMime(found.meta.mime)}`);
           if (await this.writeBytesIfChanged(rel, found.bytes, m)) written++;
           knownBySha.set(sha, rel);
         }
         mine.push(rel);
         // Relative to the page's OWN directory, so a folder page (index.md) and a leaf
         // page (<slug>.md) both resolve.
-        const href = posix.relative(pageDir, posix.relative(wsDir, rel));
+        const href = posix.relative(pageDir, rel);
         body = body.split(`attachment:${sha}`).join(href);
       }
       if (mine.length > 0) {
         assetsByPage[entry.pageId] = mine;
-        expected.set(pageAbsRel, { pageId: entry.pageId, body });
+        expected.set(pageRel, { pageId: entry.pageId, body });
       }
     }
     return { assetsByPage, written };

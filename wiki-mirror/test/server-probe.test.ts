@@ -14,6 +14,7 @@ function statusOf(overrides: Partial<MirrorWorkspaceStatus> = {}): MirrorWorkspa
   return {
     workspaceId: WS,
     root: "/tmp/root",
+    subtreeRootId: null,
     appliedVersion: 3,
     lastReconcileAt: null,
     lastReconcileError: null,

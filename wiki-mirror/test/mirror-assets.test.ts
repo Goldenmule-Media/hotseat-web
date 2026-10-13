@@ -104,11 +104,11 @@ describe("wiki-mirror — attachments as on-disk assets", () => {
     await new Promise<void>((r) => blobServer.close(() => r()));
   });
 
-  async function makeMirror(root: string): Promise<WorkspaceMirror> {
+  async function makeMirror(root: string, subtreeRootId?: string): Promise<WorkspaceMirror> {
     const mirrorWiki = wikiOn(server.url, PAGE_TYPES, { namespace: "test" });
     const handle = await mirrorWiki.openWorkspace(writer.id);
     const sink = new MarkdownDiskProjector(
-      { enabled: true, root, workspaces: [writer.id], layout: "tree" },
+      { enabled: true, root, workspaces: [writer.id], layout: "tree", ...(subtreeRootId !== undefined ? { subtreeRootId } : {}) },
       silentLogger,
       new AttachmentClient({ baseUrl: blobBase, namespace: "test" }),
     );
@@ -156,11 +156,11 @@ describe("wiki-mirror — attachments as on-disk assets", () => {
     await m.start();
 
     // The bytes land content-addressed, with an extension derived from the served mime.
-    expect(await exists(root, `docs/.assets/${SHA}.png`)).toBe(true);
-    expect((await readFile(join(root, `docs/.assets/${SHA}.png`))).equals(PNG)).toBe(true);
+    expect(await exists(root, `.assets/${SHA}.png`)).toBe(true);
+    expect((await readFile(join(root, `.assets/${SHA}.png`))).equals(PNG)).toBe(true);
 
-    // A top-level page sits at docs/<slug>.md, so the ref resolves as `.assets/<sha>.png`.
-    const md = await readFile(join(root, "docs/with-image.md"), "utf8");
+    // A top-level page sits at <slug>.md, so the ref resolves as `.assets/<sha>.png`.
+    const md = await readFile(join(root, "with-image.md"), "utf8");
     expect(md).toContain(`![A screenshot](.assets/${SHA}.png)`);
     expect(md).not.toContain("attachment:");
   });
@@ -176,8 +176,27 @@ describe("wiki-mirror — attachments as on-disk assets", () => {
 
     // A page with children becomes a folder + index.md, so the child sits one level down
     // and must climb back out to reach the shared assets directory.
-    const md = await readFile(join(root, "docs/parent/child.md"), "utf8");
+    const md = await readFile(join(root, "parent/child.md"), "utf8");
     expect(md).toContain(`![Deep](../.assets/${SHA}.png)`);
+  });
+
+  it("a subtree mirror fetches only what its own pages reference, relative to its root", async () => {
+    const root = await freshRoot();
+    const game = (await writer.createPage("note", { title: "Game", parentId: null })).value;
+    const art = (await writer.createPage("note", { title: "Art", parentId: game })).value;
+    const sprite = (await writer.createPage("note", { title: "Sprite", parentId: art })).value;
+    const other = (await writer.createPage("note", { title: "Other", parentId: null })).value;
+    await writer.mutate(game, "setBody", { markdown: `![Cover](attachment:${SHA})` });
+    await writer.mutate(sprite, "setBody", { markdown: `![Sprite](attachment:${SHA})` });
+    await writer.mutate(other, "setBody", { markdown: `[Elsewhere](attachment:${PDF_SHA})` });
+
+    const m = await makeMirror(root, game);
+    await m.start();
+
+    expect(await readFile(join(root, "index.md"), "utf8")).toContain(`![Cover](.assets/${SHA}.png)`);
+    expect(await readFile(join(root, "art/sprite.md"), "utf8")).toContain(`![Sprite](../.assets/${SHA}.png)`);
+    expect(await exists(root, `.assets/${PDF_SHA}.pdf`)).toBe(false);
+    expect(downloads).toBe(1);
   });
 
   it("handles a non-image attachment the same way", async () => {
@@ -188,8 +207,8 @@ describe("wiki-mirror — attachments as on-disk assets", () => {
     const m = await makeMirror(root);
     await m.start();
 
-    expect(await exists(root, `docs/.assets/${PDF_SHA}.pdf`)).toBe(true);
-    const md = await readFile(join(root, "docs/with-pdf.md"), "utf8");
+    expect(await exists(root, `.assets/${PDF_SHA}.pdf`)).toBe(true);
+    const md = await readFile(join(root, "with-pdf.md"), "utf8");
     // The rewrite is a substitution of the ref string, so a link and an image both work.
     expect(md).toContain(`[Q3 report](.assets/${PDF_SHA}.pdf)`);
   });
@@ -207,9 +226,9 @@ describe("wiki-mirror — attachments as on-disk assets", () => {
     // Another commit re-renders every page; content-addressed bytes never change, so the
     // asset must be recognised rather than fetched again.
     await writer.mutate(page, "setBody", { markdown: `![Shot](attachment:${SHA})\n\nAnd a caption.` });
-    await syncUntil(m, async () => (await readFile(join(root, "docs/stable.md"), "utf8")).includes("And a caption."));
+    await syncUntil(m, async () => (await readFile(join(root, "stable.md"), "utf8")).includes("And a caption."));
     expect(downloads).toBe(first);
-    expect(await exists(root, `docs/.assets/${SHA}.png`)).toBe(true);
+    expect(await exists(root, `.assets/${SHA}.png`)).toBe(true);
   });
 
   it("collects an asset once nothing references it", async () => {
@@ -219,13 +238,13 @@ describe("wiki-mirror — attachments as on-disk assets", () => {
 
     const m = await makeMirror(root);
     await m.start();
-    expect(await exists(root, `docs/.assets/${SHA}.png`)).toBe(true);
+    expect(await exists(root, `.assets/${SHA}.png`)).toBe(true);
 
     await writer.mutate(page, "setBody", { markdown: "No image any more." });
-    await syncUntil(m, async () => !(await exists(root, `docs/.assets/${SHA}.png`)));
-    expect(await exists(root, `docs/.assets/${SHA}.png`)).toBe(false);
+    await syncUntil(m, async () => !(await exists(root, `.assets/${SHA}.png`)));
+    expect(await exists(root, `.assets/${SHA}.png`)).toBe(false);
     // The emptied directory prunes itself rather than lingering.
-    expect(await exists(root, "docs/.assets")).toBe(false);
+    expect(await exists(root, ".assets")).toBe(false);
   });
 
   it("leaves the ref verbatim when the attachment cannot be fetched", async () => {
@@ -238,7 +257,7 @@ describe("wiki-mirror — attachments as on-disk assets", () => {
     await m.start();
 
     // One unreachable attachment must not stall the mirror or lose the page.
-    const md = await readFile(join(root, "docs/broken.md"), "utf8");
+    const md = await readFile(join(root, "broken.md"), "utf8");
     expect(md).toContain(`![Gone](attachment:${missing})`);
   });
 
@@ -257,6 +276,6 @@ describe("wiki-mirror — attachments as on-disk assets", () => {
     const second = await makeMirror(root);
     await second.start();
     expect(downloads).toBe(after);
-    expect(await exists(root, `docs/.assets/${SHA}.png`)).toBe(true);
+    expect(await exists(root, `.assets/${SHA}.png`)).toBe(true);
   });
 });

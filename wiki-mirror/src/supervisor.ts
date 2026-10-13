@@ -93,6 +93,7 @@ export class EmitterSupervisor implements IWorkspaceStatusSource {
     return {
       workspaceId: this.workspaceId,
       root: this.deps.sink.root,
+      subtreeRootId: this.deps.sink.subtreeRootId ?? null,
       // The manifest still knows what was last written here, so a disconnected emitter can
       // still report how far behind it is rather than pretending it mirrors nothing.
       appliedVersion: await this.appliedVersion(),

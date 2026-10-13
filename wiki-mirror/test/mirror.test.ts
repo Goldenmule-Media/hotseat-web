@@ -139,12 +139,12 @@ describe("wiki-mirror — tail a workspace stream to a local Markdown mirror", (
     const mirror = await makeMirror(root);
     await mirror.start(); // boot back-fill is synchronous
 
-    expect(await exists(root, "docs/guide/index.md")).toBe(true);
-    expect(await exists(root, "docs/guide/intro.md")).toBe(true);
-    expect(await exists(root, "docs/top.md")).toBe(true);
-    expect(await read(root, "docs/guide/index.md")).toBe(await writer.toMarkdown(parent));
-    expect(await read(root, "docs/guide/intro.md")).toBe(await writer.toMarkdown(child));
-    expect(await read(root, "docs/top.md")).toBe(await writer.toMarkdown(leaf));
+    expect(await exists(root, "guide/index.md")).toBe(true);
+    expect(await exists(root, "guide/intro.md")).toBe(true);
+    expect(await exists(root, "top.md")).toBe(true);
+    expect(await read(root, "guide/index.md")).toBe(await writer.toMarkdown(parent));
+    expect(await read(root, "guide/intro.md")).toBe(await writer.toMarkdown(child));
+    expect(await read(root, "top.md")).toBe(await writer.toMarkdown(leaf));
   });
 
   it("mirrors a new commit live — driven only by the stream subscription", async () => {
@@ -155,8 +155,8 @@ describe("wiki-mirror — tail a workspace stream to a local Markdown mirror", (
     const { value: page } = await writer.createPage("note", { title: "Live", parentId: null });
     await writer.mutate(page, "setBody", { text: "streamed in" });
 
-    await waitFor(async () => (await exists(root, "docs/live.md")) && (await read(root, "docs/live.md")).includes("streamed in"));
-    expect(await read(root, "docs/live.md")).toBe(await writer.toMarkdown(page));
+    await waitFor(async () => (await exists(root, "live.md")) && (await read(root, "live.md")).includes("streamed in"));
+    expect(await read(root, "live.md")).toBe(await writer.toMarkdown(page));
   });
 
   it("moves a renamed sibling and leaves unchanged files untouched (no churn)", async () => {
@@ -166,16 +166,16 @@ describe("wiki-mirror — tail a workspace stream to a local Markdown mirror", (
     const root = await freshRoot();
     const mirror = await makeMirror(root);
     await mirror.start();
-    expect(await exists(root, "docs/guide/alpha.md")).toBe(true);
-    const alphaMtime = (await stat(join(root, "docs/guide/alpha.md"))).mtimeMs;
+    expect(await exists(root, "guide/alpha.md")).toBe(true);
+    const alphaMtime = (await stat(join(root, "guide/alpha.md"))).mtimeMs;
 
     await sleep(15);
     await writer.setPageTitle(b, "Bravo"); // structural → whole rebuild
-    await syncUntil(mirror, () => exists(root, "docs/guide/bravo.md"));
+    await syncUntil(mirror, () => exists(root, "guide/bravo.md"));
 
-    expect(await exists(root, "docs/guide/beta.md")).toBe(false);
-    expect(await read(root, "docs/guide/bravo.md")).toBe(await writer.toMarkdown(b));
-    expect((await stat(join(root, "docs/guide/alpha.md"))).mtimeMs).toBe(alphaMtime); // unchanged → not rewritten
+    expect(await exists(root, "guide/beta.md")).toBe(false);
+    expect(await read(root, "guide/bravo.md")).toBe(await writer.toMarkdown(b));
+    expect((await stat(join(root, "guide/alpha.md"))).mtimeMs).toBe(alphaMtime); // unchanged → not rewritten
   });
 
   it("reflects a reparent — moves the subtree and reshapes the old parent", async () => {
@@ -185,15 +185,15 @@ describe("wiki-mirror — tail a workspace stream to a local Markdown mirror", (
     const root = await freshRoot();
     const mirror = await makeMirror(root);
     await mirror.start();
-    expect(await exists(root, "docs/guide/intro.md")).toBe(true);
+    expect(await exists(root, "guide/intro.md")).toBe(true);
 
     await writer.reparent(intro, manual);
-    await syncUntil(mirror, () => exists(root, "docs/manual/intro.md"));
+    await syncUntil(mirror, () => exists(root, "manual/intro.md"));
 
-    expect(await exists(root, "docs/guide/intro.md")).toBe(false);
-    expect(await read(root, "docs/manual/intro.md")).toBe(await writer.toMarkdown(intro));
-    expect(await exists(root, "docs/guide/index.md")).toBe(false); // childless → flips back to a leaf
-    expect(await exists(root, "docs/guide.md")).toBe(true);
+    expect(await exists(root, "guide/intro.md")).toBe(false);
+    expect(await read(root, "manual/intro.md")).toBe(await writer.toMarkdown(intro));
+    expect(await exists(root, "guide/index.md")).toBe(false); // childless → flips back to a leaf
+    expect(await exists(root, "guide.md")).toBe(true);
   });
 
   it("archiving moves a file under .archived/ (never deletes); unarchiving moves it back", async () => {
@@ -202,16 +202,16 @@ describe("wiki-mirror — tail a workspace stream to a local Markdown mirror", (
     const root = await freshRoot();
     const mirror = await makeMirror(root);
     await mirror.start();
-    expect(await exists(root, "docs/temp.md")).toBe(true);
+    expect(await exists(root, "temp.md")).toBe(true);
 
-    const archivedRel = `docs/.archived/${archivedFileName(temp)}`;
+    const archivedRel = `.archived/${archivedFileName(temp)}`;
     await writer.archivePage(temp);
     await syncUntil(mirror, () => exists(root, archivedRel));
-    expect(await exists(root, "docs/temp.md")).toBe(false);
+    expect(await exists(root, "temp.md")).toBe(false);
     expect(await read(root, archivedRel)).toContain("keep me");
 
     await writer.unarchivePage(temp);
-    await syncUntil(mirror, () => exists(root, "docs/temp.md"));
+    await syncUntil(mirror, () => exists(root, "temp.md"));
     expect(await exists(root, archivedRel)).toBe(false);
   });
 
@@ -221,15 +221,15 @@ describe("wiki-mirror — tail a workspace stream to a local Markdown mirror", (
     const root = await freshRoot();
     const m1 = await makeMirror(root);
     await m1.start();
-    const expected = await read(root, "docs/guide.md");
+    const expected = await read(root, "guide.md");
     await m1.stop();
 
     await rm(root, { recursive: true, force: true }); // wipe manifest + files
 
     const m2 = await makeMirror(root);
     await m2.start(); // init → empty manifest → back-fill rebuilds from head
-    expect(await exists(root, "docs/guide.md")).toBe(true);
-    expect(await read(root, "docs/guide.md")).toBe(expected);
+    expect(await exists(root, "guide.md")).toBe(true);
+    expect(await read(root, "guide.md")).toBe(expected);
   });
 
   it("mirrors multiple workspaces from one process, each to its own root", async () => {
@@ -243,8 +243,8 @@ describe("wiki-mirror — tail a workspace stream to a local Markdown mirror", (
     await m1.start();
     await m2.start();
 
-    expect(await exists(rootA, "docs/one.md")).toBe(true);
-    expect(await exists(rootB, "other/two.md")).toBe(true);
+    expect(await exists(rootA, "one.md")).toBe(true);
+    expect(await exists(rootB, "two.md")).toBe(true);
   });
 
   it("startMirror skips a workspace whose boot fails instead of aborting the whole process", async () => {
@@ -258,7 +258,7 @@ describe("wiki-mirror — tail a workspace stream to a local Markdown mirror", (
       silentLogger,
     );
     expect(running.mirrors.length).toBe(0); // the failing workspace was skipped, not fatal
-    expect(await exists(root, "docs/x.md")).toBe(false);
+    expect(await exists(root, "x.md")).toBe(false);
     await running.close(); // tears down cleanly despite the skipped workspace
   });
 
