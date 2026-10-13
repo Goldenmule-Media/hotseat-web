@@ -179,10 +179,29 @@ describe("cross-workspace links over MCP", () => {
     expect(md).toContain(`- sees → [Local](${local})`);
   });
 
+  it("backlinks lists inbound edges from every workspace the caller can access", async () => {
+    const res = await call(alice, "backlinks", { workspaceId: there, pageId: target });
+    expect(dataOf(res)).toEqual([{ workspace_id: here, from_id: source, role: "uses", from_title: "Source" }]);
+    expect(textOf(res)).toContain(`Source (${source}) in ${here} —uses→`);
+  });
+
+  it("backlinks hides a source workspace the caller can't access", async () => {
+    const shared = await createWs(alice, "Shared");
+    const sharedPage = await createNote(alice, shared, "Shared page");
+    await call(alice, "link", { workspaceId: here, from: source, to: sharedPage, role: "cites", toWorkspaceId: shared });
+    expect(dataOf(await call(alice, "backlinks", { workspaceId: shared, pageId: sharedPage }))).toHaveLength(1);
+    owners.set(here, "carol");
+    try {
+      expect(dataOf(await call(alice, "backlinks", { workspaceId: shared, pageId: sharedPage }))).toEqual([]);
+    } finally {
+      owners.set(here, "alice");
+    }
+  });
+
   it("unlinks a cross-workspace edge", async () => {
     const res = await call(alice, "unlink", { workspaceId: here, from: source, to: target, role: "uses", toWorkspaceId: there });
     expect(res.isError ?? false).toBe(false);
     const md = textOf(await call(alice, "renderPage", { workspaceId: here, pageId: source }));
-    expect(md).not.toContain("wiki://");
+    expect(md).not.toContain(`wiki://${there}/`);
   });
 });

@@ -1267,6 +1267,28 @@ const symbolsTool: WikiTool = {
   },
 };
 
+const backlinksTool: WikiTool = {
+  name: "backlinks",
+  description:
+    "Pages that link TO a page, from its own workspace and from other workspaces you can access. " +
+    "Token-gated for read-your-writes.",
+  inputSchema: obj({ workspaceId: STR, pageId: str("The page being linked to.") }, ["workspaceId", "pageId"]),
+  write: false,
+  async handle(args, ctx) {
+    const ws = asWorkspaceId(reqStr(args, "workspaceId"));
+    const pageId = reqStr(args, "pageId");
+    await awaitAllConsistency(ctx);
+    const rows = (await ctx.readModel.inboundLinks(ws, pageId)).filter(
+      (r) => r.workspace_id === ws || ctx.access === undefined || ctx.access.canAccess(r.workspace_id),
+    );
+    const lines = rows.map((r) => {
+      const where = r.workspace_id === ws ? "" : ` in ${r.workspace_id}`;
+      return `- ${r.from_title ?? r.from_id} (${r.from_id})${where} —${r.role}→`;
+    });
+    return { text: rows.length === 0 ? `Nothing links to ${pageId}.` : lines.join("\n"), data: rows };
+  },
+};
+
 const referencesTool: WikiTool = {
   name: "references",
   description:
@@ -1540,6 +1562,7 @@ export function wikiTools(): readonly WikiTool[] {
     unarchivePageTool,
     linkTool,
     unlinkTool,
+    backlinksTool,
     mutatePageTool,
     mutatePageBatchTool,
     // semantic operations (write, Phase 3)

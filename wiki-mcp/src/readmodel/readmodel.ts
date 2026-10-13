@@ -42,6 +42,12 @@ export type WorkspaceRow = Selectable<WorkspacesTable>;
 export type PageRow = Selectable<PagesTable>;
 export type TreeEdgeRow = Selectable<TreeEdgesTable>;
 export type LinkRow = Selectable<LinksTable>;
+export interface InboundLinkRow {
+  workspace_id: string;
+  from_id: string;
+  role: string;
+  from_title: string | null;
+}
 export type EventRow = Selectable<EventsTable>;
 export type OutlineRow = Selectable<OutlineTable>;
 export type SymbolRow = Selectable<SymbolIndexTable>;
@@ -157,6 +163,25 @@ export class SqlReadModel implements IReadModel {
   /** The links for a workspace. */
   async links(workspace: WorkspaceId): Promise<LinkRow[]> {
     return this.db.selectFrom("links").selectAll().where("workspace_id", "=", workspace).execute();
+  }
+
+  /**
+   * Edges INTO a page, from this workspace and from any other, with each source page's
+   * title. Callers filter the result by the reader's access to each source workspace.
+   */
+  async inboundLinks(workspace: WorkspaceId, pageId: string): Promise<InboundLinkRow[]> {
+    return this.db
+      .selectFrom("links")
+      .leftJoin("pages", (join) =>
+        join.onRef("pages.workspace_id", "=", "links.workspace_id").onRef("pages.id", "=", "links.from_id"),
+      )
+      .select(["links.workspace_id", "links.from_id", "links.role", "pages.title as from_title"])
+      .where("links.to_workspace_id", "=", workspace)
+      .where("links.to_id", "=", pageId)
+      .orderBy("links.workspace_id")
+      .orderBy("links.from_id")
+      .orderBy("links.role")
+      .execute();
   }
 
   /** The event log for a workspace, in version order. */
