@@ -42,3 +42,4 @@ _No overview yet._
 - [OAuth 2.1 façade over the stateless gateway — signed-blob codes and refresh tokens](decision-record:mqbfg2yp-0027-n6wrih)
 - [An `image` block kind](decision-record:mt0mgz4p-0001-oasvsj)
 - [Attachments: bytes outside the stream, content-addressed behind the workspace's own auth](decision-record:mt0mhp3t-000o-2azfry)
+- [A mirror's root is the mirror, scoped to a workspace or a page subtree](decision-record:mv73x53e-00hw-ul243j)
