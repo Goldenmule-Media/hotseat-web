@@ -1,17 +1,19 @@
 /**
- * Cross-workspace links: a graph edge whose target lives in another workspace's stream. The
- * engine can't read that stream, so the edge carries the target's workspace id and a
- * write-time title snapshot, renders as a `wiki://<ws>/<page>` href, and never resolves live.
+ * Cross-workspace links and content refs: a graph edge or a ref whose target lives in another
+ * workspace's stream. The engine can't read that stream, so each carries the target's
+ * workspace id and a write-time title snapshot, renders as a `wiki://<ws>/<page>` href, and
+ * never resolves live.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import documentPageTypes from "wiki-models/document";
 import { featurePageTypes } from "wiki-models/feature";
-import type { IWorkspaceHandle, PageId, WorkspaceId } from "../src/api";
+import type { IWorkspaceHandle, PageId, SectionId, WorkspaceId } from "../src/api";
 import { Registry } from "../src/core/registry";
 import { deserializeState, serializeState } from "../src/core/snapshot";
 import { foldWorkspace } from "../src/core/workspace";
 import { affectedPageIds } from "../src/search/render-docs";
-import { crossWorkspaceHref, parseCrossWorkspaceHref } from "../src";
+import { collectCrossWorkspaceArgRefs, crossWorkspaceHref, crossWorkspaceRefOf, parseCrossWorkspaceHref } from "../src";
 import { createTestWiki, type ITestWiki } from "../src/testing";
 
 describe("cross-workspace links", () => {
@@ -109,5 +111,69 @@ describe("cross-workspace links", () => {
     expect(parseCrossWorkspaceHref(remote)).toBeUndefined();
     expect(parseCrossWorkspaceHref("wiki://ws-only")).toBeUndefined();
     expect(parseCrossWorkspaceHref(`wiki://default/page/${other.id}/${remote}`)).toBeUndefined();
+  });
+});
+
+describe("cross-workspace refs in content", () => {
+  let harness: ITestWiki;
+  let ws: IWorkspaceHandle;
+  let other: IWorkspaceHandle;
+  let doc: PageId;
+  let local: PageId;
+
+  beforeAll(async () => {
+    harness = await createTestWiki([...featurePageTypes, ...documentPageTypes]);
+    ws = await harness.wiki.createWorkspace({ name: "Here" });
+    other = await harness.wiki.createWorkspace({ name: "There" });
+    doc = (await ws.createPage("document", { title: "Doc", parentId: null })).value;
+    local = (await ws.createPage("document", { title: "Local", parentId: null })).value;
+  });
+
+  afterAll(async () => {
+    await harness.stop();
+  });
+
+  it("renders an inline ref into another workspace with its title snapshot", async () => {
+    const { token } = await ws.mutate(doc, "addParagraph", {
+      inlines: ["See ", { ref: "document:far", workspace: other.id, title: "Far doc" }, " and ", { ref: local }, "."],
+    });
+    const md = await ws.toMarkdown(doc, { consistentWith: token });
+    expect(md).toContain(`See [Far doc](wiki://${other.id}/document:far) and Local.`);
+    expect(await ws.toMarkdown(doc, { consistentWith: token })).toBe(md);
+  });
+
+  it("rejects a cross-workspace ref without a title, or a non-page kind without its page", async () => {
+    await expect(
+      ws.mutate(doc, "addParagraph", { inlines: [{ ref: "document:far", workspace: other.id }] }),
+    ).rejects.toThrow(/non-empty title/);
+    expect(
+      crossWorkspaceRefOf({ kind: "section", id: "s" as SectionId, workspace: other.id, title: "S" }, ws.id),
+    ).toBeUndefined();
+  });
+
+  it("a ref naming its own workspace is a local ref, integrity-checked as usual", async () => {
+    await expect(
+      ws.mutate(doc, "addParagraph", { inlines: [{ ref: "document:missing", workspace: ws.id }] }),
+    ).rejects.toThrow(/does not resolve/);
+    const { token } = await ws.mutate(doc, "addParagraph", { inlines: [{ ref: local, workspace: ws.id }] });
+    expect(await ws.toMarkdown(doc, { consistentWith: token })).toContain("\nLocal\n");
+  });
+
+  it("finds cross-workspace refs at any depth in raw args", () => {
+    const args = {
+      inlines: ["x", { ref: "document:a", workspace: "ws:b" }, { ref: "document:c" }],
+      field: {
+        kind: "ref",
+        target: { kind: "element", page: "document:d", section: "s", field: "f", element: "e", workspace: "ws:b" },
+      },
+      same: { kind: "page", id: "document:e", workspace: ws.id },
+    };
+    const found = collectCrossWorkspaceArgRefs(args, ws.id);
+    expect(found.map((f) => [f.workspace, f.page, f.kind])).toEqual([
+      ["ws:b", "document:a", "page"],
+      ["ws:b", "document:d", "element"],
+    ]);
+    found[0]!.holder["title"] = "Stamped";
+    expect(args.inlines[1]).toEqual({ ref: "document:a", workspace: "ws:b", title: "Stamped" });
   });
 });

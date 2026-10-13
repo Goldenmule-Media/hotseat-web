@@ -165,12 +165,26 @@ export type FieldKind =
  * element's title) then the element id when no ordinal applies (the target is filtered out
  * of every rendered group, or the ref is cross-page).
  */
-export type RefTarget =
+export type RefTarget = (
   | { readonly kind: "section"; page?: PageId; id: SectionId }
   | { readonly kind: "page"; id: PageId }
   | { readonly kind: "symbol"; page?: PageId; section: SectionId; field: string; name: string }
   | { readonly kind: "block"; page?: PageId; section: SectionId; field: string; block: BlockId }
-  | { readonly kind: "element"; page?: PageId; section: SectionId; field: string; element: string; labelField?: string };
+  | { readonly kind: "element"; page?: PageId; section: SectionId; field: string; element: string; labelField?: string }
+) &
+  ICrossWorkspaceRef;
+
+/**
+ * A ref into ANOTHER workspace names it in `workspace` and carries a write-time `title`
+ * snapshot (required alongside `workspace`): a render can't read another stream, so the
+ * label never resolves live. A non-`page` kind must also name its `page`. The engine checks
+ * only that shape; the host confirms the target exists. A `workspace` equal to the page's
+ * own workspace is an ordinary local ref.
+ */
+export interface ICrossWorkspaceRef {
+  workspace?: WorkspaceId;
+  title?: string;
+}
 
 /** A `text` run's overlapping inline style, carried as a canonical-sorted set. */
 export type Mark = "strong" | "emphasis" | { readonly kind: "link"; href: string };

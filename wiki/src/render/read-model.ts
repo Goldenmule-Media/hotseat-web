@@ -26,6 +26,7 @@ import { pageStateView } from "../core/workspace";
 import type { Registry } from "../core/registry";
 import { renderBlocks, type LabelResolver } from "./blocks";
 import { crossWorkspaceHref } from "./cross-workspace-href";
+import { crossWorkspaceRefOf } from "../core/cross-workspace-refs";
 import { bulletList, heading, joinBlocks, numbered, placeholder, section, statusBadge } from "./determinism";
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -100,6 +101,8 @@ function makeLabelResolver(
   const ownerOf = (p: PageId | undefined): IPageNode | undefined =>
     p === undefined ? page : state.pages.get(p);
   return (target: RefTarget): string => {
+    const external = crossWorkspaceRefOf(target, state.id);
+    if (external !== undefined) return `[${external.title}](${crossWorkspaceHref(external.workspace, external.page)})`;
     switch (target.kind) {
       case "page":
         return ctx.titleOf(target.id) ?? String(target.id);

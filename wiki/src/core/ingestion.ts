@@ -8,6 +8,7 @@
  * - `validatePage` — field-kind grammar, no-markdown-in-text-leaf, block normal
  *   form, and ref integrity over the whole page.
  */
+import { crossWorkspaceRefOf } from "./cross-workspace-refs";
 import type {
   DeepReadonly,
   FieldDecl,
@@ -223,6 +224,14 @@ function assertBlockNormalForm(block: IBlock): void {
 // ────────────────────────────────────────────────────────────────────────────
 
 function resolveRef(state: IWorkspaceState, page: IPageNode, target: RefTarget): boolean {
+  if (target.workspace !== undefined && target.workspace !== state.id) {
+    if (crossWorkspaceRefOf(target, state.id) === undefined) {
+      throw new RefIntegrityError(
+        `A cross-workspace ref (kind=${target.kind}) needs a non-empty title${target.kind === "page" ? "" : " and its page"}.`,
+      );
+    }
+    return true;
+  }
   if (target.kind === "page") return state.pages.has(target.id);
   // Non-`page` kinds resolve within an OWNER page: the cross-page `target.page` when
   // present (ref integrity now spans pages), else the page being validated.

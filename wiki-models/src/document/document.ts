@@ -16,7 +16,7 @@
  * vocabulary and has no native Markdown rendering; growing that vocabulary takes a
  * decision record.
  */
-import type { BlockId, DeepReadonly, IBlock, IInline, Mark, PageId, PageState, SectionOp } from "wiki/authoring";
+import type { BlockId, DeepReadonly, IBlock, IInline, Mark, PageId, PageState, SectionOp, WorkspaceId } from "wiki/authoring";
 import { definePageType, InvariantViolationError, parseBlocks, z, zodSchema } from "wiki/authoring";
 
 /** The one content address every command targets. */
@@ -31,7 +31,7 @@ type RunArg =
   | string
   | { text: string; bold?: boolean; italic?: boolean; href?: string }
   | { code: string }
-  | { ref: string };
+  | { ref: string; workspace?: string; title?: string };
 
 /** Strict object shapes so a mixed run (e.g. `{text, code}`) fails the union instead of
  *  silently dropping keys. */
@@ -47,11 +47,15 @@ const runSchema = z
       })
       .strict(),
     z.object({ code: z.string().min(1) }).strict(),
-    z.object({ ref: z.string().min(1) }).strict(),
+    z
+      .object({ ref: z.string().min(1), workspace: z.string().min(1).optional(), title: z.string().min(1).optional() })
+      .strict(),
   ])
   .describe(
     'An inline run: a plain string; {"text","bold"?,"italic"?,"href"?} for marked text; ' +
-      '{"code"} for an inline code span; {"ref":"<pageId>"} for a page reference.',
+      '{"code"} for an inline code span; {"ref":"<pageId>"} for a page reference; ' +
+      '{"ref":"<pageId>","workspace":"<workspaceId>"} for a page in another workspace (its "title" is ' +
+      "stamped from the target when written through MCP).",
   );
 
 /** A non-empty inline sequence — one paragraph's (or heading's, or list item's) worth of runs. */
@@ -66,7 +70,11 @@ function toInlines(runs: readonly RunArg[]): IInline[] {
   return runs.map((r): IInline => {
     if (typeof r === "string") return { kind: "text", value: r, marks: [] };
     if ("code" in r) return { kind: "code-span", value: r.code };
-    if ("ref" in r) return { kind: "ref", target: { kind: "page", id: r.ref as PageId } };
+    if ("ref" in r) {
+      if (r.workspace === undefined) return { kind: "ref", target: { kind: "page", id: r.ref as PageId } };
+      const target = { kind: "page" as const, id: r.ref as PageId, workspace: r.workspace as WorkspaceId };
+      return { kind: "ref", target: r.title === undefined ? target : { ...target, title: r.title } };
+    }
     const marks: Mark[] = [];
     if (r.italic === true) marks.push("emphasis");
     if (r.bold === true) marks.push("strong");
@@ -199,7 +207,9 @@ export const Document = definePageType({
         "Append a paragraph of inline runs (pass `index` to insert at that position). A run is a plain string; " +
         "{text, bold?, italic?, href?} for bold/italic/link-marked text; {code} for an inline code span; or " +
         "{ref: pageId} for an integrity-checked page reference whose label is render-derived (a dangling pageId " +
-        "aborts the commit). Markdown syntax inside a text run is rejected — express it as runs instead.",
+        "aborts the commit); or {ref: pageId, workspace: workspaceId} for a page in another workspace, which " +
+        "renders with the target's title as of the write. Markdown syntax inside a text run is rejected — " +
+        "express it as runs instead.",
       args: zodSchema(z.object({ inlines: inlinesSchema, index: optionalIndex })),
       result: addedBlockId,
       target: BODY,
