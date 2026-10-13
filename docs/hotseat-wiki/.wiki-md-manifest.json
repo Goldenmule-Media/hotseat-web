@@ -1,6 +1,6 @@
 {
   "ws:mpzncs2z-0001-2wgv51": {
-    "version": 2486,
+    "version": 2508,
     "files": {
       "architecture/index.md": "5213acdc1038077e77d636e752170d48a0efdbf3a8639b6e6d795f4fde277015",
       "feature-specs/index.md": "f39d08db07e0ed57f225cb9f5c595b09681c1f99fbc6753333f70742a6cb5dad",
@@ -47,10 +47,10 @@
       ".archived/implementation-plan--mq0z8mvy-008g-bglkr7.md": "884fb36efa34ab04dad0ccf5bd3f3514f1fcd2f0c69d333b6c546a5a89291bd2",
       ".archived/testing-plan--mq0z8mvz-008i-1dmape.md": "2e482867e58fa657daeeb0eddd511474649debbfa2f3f038c251c24a828ef651",
       ".archived/feature-spec--mq0z8mvz-008j-22lx4e.md": "4a139424b08c2a8a75f4e0ea1001028e83d5bf65af678a5632804b57119ed4ae",
-      "decision-records/index.md": "c218e36f21685a950c9b6dadae339a74730c0227d2b56642fd2cbd8b23f07897",
+      "decision-records/index.md": "c2e9b1556876783a0507e980598a114fd14a6e263f36dc0c5dbb0d5d553fbce7",
       "decision-records/design-decisions-live-in-the-wiki.md": "4d4b705ef5c7a4a79f31575719294e140d784b74f94b03b7026b63fe95312a04",
       "decision-records/use-durable-streams-directly-no-storage-port.md": "911207d464545c2a8fda783078d04f6b1d57a6a3849f6384ebc516aafeb6a012",
-      "decision-records/workspace-as-the-aggregate-one-stream.md": "88b0619df29905e45cfb3f942475c7418755c9acec395fee19f00074c481a3e7",
+      "decision-records/workspace-as-the-aggregate-one-stream.md": "8fc85675f61657427f6272dba3b7394febe68d20bb3dbc5c79cd58e74a25a487",
       "decision-records/cqrs-with-consistency-tokens.md": "f4e6879724bb03c07b20002273aa93307e567078cc4071eb4fb9aba9bdcd59f4",
       "decision-records/sections-are-the-one-content-container.md": "d824dd77a8a8e955b2e2d2efd90c34ab81f0e205496e0615bea0f1469d3fabce",
       "decision-records/closed-field-kinds-including-the-blocks-document-model.md": "543c4a00bc0fd8e363f792ebae59bcead7e45c999f1aff2fb132cfc03740360b",
@@ -128,8 +128,9 @@
       "decision-records/an-image-block-kind.md": "0faa4413e47318503743810461ed9f8b9e21976306f14414816088071079d1f4",
       "decision-records/attachments-bytes-outside-the-stream-content-addressed-behind-the-workspace-s-own-auth.md": "c73779e30d67b6ce760d521d2138807292af332cd9389a0cbbcb0ccfcdea9328",
       "architecture/wiki-mirror/wiki-mirror-menubar.md": "f7f033ec55d6c9b39ee945f31e4e6357c93c2d9f3532737cff22887a2edb59ca",
-      "decision-records/a-mirror-s-root-is-the-mirror-scoped-to-a-workspace-or-a-page-subtree.md": "2d7da07f26c38924d639c47697bb6c5d846adaf4d77452e5dac7f83750b4323c",
-      "decision-records/cross-workspace-references-carry-their-workspace-and-a-title-snapshot.md": "60eabe8ca14805eb97d43f4c9d761ae446f7d4b2f311dd4c98047848576c6e76"
+      "decision-records/a-mirror-s-root-is-the-mirror-scoped-to-a-workspace-or-a-page-subtree.md": "eac4700d24b5bc435e30c5553455c07e3746c93fc8fe4d4e39d7527bd962912d",
+      "decision-records/cross-workspace-references-carry-their-workspace-and-a-title-snapshot.md": "dae99988672564a147623d69f871c20a57a1953fcda17c374e4c11f81afdd1ab",
+      "decision-records/cross-workspace-page-moves-are-a-source-journaled-saga-that-keeps-page-ids-and-leaves-forwards.md": "ce3888a30a6630ed3d4e844de96b9a70dd75aa9602401ff6b8637bdba02f504a"
     },
     "pages": {
       "toc:mpznedyz-0003-pdtcmh": "architecture/index.md",
@@ -259,7 +260,8 @@
       "decision-record:mt0mhp3t-000o-2azfry": "decision-records/attachments-bytes-outside-the-stream-content-addressed-behind-the-workspace-s-own-auth.md",
       "architecture:mt7dkh1l-00e4-rwjefz": "architecture/wiki-mirror/wiki-mirror-menubar.md",
       "decision-record:mv73x53e-00hw-ul243j": "decision-records/a-mirror-s-root-is-the-mirror-scoped-to-a-workspace-or-a-page-subtree.md",
-      "decision-record:mv740lnv-00if-79xsqh": "decision-records/cross-workspace-references-carry-their-workspace-and-a-title-snapshot.md"
+      "decision-record:mv740lnv-00if-79xsqh": "decision-records/cross-workspace-references-carry-their-workspace-and-a-title-snapshot.md",
+      "decision-record:mv759r5q-00j5-woj8gx": "decision-records/cross-workspace-page-moves-are-a-source-journaled-saga-that-keeps-page-ids-and-leaves-forwards.md"
     },
     "assets": {},
     "layout": 2,

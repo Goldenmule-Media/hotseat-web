@@ -44,3 +44,4 @@ _No overview yet._
 - [Attachments: bytes outside the stream, content-addressed behind the workspace's own auth](decision-record:mt0mhp3t-000o-2azfry)
 - [A mirror's root is the mirror, scoped to a workspace or a page subtree](decision-record:mv73x53e-00hw-ul243j)
 - [Cross-workspace references carry their workspace and a title snapshot](decision-record:mv740lnv-00if-79xsqh)
+- [Cross-workspace page moves are a source-journaled saga that keeps page ids and leaves forwards](decision-record:mv759r5q-00j5-woj8gx)

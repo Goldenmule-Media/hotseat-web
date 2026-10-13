@@ -1,6 +1,6 @@
 # A mirror's root is the mirror, scoped to a workspace or a page subtree
 
-**Status:** proposed
+**Status:** accepted
 
 ## Metadata
 - **Number:** ADR-37

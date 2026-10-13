@@ -1,6 +1,6 @@
 # Cross-workspace references carry their workspace and a title snapshot
 
-**Status:** proposed
+**Status:** accepted
 
 ## Metadata
 - **Number:** ADR-38

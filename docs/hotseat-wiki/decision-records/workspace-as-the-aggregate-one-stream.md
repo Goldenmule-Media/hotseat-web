@@ -35,10 +35,9 @@ concurrency is handled by in-process per-workspace serialization + optimistic co
 rebase-and-retry — no actor/routing system.
 
 ## Consequences
-Snapshots recommended as the stream grows (§8.3); version is
-per-workspace; cross-workspace moves are a non-atomic saga (a non-goal). Escape hatch if a
-workspace gets write-hot: single epoch-fenced owner, split the workspace, or adopt the StreamFS
-hybrid.
+Snapshots are recommended as the stream grows, and version is per-workspace. If a workspace gets write-hot, the escape hatches are a single epoch-fenced owner, splitting the workspace, or adopting the StreamFS hybrid.
+
+Moving pages between workspaces can never be one atomic commit. It is a journaled saga of single-stream commits, described in the decision record "Cross-workspace page moves are a source-journaled saga that keeps page ids and leaves forwards".
 
 ## Relations
 _None._
