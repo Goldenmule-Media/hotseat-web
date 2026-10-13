@@ -34,7 +34,7 @@ import {
   type ListToolsResult,
   type ReadResourceResult,
 } from "@modelcontextprotocol/sdk/types.js";
-import { WikiError, decodeToken, type ISearchIndex, type WorkspaceId } from "wiki";
+import { PageMovedError, WikiError, decodeToken, type ISearchIndex, type WorkspaceId } from "wiki";
 
 import { asWorkspaceId, type EmbeddedEngine } from "../engine.js";
 import type { ModelRegistry } from "../models/registry.js";
@@ -307,7 +307,9 @@ export class WikiMcpServer {
   private toToolError(err: unknown, toolName: string): CallToolResult {
     if (err instanceof WikiError) {
       this.deps.logger.warn("tool rejected by engine", { tool: toolName, code: err.code });
-      return errorResult(`[${err.code}] ${err.message}`, { code: err.code });
+      // A moved page names where it lives now, so the agent can retry there.
+      const where = err instanceof PageMovedError ? { workspaceId: err.workspaceId, pageId: err.pageId } : {};
+      return errorResult(`[${err.code}] ${err.message}`, { code: err.code, ...where });
     }
     const message = err instanceof Error ? err.message : String(err);
     this.deps.logger.error("tool failed", { tool: toolName, error: message });

@@ -36,7 +36,9 @@ import type {
   EventsTable,
   LinksTable,
   OutlineTable,
+  PageForwardsTable,
   PagesTable,
+  PendingMovesTable,
   ReadModelDatabase,
   ReferenceIndexTable,
   SymbolIndexTable,
@@ -53,6 +55,8 @@ type OutlineInsert = Insertable<OutlineTable>;
 type SymbolInsert = Insertable<SymbolIndexTable>;
 type ReferenceInsert = Insertable<ReferenceIndexTable>;
 type XrefInsert = Insertable<XrefIndexTable>;
+type ForwardInsert = Insertable<PageForwardsTable>;
+type PendingMoveInsert = Insertable<PendingMovesTable>;
 
 /** Serialize a JS value to the `string` JSONB columns expect on insert. */
 function toJsonb(value: unknown): string {
@@ -207,6 +211,10 @@ function xrefRows(state: IWorkspaceState): XrefInsert[] {
     // page so backlinks resolve across pages; an `element` ref records the element id
     // in `target_name` (its identifier within the section).
     const crossPage = target.kind !== "page" ? target.page : undefined;
+    // A local ref to a page that moved away points at it in its new workspace.
+    const targetPage = target.kind === "page" ? target.id : crossPage;
+    const local = target.workspace === undefined || target.workspace === state.id;
+    const moved = local && targetPage !== undefined && !state.pages.has(targetPage) ? state.forwards.get(targetPage) : undefined;
     rows.push({
       workspace_id: state.id,
       from_page: node.id,
@@ -217,8 +225,8 @@ function xrefRows(state: IWorkspaceState): XrefInsert[] {
       target_section: target.kind === "section" ? target.id : "section" in target ? target.section : null,
       target_block: target.kind === "block" ? target.block : null,
       target_name: target.kind === "symbol" ? target.name : target.kind === "element" ? target.element : null,
-      target_workspace_id: target.workspace ?? state.id,
-      target_title: target.workspace !== undefined && target.workspace !== state.id ? (target.title ?? null) : null,
+      target_workspace_id: moved?.workspace ?? target.workspace ?? state.id,
+      target_title: moved !== undefined ? moved.title : !local ? (target.title ?? null) : null,
     });
   };
   const walkInlines = (node: IPageNode, sec: ISection, field: string, inlines: IInline[]): void => {
@@ -274,6 +282,27 @@ function linkRows(state: IWorkspaceState): LinkInsert[] {
     to_id: l.to,
     role: l.role,
     to_title: l.title ?? null,
+  }));
+}
+
+/** Build the `page_forwards` rows: where each page that moved out went. */
+function forwardRows(state: IWorkspaceState): ForwardInsert[] {
+  return [...state.forwards].map(([pageId, f]) => ({
+    workspace_id: state.id,
+    page_id: pageId,
+    to_workspace_id: f.workspace,
+    title: f.title,
+    move_id: f.moveId,
+  }));
+}
+
+/** Build the `pending_moves` rows: moves out that haven't finished. */
+function pendingMoveRows(state: IWorkspaceState): PendingMoveInsert[] {
+  return [...state.pendingMoves.values()].map((m) => ({
+    workspace_id: state.id,
+    move_id: m.moveId,
+    to_workspace_id: m.to,
+    page_ids: toJsonb(m.pageIds),
   }));
 }
 
@@ -374,6 +403,8 @@ export async function applyCommit(
   const outline = outlineRows(state);
   const { symbols, references } = symbolAndReferenceRows(state, languages);
   const xrefs = xrefRows(state);
+  const forwards = forwardRows(state);
+  const pendingMoves = pendingMoveRows(state);
   const cursor = commit.cursor ?? null;
 
   await db.transaction().execute(async (trx) => {
@@ -387,6 +418,8 @@ export async function applyCommit(
     await trx.deleteFrom("symbol_index").where("workspace_id", "=", commit.workspaceId).execute();
     await trx.deleteFrom("reference_index").where("workspace_id", "=", commit.workspaceId).execute();
     await trx.deleteFrom("xref_index").where("workspace_id", "=", commit.workspaceId).execute();
+    await trx.deleteFrom("page_forwards").where("workspace_id", "=", commit.workspaceId).execute();
+    await trx.deleteFrom("pending_moves").where("workspace_id", "=", commit.workspaceId).execute();
 
     await trx
       .insertInto("workspaces")
@@ -403,6 +436,8 @@ export async function applyCommit(
     if (symbols.length > 0) await trx.insertInto("symbol_index").values(symbols).execute();
     if (references.length > 0) await trx.insertInto("reference_index").values(references).execute();
     if (xrefs.length > 0) await trx.insertInto("xref_index").values(xrefs).execute();
+    if (forwards.length > 0) await trx.insertInto("page_forwards").values(forwards).execute();
+    if (pendingMoves.length > 0) await trx.insertInto("pending_moves").values(pendingMoves).execute();
 
     // Append the commit's events (idempotent on the (workspace, version) PK).
     if (events.length > 0) {

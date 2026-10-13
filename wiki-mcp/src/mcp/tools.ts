@@ -25,6 +25,7 @@
  */
 import {
   encodeToken,
+  PageMovedError,
   PageNotFoundError,
   StaleEditError,
   type ConsistencyToken,
@@ -510,11 +511,15 @@ const linkTool: WikiTool = {
       return { text: "Linked.", data: { token } };
     }
     const target = await resolveCrossWorkspaceTarget(ctx, asWorkspaceId(toWs), to);
-    const { token } = await handle.link(from, to, role, { workspace: asWorkspaceId(toWs), title: target.title });
+    const { token } =
+      target.workspace === ws
+        ? await handle.link(from, to, role)
+        : await handle.link(from, to, role, { workspace: target.workspace, title: target.title });
     ctx.tokens.recordWrite(ctx.sessionId, token);
+    const moved = target.workspace !== toWs ? ` (the page moved to ${target.workspace}; linked there)` : "";
     return {
-      text: target.archived ? `Linked (note: the target is archived in ${toWs}).` : "Linked.",
-      data: { token, title: target.title, archived: target.archived },
+      text: target.archived ? `Linked${moved} (note: the target is archived in ${target.workspace}).` : `Linked${moved}.`,
+      data: { token, title: target.title, archived: target.archived, workspaceId: target.workspace },
     };
   },
 };
@@ -999,8 +1004,13 @@ const getPageTool: WikiTool = {
   async handle(args, ctx) {
     const ws = asWorkspaceId(reqStr(args, "workspaceId"));
     await awaitConsistency(ctx, ws);
-    const row = await ctx.readModel.getPage(ws, reqStr(args, "pageId"));
-    if (row === undefined) return { text: `Page ${reqStr(args, "pageId")} not found.`, data: null };
+    const pageId = reqStr(args, "pageId");
+    const row = await ctx.readModel.getPage(ws, pageId);
+    if (row === undefined) {
+      const forward = await ctx.readModel.forwardOf(ws, pageId);
+      if (forward !== undefined) throw new PageMovedError(pageId, forward.to_workspace_id);
+      return { text: `Page ${pageId} not found.`, data: null };
+    }
     return { text: `${row.title} (${row.type}) [${row.status}]`, data: row };
   },
 };

@@ -184,8 +184,27 @@ export interface ProjectionOffsetsTable {
   fingerprint: string;
 }
 
+/** `page_forwards(workspace_id, page_id, to_workspace_id, title, move_id)` — pages that moved out. */
+export interface PageForwardsTable {
+  workspace_id: string;
+  page_id: string;
+  to_workspace_id: string;
+  title: string;
+  move_id: string;
+}
+
+/** `pending_moves(workspace_id, move_id, to_workspace_id, page_ids JSONB)` — moves out not yet finished. */
+export interface PendingMovesTable {
+  workspace_id: string;
+  move_id: string;
+  to_workspace_id: string;
+  page_ids: JSONColumnType<string[]>;
+}
+
 /** The full read-model database, as Kysely sees it. */
 export interface ReadModelDatabase {
+  page_forwards: PageForwardsTable;
+  pending_moves: PendingMovesTable;
   workspaces: WorkspacesTable;
   pages: PagesTable;
   tree_edges: TreeEdgesTable;

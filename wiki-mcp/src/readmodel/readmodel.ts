@@ -29,7 +29,9 @@ import type {
   EventsTable,
   LinksTable,
   OutlineTable,
+  PageForwardsTable,
   PagesTable,
+  PendingMovesTable,
   ReadModelDatabase,
   ReferenceIndexTable,
   SymbolIndexTable,
@@ -54,6 +56,8 @@ export type EventRow = Selectable<EventsTable>;
 export type OutlineRow = Selectable<OutlineTable>;
 export type SymbolRow = Selectable<SymbolIndexTable>;
 export type ReferenceRow = Selectable<ReferenceIndexTable>;
+export type ForwardRow = Selectable<PageForwardsTable>;
+export type PendingMoveRow = Selectable<PendingMovesTable>;
 
 /** Tuning knobs for the read model's `waitFor` backstop poll + default timeout. */
 export interface ReadModelOptions {
@@ -144,6 +148,21 @@ export class SqlReadModel implements IReadModel {
       .where("workspace_id", "=", workspace)
       .where("id", "=", pageId)
       .executeTakeFirst();
+  }
+
+  /** Where a page that moved out of `workspace` went, or `undefined` if it never left. */
+  async forwardOf(workspace: WorkspaceId, pageId: string): Promise<ForwardRow | undefined> {
+    return this.db
+      .selectFrom("page_forwards")
+      .selectAll()
+      .where("workspace_id", "=", workspace)
+      .where("page_id", "=", pageId)
+      .executeTakeFirst();
+  }
+
+  /** Moves out of any workspace that haven't finished. */
+  async pendingMoves(): Promise<PendingMoveRow[]> {
+    return this.db.selectFrom("pending_moves").selectAll().orderBy("workspace_id").orderBy("move_id").execute();
   }
 
   /** All pages in a workspace. */

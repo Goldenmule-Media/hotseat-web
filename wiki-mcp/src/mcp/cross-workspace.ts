@@ -16,9 +16,14 @@ export class AccessDeniedError extends WikiError {
 }
 
 export interface ICrossWorkspaceTarget {
+  /** Where the page lives now: the asked-for workspace, or wherever it moved to since. */
+  readonly workspace: WorkspaceId;
   readonly title: string;
   readonly archived: boolean;
 }
+
+/** Forward hops followed before giving up (a page moved more times than this is a loop). */
+const MAX_FORWARDS = 8;
 
 export function requireAccess(ctx: WikiToolContext, workspace: WorkspaceId): void {
   if (ctx.access !== undefined && !ctx.access.canAccess(workspace)) {
@@ -26,18 +31,27 @@ export function requireAccess(ctx: WikiToolContext, workspace: WorkspaceId): voi
   }
 }
 
-/** Gate, wait for the session's own writes there, and read the target's current title. */
+/**
+ * Gate, wait for the session's own writes there, and read the target's current title. A page
+ * that moved is followed to where it lives now (gated there too).
+ */
 export async function resolveCrossWorkspaceTarget(
   ctx: WikiToolContext,
   workspace: WorkspaceId,
   pageId: string,
 ): Promise<ICrossWorkspaceTarget> {
-  requireAccess(ctx, workspace);
-  const token = ctx.tokens.consistentWith(ctx.sessionId, workspace);
-  if (token !== undefined) await ctx.readModel.waitFor(token);
-  const row = await ctx.readModel.getPage(workspace, pageId);
-  if (row === undefined) throw new LinkTargetNotFoundError(`${workspace}/${pageId}`);
-  return { title: row.title, archived: row.archived };
+  let at = workspace;
+  for (let hop = 0; hop <= MAX_FORWARDS; hop++) {
+    requireAccess(ctx, at);
+    const token = ctx.tokens.consistentWith(ctx.sessionId, at);
+    if (token !== undefined) await ctx.readModel.waitFor(token);
+    const row = await ctx.readModel.getPage(at, pageId);
+    if (row !== undefined) return { workspace: at, title: row.title, archived: row.archived };
+    const forward = await ctx.readModel.forwardOf(at, pageId);
+    if (forward === undefined) break;
+    at = forward.to_workspace_id as WorkspaceId;
+  }
+  throw new LinkTargetNotFoundError(`${workspace}/${pageId}`);
 }
 
 /**
@@ -50,6 +64,7 @@ export async function stampCrossWorkspaceRefs(args: Record<string, unknown>, ctx
   if (typeof ws !== "string") return;
   for (const ref of collectCrossWorkspaceArgRefs(args, ws as WorkspaceId)) {
     const target = await resolveCrossWorkspaceTarget(ctx, ref.workspace, ref.page);
+    ref.holder["workspace"] = target.workspace;
     const given = ref.holder["title"];
     if (ref.kind === "page" || typeof given !== "string" || given.trim().length === 0) ref.holder["title"] = target.title;
   }
