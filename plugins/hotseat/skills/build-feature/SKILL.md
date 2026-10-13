@@ -2,7 +2,7 @@
 name: build-feature
 description: Drive a feature through the wiki's feature-brief FSM end-to-end — seed or select a brief, ground the plan in the real repo, write code, verify with real tests + code review, and flip FSM gates only from verified results. Stops at human sign-off gates. Branch/worktree-agnostic; safe to run in parallel worktrees.
 when_to_use: Invoke explicitly (in a worktree on a feature branch) to build a feature tracked in the structured wiki's `feature` bundle.
-argument-hint: '[feature-brief:id | "one-line intent"]  (workspace auto-resolved from hotseat.config.json; prefix a ws: token to override)'
+argument-hint: '[feature-brief:id | "one-line intent"]  (workspace and optional root page auto-resolved from hotseat.config.json; prefix a ws: token to override)'
 arguments: [target]
 disable-model-invocation: true
 allowed-tools:
@@ -40,16 +40,21 @@ allowed-tools:
 Drive one feature from intent to a human sign-off gate. The wiki's `feature` bundle is the source of truth for *what document edit comes next*; you supply the engineering and verification the wiki cannot — choosing what to build, grounding it in the real repo, writing code, and confirming it actually works before flipping any gate.
 
 ## Inputs
-- **Workspace** — a repo maps **1:1** to a wiki workspace, so you do not pass the id; resolve it **once** at the start and call the result `$WS`. Resolution precedence:
-  1. If `$target` begins with a `ws:` token → that token is `$WS` (an explicit override); the remainder is the real target.
-  2. Else `Read` **`hotseat.config.json`** at the worktree root and use its `workspaceId` as `$WS`.
-  3. Else (file missing or no `workspaceId`) → call `listWorkspaces`, confirm `$WS` with the user, then offer to write `hotseat.config.json` so future runs need no lookup.
+- **Workspace** — a repo maps to a wiki workspace, and optionally to one page inside it when several repos share a workspace, so you do not pass the id. Resolve both **once** at the start: `$WS` (the workspace) and `$ROOT` (the repo's root page, or unset). Resolution precedence:
+  1. If `$target` begins with a `ws:` token → that token is `$WS` (an explicit override) and `$ROOT` is unset; the remainder is the real target.
+  2. Else `Read` **`hotseat.config.json`** at the worktree root: its `workspaceId` is `$WS` and its optional `rootPageId` is `$ROOT`.
+  3. Else (file missing or no `workspaceId`) → call `listWorkspaces` and confirm `$WS` with the user. If that workspace is shared by several repos (one top-level page per project), ask which page this repo owns (`tree($WS)`) and use it as `$ROOT`. Then offer to write `hotseat.config.json` (`{ "workspaceId": "ws:...", "rootPageId": "toc:..." }`, `rootPageId` only when set) so future runs need no lookup.
 
   Use `$WS` wherever a workspace id is needed for the rest of the run. Never silently guess a workspace.
+- **Root page** — when `$ROOT` is set, this repo owns only that page's subtree:
+  - Confirm `$ROOT` once with `tree($WS)`: it must exist and not be archived. If it is missing, archived, or a read returns `PAGE_MOVED`, stop and ask the user to fix `hotseat.config.json`. Never fall back to the workspace root.
+  - Tell the user where you are writing: `<workspace name> › <$ROOT title> ($ROOT)`.
+  - Every page you create goes under `$ROOT` or one of its descendants (`parentId`), never at the workspace root or under another project's page.
+  - Scope reads to the subtree: `nextActions($WS, $ROOT)` instead of `nextActions($WS)`; from `tree($WS)` and `attention($WS)`, consider only pages inside `$ROOT`'s subtree.
 - **Target** = `$target` (with any leading `ws:` override token stripped per above) — either an existing `feature-brief:<id>` to drive, or a one-line intent.
   - Starts with `feature-brief:` → drive that brief.
-  - Otherwise → treat it as the feature intent and `createPage` a new `feature-brief` (title from the intent) **under the "Feature Specs" TOC** (Planning step 1) — never at the workspace root. That auto-materializes its pinned children: implementation-plan, implementation-checklist, testing-plan, feature-spec — never create the children by hand.
-  - Empty → call `nextActions($WS)` to list in-progress feature work and confirm which brief to drive (or ask for an intent).
+  - Otherwise → treat it as the feature intent and `createPage` a new `feature-brief` (title from the intent) **under the "Feature Specs" TOC** (Planning step 1) — never at the workspace root, and inside `$ROOT` when it is set. That auto-materializes its pinned children: implementation-plan, implementation-checklist, testing-plan, feature-spec — never create the children by hand.
+  - Empty → call `nextActions($WS, $ROOT)` (or `nextActions($WS)` when `$ROOT` is unset) to list in-progress feature work and confirm which brief to drive (or ask for an intent).
 
 ## Standing rules (apply for the whole task)
 - **The wiki decides the next document edit — you don't.** After every write, read the echoed `next`; call `nextActions($WS, <briefId>)` for `do` / `blocked` / `humanGates` / `attention`. Drive `do` edges; for each `blocked` edge author exactly the content its `reason` names, then re-check. Never hardcode a command sequence — if a `reason` changes, follow the new one.
@@ -62,7 +67,7 @@ Drive one feature from intent to a human sign-off gate. The wiki's `feature` bun
 ## Planning (draft → planning → building)
 Ground the plan in the real repo first — the wiki's preconditions read only sibling pages, never the codebase, so an ungrounded plan invents plausible-but-wrong steps.
 
-1. **New briefs live under the "Feature Specs" TOC.** When Target is an intent, first find the workspace's top-level `toc` page titled "Feature Specs" (`tree($WS)`); if it doesn't exist, `createPage({ type: "toc", title: "Feature Specs" })` to make it. Then `createPage` the feature-brief with `parentId` set to that TOC's id. The TOC's contents are derived from its live children — no TOC edit is needed.
+1. **New briefs live under the "Feature Specs" TOC.** When Target is an intent, first find the `toc` page titled "Feature Specs" whose parent is `$ROOT` (a top-level page when `$ROOT` is unset) in `tree($WS)`; if it doesn't exist, `createPage({ type: "toc", title: "Feature Specs", parentId: $ROOT })` (`parentId: null` when `$ROOT` is unset) to make it. Then `createPage` the feature-brief with `parentId` set to that TOC's id. The TOC's contents are derived from its live children — no TOC edit is needed.
 2. Capture/confirm the brief id and child page ids with `tree($WS, <briefId>)`.
 3. Run the **grounding** workflow (parallel repo reads):
    `Workflow({ scriptPath: "${CLAUDE_SKILL_DIR}/workflows/grounding.template.js", args: { repoRoot: "<this worktree path>", intent: "<intent or current brief summary>", areas: [<optional repo areas to focus>] } })`

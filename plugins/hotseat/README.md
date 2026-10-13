@@ -38,7 +38,9 @@ The skill talks to a running `wiki-server`; the plugin only carries the client w
 4. A **`hotseat.config.json`** at the repo root binding the repo to its workspace
    (`{ "workspaceId": "ws:..." }`), so `/build-feature` resolves the workspace without an argument. Commit
    it so it travels with every clone/worktree. Skip it and the skill falls back to `listWorkspaces` + a
-   prompt (and offers to write it for you).
+   prompt (and offers to write it for you). When several repos share one workspace, add
+   `"rootPageId": "<page id>"` to pin this repo to its own page: the skills create pages only under it
+   and scope their reads to its subtree.
 
 ## Contents
 

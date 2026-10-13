@@ -270,6 +270,8 @@ its own. Full surface: [`architecture/wiki-server.md`](docs/hotseat-wiki/archite
   (`https://hotseat.thegoldenmule.com/mcp`), which Claude Code authenticates against on its own. Point it at
   `http://127.0.0.1:4439/mcp` to drive a local `wiki-server` instead — the `wiki` MCP tools then need that
   server up **with a model loaded**.
+- **`hotseat.config.json`** binds a repo to its workspace (`workspaceId`) and, when repos share one
+  workspace, to its own page (`rootPageId`); the hotseat skills then create pages only under that page.
 - **Self-direction (don't ask "what next?").** The wiki is self-directing via two model-declared classifiers
   the engine surfaces generically: per-edge `agency` (`"agent"` = a forward edge to drive autonomously;
   `"human"` = a sign-off/decision gate) on FSM transitions, and a per-instance `awaitsHuman` predicate on

@@ -20,6 +20,15 @@ every clone and parallel worktree:
 { "workspaceId": "ws:mpzncs2z-0001-2wgv51" }
 ```
 
+**Root page (shared workspaces).** When several repos share one workspace, add `rootPageId` to pin this
+repo to its own page. The skill then creates every page under that page (its "Feature Specs" TOC lives
+there too), scopes `nextActions`/`attention`/`tree` reads to that subtree, and stops rather than writing
+elsewhere if the page is missing, archived or moved:
+
+```json
+{ "workspaceId": "ws:mv72wvay-00gz-t90t1h", "rootPageId": "toc:mv72x0ma-00hb-a0qurk" }
+```
+
 ## Why it exists
 
 The wiki is already **self-directing** for in-document work: the `feature-brief` FSM plus the

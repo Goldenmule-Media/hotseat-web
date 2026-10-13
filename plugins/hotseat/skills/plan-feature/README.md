@@ -19,7 +19,8 @@ satisfied (≥1 plan step, ≥1 data-model block, ≥1 testing-plan case) — ha
 **Workspace resolution.** Identical to `/build-feature`: a leading `ws:` token overrides; else the
 `workspaceId` in **`hotseat.config.json`** at the repo root; else `listWorkspaces` + a prompt (and
 an offer to write the config). `hotseat.config.json` is committed, so it travels with every clone
-and parallel worktree.
+and parallel worktree. An optional `rootPageId` pins the repo to one page of a shared workspace, exactly
+as in `/build-feature`.
 
 ## Why it exists
 
