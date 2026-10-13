@@ -54,6 +54,29 @@ final class MirrorConfigTests: XCTestCase {
         XCTAssertEqual(emitters.map { $0["workspaceId"] as? String }, ["ws:a", "ws:b"])
     }
 
+    func testRoundTripKeepsPerEmitterKeysItDoesNotModel() throws {
+        // A key a newer mirror added to an entry (a subtree filter, say) must survive an older
+        // app's save, or the next restart mirrors more than that entry asked for.
+        try write("""
+        {
+          "emitters": [
+            { "workspaceId": "ws:a", "root": "/tmp/a", "futureKey": "page:x", "opts": { "n": 2 } },
+            { "workspaceId": "ws:b", "root": "/tmp/b" }
+          ]
+        }
+        """)
+
+        var config = try MirrorConfigFile.load(from: path)
+        config.emitters[0].root = "/tmp/a2"
+        try config.save(to: path)
+
+        let emitters = try XCTUnwrap(try reread()["emitters"] as? [[String: Any]])
+        XCTAssertEqual(emitters[0]["root"] as? String, "/tmp/a2")
+        XCTAssertEqual(emitters[0]["futureKey"] as? String, "page:x")
+        XCTAssertEqual((emitters[0]["opts"] as? [String: Any])?["n"] as? Int, 2)
+        XCTAssertEqual(Set(emitters[1].keys), ["workspaceId", "root"])
+    }
+
     func testKeepsABackupOfWhatItReplaced() throws {
         try write(#"{"namespace":"before","emitters":[]}"#)
         var config = try MirrorConfigFile.load(from: path)

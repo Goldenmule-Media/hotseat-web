@@ -5,6 +5,34 @@ struct EmitterEntry: Identifiable, Hashable {
     var id = UUID()
     var workspaceId: String = ""
     var root: String = ""
+    /// Per-entry keys this app doesn't model, written back verbatim — a newer mirror's filter
+    /// dropped on save would widen the mirror into a repo that never asked for it.
+    var extra: [String: Any] = [:]
+
+    static let modeledKeys = ["workspaceId", "root"]
+
+    init(workspaceId: String = "", root: String = "", extra: [String: Any] = [:]) {
+        self.workspaceId = workspaceId
+        self.root = root
+        self.extra = extra
+    }
+
+    init(json: [String: Any]) {
+        var extra = json
+        for key in Self.modeledKeys { extra.removeValue(forKey: key) }
+        self.init(workspaceId: json["workspaceId"] as? String ?? "", root: json["root"] as? String ?? "", extra: extra)
+    }
+
+    static func == (lhs: EmitterEntry, rhs: EmitterEntry) -> Bool {
+        lhs.id == rhs.id && lhs.workspaceId == rhs.workspaceId && lhs.root == rhs.root
+            && NSDictionary(dictionary: lhs.extra).isEqual(to: rhs.extra)
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(workspaceId)
+        hasher.combine(root)
+    }
 }
 
 /// The per-machine `~/.wiki/wiki-mirror.config.json`, edited in place.
@@ -39,9 +67,7 @@ struct MirrorConfigFile {
             // A malformed `emitters` must be an ERROR, not an empty list: quietly reading zero
             // emitters and then saving would erase every mirror on this machine.
             guard let entries = raw as? [[String: Any]] else { throw ConfigError.malformedEmitters(path) }
-            config.emitters = entries.map {
-                EmitterEntry(workspaceId: $0["workspaceId"] as? String ?? "", root: $0["root"] as? String ?? "")
-            }
+            config.emitters = entries.map(EmitterEntry.init(json:))
         }
         for key in ["streamBaseUrl", "namespace", "emitters"] { extra.removeValue(forKey: key) }
         config.extra = extra
@@ -111,7 +137,16 @@ struct MirrorConfigFile {
         let entries = emitters.map { emitter -> String in
             let workspace = emitter.workspaceId.trimmingCharacters(in: .whitespaces)
             let root = emitter.root.trimmingCharacters(in: .whitespaces)
-            return "    {\n      \(Self.quote("workspaceId")): \(Self.quote(workspace)),\n      \(Self.quote("root")): \(Self.quote(root))\n    }"
+            var fields = [
+                "\(Self.quote("workspaceId")): \(Self.quote(workspace))",
+                "\(Self.quote("root")): \(Self.quote(root))",
+            ]
+            for key in emitter.extra.keys.sorted() where !EmitterEntry.modeledKeys.contains(key) {
+                if let value = Self.jsonText(emitter.extra[key]!, indent: "      ") {
+                    fields.append("\(Self.quote(key)): \(value)")
+                }
+            }
+            return "    {\n      \(fields.joined(separator: ",\n      "))\n    }"
         }
         let emitterText = entries.isEmpty ? "[]" : "[\n\(entries.joined(separator: ",\n"))\n  ]"
         lines.append("  \(Self.quote("emitters")): \(emitterText)")
