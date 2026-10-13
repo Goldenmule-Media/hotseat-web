@@ -25,7 +25,15 @@ import type { IncomingMessage } from "node:http";
 import { join } from "node:path";
 
 import { DurableStreamTestServer, type StreamLifecycleEvent } from "@durable-streams/server";
-import { createWikiMcp, resolveConfig as resolveMcpConfig, type McpAuth, type McpTransport, type WikiMcp, type WikiMcpConfig } from "wiki-mcp";
+import {
+  createWikiMcp,
+  resolveConfig as resolveMcpConfig,
+  type CreateWikiMcpOptions,
+  type McpAuth,
+  type McpTransport,
+  type WikiMcp,
+  type WikiMcpConfig,
+} from "wiki-mcp";
 
 // NOTE: `.js` extensions are required because wiki-server is COMPILED and run via
 // `node dist/main.js` (raw Node ESM needs explicit extensions). This differs from
@@ -84,6 +92,7 @@ export interface WikiServerDeps {
     logger: IConsolidatingLogger,
     transport: McpTransport,
     auth?: McpAuth,
+    copyBlob?: CreateWikiMcpOptions["copyBlob"],
   ) => Promise<{ readonly mcp?: WikiMcp; readonly config: WikiMcpConfig }>;
   /** Process start time (ms epoch) for `uptimeMs`; defaults to "now". */
   readonly startedAt?: number;
@@ -111,6 +120,7 @@ async function defaultStartMcp(
   logger: IConsolidatingLogger,
   transport: McpTransport,
   auth?: McpAuth,
+  copyBlob?: CreateWikiMcpOptions["copyBlob"],
 ): Promise<{ mcp: WikiMcp; config: WikiMcpConfig }> {
   // Derive wiki-mcp's wire config from env/flags via its own resolver, then point its
   // `streamBaseUrl` at THIS host's localhost URL (read back from `server.url`, robust
@@ -119,7 +129,14 @@ async function defaultStartMcp(
   // `transport` (streamable HTTP, built from cfg) makes the MCP endpoint network-
   // reachable — an embedded host can't use stdio (that's its own terminal).
   const config: WikiMcpConfig = { ...resolveMcpConfig(process.argv.slice(2), process.env), streamBaseUrl: baseUrl };
-  const mcp = await createWikiMcp({ config, pageTypes: [], logger, transport, ...(auth !== undefined ? { auth } : {}) });
+  const mcp = await createWikiMcp({
+    config,
+    pageTypes: [],
+    logger,
+    transport,
+    ...(auth !== undefined ? { auth } : {}),
+    ...(copyBlob !== undefined ? { copyBlob } : {}),
+  });
   return { mcp, config };
 }
 
@@ -230,7 +247,13 @@ export async function startWikiServer(
         }
       : {}),
   };
-  const started = await startMcp(internalBaseUrl, logger.forSource("mcp"), mcpTransport, mcpAuth);
+  // A page move copies the attachments it references into the target workspace's store.
+  const copyBlob: CreateWikiMcpOptions["copyBlob"] = async (id, from, to) => {
+    if (!(await blobs.store.copy(from, to, id))) {
+      serverLog.warn("a moved page references an attachment the source doesn't hold", { id, from, to });
+    }
+  };
+  const started = await startMcp(internalBaseUrl, logger.forSource("mcp"), mcpTransport, mcpAuth, copyBlob);
   const mcp = started.mcp;
   if (authEnabled && (started.config.namespace === "auth" || started.config.namespace === ".well-known")) {
     throw new Error(

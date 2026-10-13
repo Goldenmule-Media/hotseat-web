@@ -74,6 +74,22 @@ describe("blob store", () => {
   it("rejects an empty body", async () => {
     await expect(store.put("ws:1", Buffer.alloc(0), "image/png", "empty.png")).rejects.toThrow(/nothing to store/);
   });
+
+  it("copies a blob to another workspace for a page move, idempotently", async () => {
+    const { id } = await store.put("ws:from", PDF, "application/pdf", "spec.pdf");
+    expect(await store.copy("ws:from", "ws:to", id)).toBe(true);
+    expect(await store.copy("ws:from", "ws:to", id)).toBe(true);
+    const copied = await store.get("ws:to", id);
+    expect(copied?.bytes.equals(PDF)).toBe(true);
+    expect(copied?.meta).toMatchObject({ mime: "application/pdf", name: "spec.pdf" });
+  });
+
+  it("copies past today's mime limits (the bytes were admitted once) and reports a missing source", async () => {
+    const strict = new BlobStore({ dir, maxBytes: MAX, mimeAllow: ["image/*"] });
+    const { id } = await store.put("ws:from", PDF, "application/pdf", "spec.pdf");
+    expect(await strict.copy("ws:from", "ws:strict", id)).toBe(true);
+    expect(await strict.copy("ws:from", "ws:strict", "f".repeat(64))).toBe(false);
+  });
 });
 
 describe("blob helpers", () => {

@@ -138,6 +138,22 @@ export class BlobStore {
     if (meta === undefined) return undefined;
     return { meta, bytes: await readFile(this.pathsFor(workspaceId, id).bytes) };
   }
+
+  /**
+   * Copy a blob to another workspace's store, for a page move. The bytes were admitted once,
+   * so today's size and mime limits don't apply again. Returns `false` when the source
+   * doesn't hold it (the reference was already broken there); idempotent otherwise.
+   */
+  async copy(fromWorkspaceId: string, toWorkspaceId: string, id: string): Promise<boolean> {
+    const dest = this.pathsFor(toWorkspaceId, id);
+    if (await exists(dest.bytes)) return true;
+    const blob = await this.get(fromWorkspaceId, id);
+    if (blob === undefined) return false;
+    await mkdir(dest.dir, { recursive: true });
+    await atomicWrite(dest.bytes, blob.bytes);
+    await atomicWrite(dest.meta, Buffer.from(JSON.stringify(blob.meta), "utf8"));
+    return true;
+  }
 }
 
 async function exists(path: string): Promise<boolean> {
