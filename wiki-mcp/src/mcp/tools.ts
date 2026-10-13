@@ -43,6 +43,7 @@ import type { LanguageRegistry, RenameTarget } from "../models/language-registry
 import type { ModelRegistry } from "../models/registry.js";
 import type { AccessView } from "./auth.js";
 import type { SessionTokenManager } from "./tokens.js";
+import { resolveCrossWorkspaceTarget } from "./cross-workspace.js";
 
 /**
  * The shared default {@link LanguageRegistry} (built-in TS/JS analyzer, stateless/pure)
@@ -103,6 +104,8 @@ export interface WikiTool {
    * (the default — any workspace member) or `"owner"` (workspace administration).
    */
   readonly access?: "member" | "owner";
+  /** Args naming a workspace the call touches, each gated at `access`. @default ["workspaceId"] */
+  readonly workspaceArgs?: readonly string[];
   handle(args: Record<string, unknown>, ctx: WikiToolContext): Promise<ToolResult>;
 }
 
@@ -478,40 +481,67 @@ const unarchivePageTool: WikiTool = {
 
 const linkTool: WikiTool = {
   name: "link",
-  description: "Create a typed graph link between two pages (beyond the tree).",
+  description:
+    "Create a typed graph link between two pages (beyond the tree). To link to a page in ANOTHER " +
+    "workspace, pass its workspace as toWorkspaceId: you need access to both, the target must exist, " +
+    "and the link renders with the target's current title (re-link to refresh it).",
   inputSchema: obj(
-    { workspaceId: STR, from: str("Source page id."), to: str("Target page id."), role: str("Link role/label.") },
+    {
+      workspaceId: STR,
+      from: str("Source page id."),
+      to: str("Target page id."),
+      role: str("Link role/label."),
+      toWorkspaceId: str("The target's workspace, when it isn't workspaceId."),
+    },
     ["workspaceId", "from", "to", "role"],
   ),
+  workspaceArgs: ["workspaceId", "toWorkspaceId"],
   write: true,
   async handle(args, ctx) {
     const ws = asWorkspaceId(reqStr(args, "workspaceId"));
+    const toWs = optStrOrNull(args, "toWorkspaceId");
+    const from = asPageId(reqStr(args, "from"));
+    const to = asPageId(reqStr(args, "to"));
+    const role = reqStr(args, "role");
     const handle = await ctx.engine.open(ws);
-    const { token } = await handle.link(
-      asPageId(reqStr(args, "from")),
-      asPageId(reqStr(args, "to")),
-      reqStr(args, "role"),
-    );
+    if (toWs === null || toWs === ws) {
+      const { token } = await handle.link(from, to, role);
+      ctx.tokens.recordWrite(ctx.sessionId, token);
+      return { text: "Linked.", data: { token } };
+    }
+    const target = await resolveCrossWorkspaceTarget(ctx, asWorkspaceId(toWs), to);
+    const { token } = await handle.link(from, to, role, { workspace: asWorkspaceId(toWs), title: target.title });
     ctx.tokens.recordWrite(ctx.sessionId, token);
-    return { text: "Linked.", data: { token } };
+    return {
+      text: target.archived ? `Linked (note: the target is archived in ${toWs}).` : "Linked.",
+      data: { token, title: target.title, archived: target.archived },
+    };
   },
 };
 
 const unlinkTool: WikiTool = {
   name: "unlink",
-  description: "Remove a typed graph link between two pages.",
+  description: "Remove a typed graph link between two pages. Pass toWorkspaceId to remove a cross-workspace link.",
   inputSchema: obj(
-    { workspaceId: STR, from: STR, to: STR, role: str("The link role to remove.") },
+    {
+      workspaceId: STR,
+      from: STR,
+      to: STR,
+      role: str("The link role to remove."),
+      toWorkspaceId: str("The target's workspace, for a cross-workspace link."),
+    },
     ["workspaceId", "from", "to", "role"],
   ),
   write: true,
   async handle(args, ctx) {
     const ws = asWorkspaceId(reqStr(args, "workspaceId"));
+    const toWs = optStrOrNull(args, "toWorkspaceId");
     const handle = await ctx.engine.open(ws);
     const { token } = await handle.unlink(
       asPageId(reqStr(args, "from")),
       asPageId(reqStr(args, "to")),
       reqStr(args, "role"),
+      toWs === null || toWs === ws ? undefined : asWorkspaceId(toWs),
     );
     ctx.tokens.recordWrite(ctx.sessionId, token);
     return { text: "Unlinked.", data: { token } };

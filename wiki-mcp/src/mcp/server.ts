@@ -219,7 +219,7 @@ export class WikiMcpServer {
         return errorResult(`Unknown tool: ${request.params.name}`);
       }
       // Auth mode: resolve the session's user and gate any workspace-scoped call.
-      // The gate is GENERIC: it reads `workspaceId` from the args (an engine concept,
+      // The gate is GENERIC: it reads the tool's `workspaceArgs` (default `workspaceId`) from the args (an engine concept,
       // never a model one) and applies the tool's declared level (`member` default,
       // `owner` for workspace administration).
       let access: AccessView | undefined;
@@ -229,8 +229,9 @@ export class WikiMcpServer {
           return errorResult("[UNAUTHENTICATED] This server requires authentication; the session has no user.");
         }
         access = bindAccess(this.deps.auth, user);
-        const ws = (request.params.arguments ?? {})["workspaceId"];
-        if (typeof ws === "string") {
+        for (const key of tool.workspaceArgs ?? ["workspaceId"]) {
+          const ws = (request.params.arguments ?? {})[key];
+          if (typeof ws !== "string") continue;
           const allowed = (tool.access ?? "member") === "owner" ? access.canAdmin(ws) : access.canAccess(ws);
           if (!allowed) {
             this.deps.logger.warn("tool access denied", { tool: tool.name, user: user.login, workspace: ws });
