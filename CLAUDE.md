@@ -176,6 +176,9 @@ The load-bearing mental model; full detail in [`architecture/wiki/`](docs/hotsea
   (`createTestWiki`, `startTestServer`, `wikiOn`) spins up an in-process `DurableStreamTestServer`;
   `wiki-mcp` uses in-memory PGlite; `wiki-mirror` drives the public engine via `wiki/testing` (a writer +
   a mirror client on one server). `wiki-models` has no tests (`vitest run --passWithNoTests`).
+- **Upgrade every tailing engine before a new event type lands.** An engine that meets an event type
+  it doesn't know stops its tail, so before the first cross-workspace move (`movePages` / `scripts/move-pages.ts`)
+  on a shared server, redeploy the server and wiki-ui and release wiki-mirror.
 
 ## Running locally
 
