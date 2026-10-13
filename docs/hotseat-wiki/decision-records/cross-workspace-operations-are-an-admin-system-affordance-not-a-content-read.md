@@ -18,12 +18,16 @@ Cross-workspace fan-out is reserved for namespace discovery/catalog only — lis
 
 Applied here: attention and search both require a workspaceId, and nextActions is subtree-scoped. The only cross-workspace read left is listWorkspaces, the namespace catalog.
 
+Amended 2026-10-13 for cross-workspace references. An operation may name an explicit second workspace, such as the target of a link or a ref, and each named workspace is access-gated on its own. An inbound lookup such as backlinks may answer from the read model's index across workspaces, filtered to the workspaces the caller can access. Neither enumerates the namespace or folds another workspace, so the rule against fan-out stands.
+
 ## Consequences
 Routine reads stay cheap and stay inside one aggregate's consistency boundary — no per-workspace fold or handle churn, and no accidental cross-aggregate coupling.
 
 The workspace boundary stays meaningful as the unit of atomic consistency; read-your-writes and consistency tokens remain per-workspace.
 
 No content read fans out: full-text search is per-workspace alongside attention and nextActions, leaving listWorkspaces as the sole cross-workspace (catalog) read.
+
+Reading another workspace by name stays cheap: one indexed read model query, never a fold. The decision record on cross-workspace references describes the shape.
 
 ## Relations
 _None._
