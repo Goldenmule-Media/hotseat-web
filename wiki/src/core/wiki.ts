@@ -54,7 +54,7 @@ import { displayTitle, renderPage, renderPageElement, renderWorkspace } from "..
 import { EventLog } from "../stores/event-log";
 import { CommandBus, type BusProjection, type CommandBusConfig, type CommitOutcome } from "./command-bus";
 import { InvariantViolationError, PageNotFoundError, WorkspaceNotFoundError } from "./errors";
-import { exportMove, planMove } from "./move";
+import { exportMove, planMove, requireLivePage } from "./move";
 import { unauthoredRequiredInFields } from "./ingestion";
 import { encodeToken, InMemoryReadModel } from "./readmodel";
 import { Registry } from "./registry";
@@ -825,6 +825,7 @@ class WorkspaceHandle implements IWorkspaceHandle {
   async page(pageId: PageId, opts?: IReadOpts): Promise<IPageView> {
     await this.awaitConsistency(opts);
     const node = this.projection.state.pages.get(pageId);
+    if (node === undefined) requireLivePage(this.projection.state, pageId);
     if (node === undefined) throw new PageNotFoundError(pageId);
     return new PageView(pageId, node.type, this);
   }
@@ -834,6 +835,7 @@ class WorkspaceHandle implements IWorkspaceHandle {
     if (pageId === undefined) {
       return renderWorkspace(this.projection.state, this.registry);
     }
+    requireLivePage(this.projection.state, pageId);
     return renderPage(this.projection.state, pageId, this.registry);
   }
 
@@ -869,6 +871,7 @@ class WorkspaceHandle implements IWorkspaceHandle {
   /** Resolve a page node (or throw). */
   nodeOf(pageId: PageId): IPageNode {
     const node = this.projection.state.pages.get(pageId);
+    if (node === undefined) requireLivePage(this.projection.state, pageId);
     if (node === undefined) throw new PageNotFoundError(pageId);
     return node;
   }

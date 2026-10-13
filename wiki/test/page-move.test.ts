@@ -141,6 +141,7 @@ describe("page move export and import", () => {
     await src.link(usage, outside, "uses");
     await src.link(usage, notes, "extends");
     await src.link(outside, usage, "documented-by");
+    await src.mutate(outside, "addParagraph", { inlines: ["Read ", { ref: usage }, "."] });
   });
 
   afterAll(async () => {
@@ -218,6 +219,23 @@ describe("page move export and import", () => {
     expect(await src.toMarkdown(outside)).toContain(`documented-by → [Usage](wiki://${dst.id}/${usage})`);
   });
 
+  it("pages that stay keep working against the moved ones through their forwards", async () => {
+    await expect(src.page(usage)).rejects.toMatchObject({ code: "PAGE_MOVED", workspaceId: dst.id, pageId: usage });
+    await expect(src.toMarkdown(usage)).rejects.toMatchObject({ code: "PAGE_MOVED" });
+    await expect(src.mutate(usage, "addParagraph", { inlines: ["x"] })).rejects.toMatchObject({ code: "PAGE_MOVED" });
+    await expect(src.reparent(usage, null)).rejects.toMatchObject({ code: "PAGE_MOVED" });
+
+    // A page whose content refers to a moved page stays writable and labels it in its new home.
+    const { token } = await src.mutate(outside, "addParagraph", { inlines: ["Still here."] });
+    expect(await src.toMarkdown(outside, { consistentWith: token })).toContain(`Read [Usage](wiki://${dst.id}/${usage}).`);
+
+    // Linking to a moved page links to it where it lives now; unlinking finds that edge.
+    const linked = await src.link(outside, notes, "see");
+    expect(await src.toMarkdown(outside, { consistentWith: linked.token })).toContain(`see → [Notes](wiki://${dst.id}/${notes})`);
+    const unlinked = await src.unlink(outside, notes, "see");
+    expect(await src.toMarkdown(outside, { consistentWith: unlinked.token })).not.toContain("see →");
+  });
+
   it("is idempotent: importing or completing the same move again writes nothing", async () => {
     const move = (await dst.history()).find((e) => e.type === "PagesImported")!;
     const { moveId } = move.payload as { moveId: string };
@@ -241,7 +259,10 @@ describe("page move export and import", () => {
     const { token } = await dst.completePageMove(move.moveId);
     expect(await src.forwardOf(kit)).toBeUndefined();
     expect(await dst.forwardOf(kit, { consistentWith: token })).toMatchObject({ workspace: src.id });
-    // The ref that pointed back home is local again.
+    // The ref and the link that pointed back home are local again.
     expect(await src.toMarkdown(usage)).toContain("See Notes and Outside.");
+    const outsideMd = await src.toMarkdown(outside);
+    expect(outsideMd).toContain(`documented-by → [Usage](${usage})`);
+    expect(outsideMd).toContain("Read Usage.");
   });
 });

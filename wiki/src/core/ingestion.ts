@@ -232,7 +232,9 @@ function resolveRef(state: IWorkspaceState, page: IPageNode, target: RefTarget):
     }
     return true;
   }
-  if (target.kind === "page") return state.pages.has(target.id);
+  // A page that moved to another workspace still resolves, through its forward.
+  if (target.kind === "page") return state.pages.has(target.id) || state.forwards.has(target.id);
+  if (target.page !== undefined && !state.pages.has(target.page) && state.forwards.has(target.page)) return true;
   // Non-`page` kinds resolve within an OWNER page: the cross-page `target.page` when
   // present (ref integrity now spans pages), else the page being validated.
   const owner = target.page === undefined ? page : state.pages.get(target.page);

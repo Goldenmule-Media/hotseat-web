@@ -36,7 +36,7 @@ import { bulletList, heading, joinBlocks, numbered, placeholder, section, status
 export function buildRenderCtx(state: IWorkspaceState, _registry: Registry): IRenderCtx {
   const nodeOf = (id: PageId): IPageNode | undefined => state.pages.get(id);
   return {
-    titleOf: (id) => nodeOf(id)?.title,
+    titleOf: (id) => nodeOf(id)?.title ?? state.forwards.get(id)?.title,
     typeOf: (id) => nodeOf(id)?.type,
     statusOf: (id) => nodeOf(id)?.status,
     archivedOf: (id) => nodeOf(id)?.archived === true,
@@ -103,6 +103,10 @@ function makeLabelResolver(
   return (target: RefTarget): string => {
     const external = crossWorkspaceRefOf(target, state.id);
     if (external !== undefined) return `[${external.title}](${crossWorkspaceHref(external.workspace, external.page)})`;
+    // A local ref to a page that has since moved away labels it where it lives now.
+    const ownerId = target.kind === "page" ? target.id : target.page;
+    const moved = ownerId === undefined || state.pages.has(ownerId) ? undefined : state.forwards.get(ownerId);
+    if (moved !== undefined) return `[${moved.title}](${crossWorkspaceHref(moved.workspace, ownerId!)})`;
     switch (target.kind) {
       case "page":
         return ctx.titleOf(target.id) ?? String(target.id);

@@ -31,6 +31,7 @@ import {
   InvariantViolationError,
   ItemNotFoundError,
   LinkTargetNotFoundError,
+  PageMovedError,
   PageNotFoundError,
   ParentNotFoundError,
 } from "./errors";
@@ -71,8 +72,10 @@ function childrenOf(state: IWorkspaceState, parentId: PageId | null | undefined)
 /** Resolve a page node or throw {@link PageNotFoundError}. */
 function requirePage(state: IWorkspaceState, pageId: PageId): IPageNode {
   const node = state.pages.get(pageId);
-  if (node === undefined) throw new PageNotFoundError(pageId);
-  return node;
+  if (node !== undefined) return node;
+  const forward = state.forwards.get(pageId);
+  if (forward !== undefined) throw new PageMovedError(pageId, forward.workspace);
+  throw new PageNotFoundError(pageId);
 }
 
 /** Reject mutating an archived target page. */
@@ -454,6 +457,11 @@ export const link: StructureHandler = (state, args) => {
   };
 
   if (!state.pages.has(from)) throw new LinkTargetNotFoundError(from);
+  const moved = workspace === undefined && !state.pages.has(to) ? state.forwards.get(to) : undefined;
+  if (moved !== undefined) {
+    // The target moved away: link to it where it lives now.
+    return { events: [{ type: "LinkAdded", payload: { from, to, role, workspace: moved.workspace, title: moved.title } }] };
+  }
   if (workspace === undefined) {
     if (!state.pages.has(to)) throw new LinkTargetNotFoundError(to);
     return { events: [{ type: "LinkAdded", payload: { from, to, role } }] };
@@ -476,6 +484,10 @@ export const unlink: StructureHandler = (state, args) => {
   };
 
   if (!state.pages.has(from)) throw new LinkTargetNotFoundError(from);
+  const moved = workspace === undefined && !state.pages.has(to) ? state.forwards.get(to) : undefined;
+  if (moved !== undefined) {
+    return { events: [{ type: "LinkRemoved", payload: { from, to, role, workspace: moved.workspace } }] };
+  }
   if (workspace === undefined) {
     if (!state.pages.has(to)) throw new LinkTargetNotFoundError(to);
     return { events: [{ type: "LinkRemoved", payload: { from, to, role } }] };

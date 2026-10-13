@@ -567,6 +567,11 @@ function importPages(
       siblings.push(rec.id);
     }
   }
+  // Edges here that pointed at these pages in the workspace they come from are local again.
+  const arrived = new Set(p.pages.map((rec) => rec.id));
+  state.links = state.links.map((l) =>
+    l.workspace === p.from && arrived.has(l.to) ? { from: l.from, to: l.to, role: l.role } : l,
+  );
   for (const link of p.links) {
     if (skipped.has(link.from) || (link.workspace === undefined && skipped.has(link.to))) continue;
     const edge = { from: link.from, to: link.to, role: link.role, workspace: link.workspace, title: link.title };
