@@ -108,9 +108,14 @@ describe("wiki-mirror config resolution", () => {
     expect(() => resolveConfig(["--workspace", "ws:b"], env, dir)).toThrow(/must be set together/);
   });
 
-  it("throws on a duplicate workspace across file + flag", () => {
+  it("mirrors one workspace into two roots across file + flag", () => {
     writeConfig({ emitters: [{ workspaceId: "ws:a", root: "/x" }] });
-    expect(() => resolveConfig(["--workspace", "ws:a", "--root", "/y"], env, dir)).toThrow(/duplicate emitter/);
+    expect(resolveConfig(["--workspace", "ws:a", "--root", "/y"], env, dir).emitters.map((e) => e.root)).toEqual(["/x", "/y"]);
+  });
+
+  it("still throws on the same workspace twice at one root", () => {
+    writeConfig({ emitters: [{ workspaceId: "ws:a", root: "/x" }] });
+    expect(() => resolveConfig(["--workspace", "ws:a", "--root", "/x"], env, dir)).toThrow(/same root/);
   });
 
   it("throws on two emitters sharing a root (single-writer-per-root)", () => {
@@ -133,14 +138,17 @@ describe("wiki-mirror config resolution", () => {
     ]);
   });
 
-  it("throws on a duplicate workspace + subtree pair", () => {
+  it("mirrors one workspace + subtree pair into two different roots", () => {
     writeConfig({
       emitters: [
         { workspaceId: "ws:a", root: "/x", subtreeRootId: "toc:ball" },
         { workspaceId: "ws:a", root: "/y", subtreeRootId: "toc:ball" },
       ],
     });
-    expect(() => resolveConfig([], env, dir)).toThrow(/duplicate emitter for page toc:ball/);
+    expect(resolveConfig([], env, dir).emitters).toEqual([
+      { workspaceId: "ws:a", root: "/x", subtreeRootId: "toc:ball" },
+      { workspaceId: "ws:a", root: "/y", subtreeRootId: "toc:ball" },
+    ]);
   });
 
   it("throws on nested roots", () => {

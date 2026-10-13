@@ -127,12 +127,6 @@ final class MirrorConfigTests: XCTestCase {
         config.emitters = [EmitterEntry(workspaceId: "ws:a", root: "relative/path")]
         XCTAssertThrowsError(try config.save(to: path))
 
-        config.emitters = [
-            EmitterEntry(workspaceId: "ws:a", root: "/tmp/one"),
-            EmitterEntry(workspaceId: "ws:a", root: "/tmp/two"),
-        ]
-        XCTAssertThrowsError(try config.save(to: path))
-
         // One root, two workspaces: they would clobber each other's manifest.
         config.emitters = [
             EmitterEntry(workspaceId: "ws:a", root: "/tmp/same"),
@@ -157,21 +151,18 @@ final class MirrorConfigTests: XCTestCase {
         XCTAssertNil(emitters[2]["subtreeRootId"])
     }
 
-    func testOneWorkspaceMayBeMirroredOncePerSubtree() {
+    func testOneWorkspaceOrPageMayBeMirroredIntoSeveralFolders() {
         var config = MirrorConfigFile()
         config.emitters = [
             EmitterEntry(workspaceId: "ws:a", root: "/tmp/whole"),
             EmitterEntry(workspaceId: "ws:a", root: "/tmp/war", subtreeRootId: "toc:war"),
-            EmitterEntry(workspaceId: "ws:a", root: "/tmp/ballgame", subtreeRootId: "toc:ballgame"),
+            EmitterEntry(workspaceId: "ws:a", root: "/tmp/war2", subtreeRootId: "toc:war"),
+            EmitterEntry(workspaceId: "ws:a", root: "/tmp/whole2"),
         ]
         XCTAssertEqual(config.validate(), [])
 
-        config.emitters.append(EmitterEntry(workspaceId: "ws:a", root: "/tmp/war2", subtreeRootId: "toc:war"))
-        XCTAssertEqual(config.validate(), ["ws:a › toc:war is listed twice."])
-
-        config.emitters.removeLast()
-        config.emitters.append(EmitterEntry(workspaceId: "ws:a", root: "/tmp/whole2", subtreeRootId: " "))
-        XCTAssertEqual(config.validate(), ["ws:a is listed twice."])
+        config.emitters.append(EmitterEntry(workspaceId: "ws:a", root: "/tmp/war", subtreeRootId: "toc:war"))
+        XCTAssertEqual(config.validate(), ["Two mirrors both write to /tmp/war — give each its own folder."])
     }
 
     func testRejectsNestedRootsButNotSiblingsWithACommonPrefix() {

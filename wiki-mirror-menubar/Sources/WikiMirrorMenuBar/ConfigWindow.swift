@@ -76,7 +76,6 @@ struct ConfigWindow: View {
                                 EmitterRow(
                                     emitter: $emitter,
                                     catalog: store.catalog,
-                                    taken: Set(config.emitters.filter { $0.id != emitter.id }.map(\.pairKey)),
                                     loadPages: store.pageTree(workspaceId:)
                                 ) {
                                     config.emitters.removeAll { $0.id == emitter.id }
@@ -187,8 +186,6 @@ struct ConfigWindow: View {
 private struct EmitterRow: View {
     @Binding var emitter: EmitterEntry
     let catalog: [CatalogWorkspace]
-    /// `pairKey`s already claimed by another emitter — offered but not selectable.
-    let taken: Set<String>
     let loadPages: (String) async throws -> [PageTreeNode]
     let onDelete: () -> Void
 
@@ -258,8 +255,6 @@ private struct EmitterRow: View {
                         // A page id from another workspace means nothing here.
                         emitter.subtreeRootId = nil
                     }
-                    // Its whole-workspace mirror is already claimed; the mirror rejects a duplicate.
-                    .disabled(taken.contains(Self.pairKey(workspace.id, nil)) && workspace.id != emitter.workspaceId)
                 }
             }
         } label: {
@@ -278,7 +273,6 @@ private struct EmitterRow: View {
     private var pagePicker: some View {
         Menu {
             Button("Whole workspace") { emitter.subtreeRootId = nil }
-                .disabled(taken.contains(Self.pairKey(emitter.workspaceId, nil)))
             Divider()
             if pages.isEmpty {
                 Text(pagesError == nil ? "No pages" : "Start the mirror to list pages")
@@ -287,7 +281,6 @@ private struct EmitterRow: View {
                     Button(String(repeating: "    ", count: page.depth) + page.title + (page.archived ? " (archived)" : "")) {
                         emitter.subtreeRootId = page.id
                     }
-                    .disabled(taken.contains(Self.pairKey(emitter.workspaceId, page.id)))
                 }
             }
         } label: {
@@ -296,10 +289,6 @@ private struct EmitterRow: View {
         .menuStyle(.borderlessButton)
         .fixedSize()
         .help("Mirror the whole workspace, or just one page and everything under it")
-    }
-
-    private static func pairKey(_ workspaceId: String, _ subtreeRootId: String?) -> String {
-        EmitterEntry(workspaceId: workspaceId, subtreeRootId: subtreeRootId).pairKey
     }
 
     private func reloadPages() async {

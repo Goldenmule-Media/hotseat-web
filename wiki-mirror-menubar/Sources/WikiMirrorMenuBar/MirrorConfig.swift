@@ -36,11 +36,6 @@ struct EmitterEntry: Identifiable, Hashable {
         return value
     }
 
-    /// What makes two entries the same mirror: the workspace plus the subtree, if any.
-    var pairKey: String {
-        "\(workspaceId.trimmingCharacters(in: .whitespaces))\u{0}\(normalizedSubtreeRootId ?? "")"
-    }
-
     static func == (lhs: EmitterEntry, rhs: EmitterEntry) -> Bool {
         lhs.id == rhs.id && lhs.workspaceId == rhs.workspaceId && lhs.root == rhs.root
             && lhs.subtreeRootId == rhs.subtreeRootId
@@ -116,19 +111,12 @@ struct MirrorConfigFile {
     /// Everything wrong with this config, in the words the mirror itself would use.
     func validate() -> [String] {
         var problems: [String] = []
-        var seenPairs = Set<String>()
         var seenRoots = Set<String>()
         for emitter in emitters {
             let workspace = emitter.workspaceId.trimmingCharacters(in: .whitespaces)
             let root = emitter.root.trimmingCharacters(in: .whitespaces)
             if workspace.isEmpty {
                 problems.append("Every mirror needs a workspace.")
-            } else if !seenPairs.insert(emitter.pairKey).inserted {
-                if let subtree = emitter.normalizedSubtreeRootId {
-                    problems.append("\(workspace) › \(subtree) is listed twice.")
-                } else {
-                    problems.append("\(workspace) is listed twice.")
-                }
             }
             if root.isEmpty {
                 problems.append("\(workspace.isEmpty ? "A mirror" : workspace) needs a folder.")
@@ -136,7 +124,7 @@ struct MirrorConfigFile {
                 problems.append("\(root) must be an absolute path.")
             } else if !seenRoots.insert(root).inserted {
                 // One root = one writer: two emitters would clobber each other's manifest.
-                problems.append("Two workspaces both write to \(root) — give each its own folder.")
+                problems.append("Two mirrors both write to \(root) — give each its own folder.")
             }
         }
         let roots = seenRoots.sorted()

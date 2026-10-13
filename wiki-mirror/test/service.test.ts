@@ -212,6 +212,42 @@ describe("wiki-mirror — the service", () => {
     ]);
   });
 
+  it("mirrors the same subtree into two roots, both connected", async () => {
+    const tocWiki = wikiOn(url, tocPageTypes, { namespace: "test" });
+    cleanup.push(() => tocWiki.close());
+    const studio = await tocWiki.createWorkspace({ name: "Shared" });
+    const war = (await studio.createPage("toc", { title: "War", parentId: null })).value;
+    await studio.createPage("toc", { title: "Rules", parentId: war });
+    const rootA = await freshRoot();
+    const rootB = await freshRoot();
+
+    const running = await startMirror(
+      {
+        streamBaseUrl: url,
+        namespace: "test",
+        models: ["wiki-models/toc"],
+        emitters: [
+          { workspaceId: studio.id, root: rootA, subtreeRootId: war },
+          { workspaceId: studio.id, root: rootB, subtreeRootId: war },
+        ],
+        healthHost: "127.0.0.1",
+        healthPort: 0,
+      },
+      silentLogger,
+    );
+    cleanup.push(() => running.close());
+    for (const root of [rootA, rootB]) {
+      expect((await readdir(root)).sort()).toEqual([".wiki-md-manifest.json", "index.md", "rules.md"]);
+    }
+    const body = (await (await fetch(`${running.health.url}/_mirror/status`)).json()) as {
+      workspaces: { root: string; subtreeRootId: string | null; connected: boolean }[];
+    };
+    expect(body.workspaces.map((w) => [w.root, w.subtreeRootId, w.connected])).toEqual([
+      [rootA, war, true],
+      [rootB, war, true],
+    ]);
+  });
+
   it("serves a config path and a pid so a client edits the right file and sees the right process", async () => {
     const running = await start(await freshRoot());
     const body = await (await fetch(`${running.health.url}/_mirror/status`)).json();

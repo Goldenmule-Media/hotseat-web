@@ -101,9 +101,9 @@ workspace, so a workspace with a page per project can feed each project's repo i
 
 Easiest path is the menu-bar app's **Configure…**, which picks workspaces by name, subtree pages
 from the workspace's tree, and folders with a file chooser. By hand, the rules the mirror enforces
-are: roots must be **absolute**, each workspace + subtree pair appears **once**, and no two entries
-share a root or nest one root inside another (one root is one writer, and a mirror sweeps any file
-it owns that it no longer expects).
+are: roots must be **absolute**, and no two entries share a root or nest one root inside another
+(one root is one writer, and a mirror sweeps any file it owns that it no longer expects). The same
+workspace or subtree may be mirrored into several repos, each at its own root.
 
 It is read **once at startup**: restart the agent after editing it.
 

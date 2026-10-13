@@ -126,8 +126,7 @@ function parseFlags(argv: readonly string[]): Record<string, string> {
 /**
  * Resolve the effective {@link IMirrorConfig} from CLI flags, environment, and an optional
  * config file. Fails fast on a malformed/missing EXPLICIT config file, an unpaired
- * `--workspace`/`--root` (or a `--subtree` without them), a duplicate workspace + subtree pair,
- * a repeated or nested root, or an empty workspaceId/root/subtreeRootId.
+ * `--workspace`/`--root` (or a `--subtree` without them), a repeated or nested root, or an empty workspaceId/root/subtreeRootId.
  *
  * @param argv process args WITHOUT the leading `node script` (`process.argv.slice(2)`).
  * @param env  environment map (`process.env`).
@@ -209,7 +208,6 @@ export function resolveConfig(
     throw new Error("wiki-mirror: --subtree (or WIKI_MIRROR_SUBTREE) needs --workspace and --root");
   }
 
-  const seen = new Set<string>();
   const roots: string[] = [];
   const emitters: IEmitterEntry[] = raw.map((e) => {
     if (typeof e.workspaceId !== "string" || e.workspaceId.length === 0) {
@@ -224,15 +222,6 @@ export function resolveConfig(
       );
     }
     const subtreeRootId = e.subtreeRootId as string | undefined;
-    const key = JSON.stringify([e.workspaceId, subtreeRootId ?? null]);
-    if (seen.has(key)) {
-      throw new Error(
-        subtreeRootId === undefined
-          ? `wiki-mirror: duplicate emitter for workspace ${e.workspaceId}`
-          : `wiki-mirror: duplicate emitter for page ${subtreeRootId} of workspace ${e.workspaceId}`,
-      );
-    }
-    seen.add(key);
     const root = isAbsolute(e.root) ? e.root : resolvePath(e.base, e.root);
     // One root = one writer: the projector is single-writer-per-root and owns everything under
     // it, so two emitters on the same or nested roots would sweep each other's files.
