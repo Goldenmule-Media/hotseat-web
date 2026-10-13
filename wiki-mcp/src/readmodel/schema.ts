@@ -142,12 +142,18 @@ export interface TreeEdgesTable {
   ord: number;
 }
 
-/** `links(workspace_id, from_id, to_id, role)` — graph edges beyond the tree. */
+/**
+ * `links(workspace_id, from_id, to_workspace_id, to_id, role, to_title)` — graph edges beyond
+ * the tree. `to_workspace_id` equals `workspace_id` for a local edge; `to_title` is the
+ * write-time label snapshot of a cross-workspace edge (null for a local one).
+ */
 export interface LinksTable {
   workspace_id: string;
   from_id: string;
+  to_workspace_id: string;
   to_id: string;
   role: string;
+  to_title: string | null;
 }
 
 /** `events(workspace_id, version, type, page_id, payload JSONB, occurred_at)` — the queryable log. */

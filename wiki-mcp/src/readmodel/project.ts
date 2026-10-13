@@ -268,8 +268,10 @@ function linkRows(state: IWorkspaceState): LinkInsert[] {
   return state.links.map((l) => ({
     workspace_id: state.id,
     from_id: l.from,
+    to_workspace_id: l.workspace ?? state.id,
     to_id: l.to,
     role: l.role,
+    to_title: l.title ?? null,
   }));
 }
 

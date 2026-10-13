@@ -154,8 +154,8 @@ describe("SQL read model: fold → serialize → SQL", () => {
 
     // ── links match ──
     const links = await readModel.links(wsId);
-    expect(links.map((l) => `${l.from_id}->${l.to_id}:${l.role}`)).toEqual(
-      folded.links.map((l) => `${l.from}->${l.to}:${l.role}`),
+    expect(links.map((l) => `${l.from_id}->${l.to_workspace_id}/${l.to_id}:${l.role}`)).toEqual(
+      folded.links.map((l) => `${l.from}->${l.workspace ?? wsId}/${l.to}:${l.role}`),
     );
 
     // ── the event log is queryable and complete ──
