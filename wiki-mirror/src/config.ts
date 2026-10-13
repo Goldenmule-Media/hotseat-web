@@ -4,7 +4,7 @@
  * bearer `token` for an auth-gated server. Resolved from
  * **flags → env (`WIKI_MIRROR_*`) → config file → defaults**.
  *
- * The `workspaceId → root` mapping is inherently PER-MACHINE state (two developers tailing
+ * The `workspaceId (+ optional subtree page) → root` mapping is inherently PER-MACHINE state (two developers tailing
  * the same server have different checkouts at different paths), which is exactly why it lives
  * in a LOCAL file rather than on the shared server — and why the default location is the
  * user-level **`~/.wiki/wiki-mirror.config.json`**, ONE file shared by every project's mirror
@@ -15,13 +15,15 @@
  */
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join as joinPath, resolve as resolvePath } from "node:path";
+import { dirname, isAbsolute, join as joinPath, relative as relativePath, resolve as resolvePath } from "node:path";
 
-/** One workspace mirrored to one absolute on-disk root. */
+/** One workspace (or one page subtree of it) mirrored to one absolute on-disk root. */
 export interface IEmitterEntry {
   readonly workspaceId: string;
   /** Absolute output directory; the projector writes ONLY under here. */
   readonly root: string;
+  /** Mirror only this page and its descendants (written to `<root>/index.md` and below). */
+  readonly subtreeRootId?: string;
 }
 
 /** Fully-resolved wiki-mirror configuration. */
@@ -39,7 +41,7 @@ export interface IMirrorConfig {
    * its schema as loose files instead of resolving bare specifiers through node_modules.
    */
   readonly modelsDir?: string;
-  /** The workspace → absolute-root mirrors; one tail loop each. */
+  /** The workspace (or page subtree) → absolute-root mirrors; one tail loop each. */
   readonly emitters: readonly IEmitterEntry[];
   /** Host the local health endpoint binds to (loopback by default — unauthenticated, local-trust). */
   readonly healthHost: string;
@@ -75,7 +77,7 @@ interface IMirrorConfigFile {
   namespace?: string;
   models?: string[];
   modelsDir?: string;
-  emitters?: { workspaceId?: string; root?: string }[];
+  emitters?: { workspaceId?: string; root?: string; subtreeRootId?: unknown }[];
   token?: string;
   healthHost?: string;
   healthPort?: number;
@@ -124,7 +126,8 @@ function parseFlags(argv: readonly string[]): Record<string, string> {
 /**
  * Resolve the effective {@link IMirrorConfig} from CLI flags, environment, and an optional
  * config file. Fails fast on a malformed/missing EXPLICIT config file, an unpaired
- * `--workspace`/`--root`, a duplicate workspace, or an empty workspaceId/root.
+ * `--workspace`/`--root` (or a `--subtree` without them), a duplicate workspace + subtree pair,
+ * a repeated or nested root, or an empty workspaceId/root/subtreeRootId.
  *
  * @param argv process args WITHOUT the leading `node script` (`process.argv.slice(2)`).
  * @param env  environment map (`process.env`).
@@ -189,22 +192,25 @@ export function resolveConfig(
         : undefined;
 
   // ── emitters: file entries (root base = config dir) + one optional flag/env entry (base = cwd) ──
-  const raw: { workspaceId?: string; root?: string; base: string }[] = (file.emitters ?? []).map((e) => ({
+  const raw: { workspaceId?: string; root?: string; subtreeRootId?: unknown; base: string }[] = (file.emitters ?? []).map((e) => ({
     ...e,
     base: configDir,
   }));
   const wsFlag = flags["workspace"] ?? env.WIKI_MIRROR_WORKSPACE;
   const rootFlag = flags["root"] ?? env.WIKI_MIRROR_ROOT;
+  const subtreeFlag = flags["subtree"] ?? env.WIKI_MIRROR_SUBTREE;
   if (wsFlag !== undefined && rootFlag !== undefined) {
-    raw.push({ workspaceId: wsFlag, root: rootFlag, base: cwd });
+    raw.push({ workspaceId: wsFlag, root: rootFlag, ...(subtreeFlag !== undefined ? { subtreeRootId: subtreeFlag } : {}), base: cwd });
   } else if ((wsFlag === undefined) !== (rootFlag === undefined)) {
     throw new Error(
       "wiki-mirror: --workspace and --root (or WIKI_MIRROR_WORKSPACE/WIKI_MIRROR_ROOT) must be set together",
     );
+  } else if (subtreeFlag !== undefined) {
+    throw new Error("wiki-mirror: --subtree (or WIKI_MIRROR_SUBTREE) needs --workspace and --root");
   }
 
   const seen = new Set<string>();
-  const seenRoots = new Set<string>();
+  const roots: string[] = [];
   const emitters: IEmitterEntry[] = raw.map((e) => {
     if (typeof e.workspaceId !== "string" || e.workspaceId.length === 0) {
       throw new Error(`wiki-mirror: each emitter needs a non-empty workspaceId (got ${JSON.stringify(e.workspaceId)})`);
@@ -212,19 +218,34 @@ export function resolveConfig(
     if (typeof e.root !== "string" || e.root.length === 0) {
       throw new Error(`wiki-mirror: emitter for ${e.workspaceId} needs a non-empty root`);
     }
-    if (seen.has(e.workspaceId)) {
-      throw new Error(`wiki-mirror: duplicate emitter for workspace ${e.workspaceId}`);
+    if (e.subtreeRootId !== undefined && (typeof e.subtreeRootId !== "string" || e.subtreeRootId.length === 0)) {
+      throw new Error(
+        `wiki-mirror: emitter for ${e.workspaceId} has an invalid subtreeRootId ${JSON.stringify(e.subtreeRootId)} (expected a page id)`,
+      );
     }
-    seen.add(e.workspaceId);
+    const subtreeRootId = e.subtreeRootId as string | undefined;
+    const key = JSON.stringify([e.workspaceId, subtreeRootId ?? null]);
+    if (seen.has(key)) {
+      throw new Error(
+        subtreeRootId === undefined
+          ? `wiki-mirror: duplicate emitter for workspace ${e.workspaceId}`
+          : `wiki-mirror: duplicate emitter for page ${subtreeRootId} of workspace ${e.workspaceId}`,
+      );
+    }
+    seen.add(key);
     const root = isAbsolute(e.root) ? e.root : resolvePath(e.base, e.root);
-    // One root = one writer: the projector is single-writer-per-root and all of a root's
-    // workspaces share one `.wiki-md-manifest.json`, so two emitters on the same root would
-    // clobber each other's manifest. Give each workspace its own root.
-    if (seenRoots.has(root)) {
-      throw new Error(`wiki-mirror: two emitters target the same root "${root}" — give each workspace its own root (single-writer-per-root)`);
+    // One root = one writer: the projector is single-writer-per-root and owns everything under
+    // it, so two emitters on the same or nested roots would sweep each other's files.
+    for (const other of roots) {
+      if (other === root) {
+        throw new Error(`wiki-mirror: two emitters target the same root "${root}" — give each its own root (single-writer-per-root)`);
+      }
+      if (isInside(root, other) || isInside(other, root)) {
+        throw new Error(`wiki-mirror: emitter roots "${other}" and "${root}" are nested — one mirror would sweep the other's files`);
+      }
     }
-    seenRoots.add(root);
-    return { workspaceId: e.workspaceId, root };
+    roots.push(root);
+    return { workspaceId: e.workspaceId, root, ...(subtreeRootId !== undefined ? { subtreeRootId } : {}) };
   });
 
   return {
@@ -240,6 +261,12 @@ export function resolveConfig(
     configPath,
     configWasExplicit: explicitConfig !== undefined,
   };
+}
+
+/** True iff `child` is strictly below `parent`. */
+function isInside(child: string, parent: string): boolean {
+  const rel = relativePath(parent, child);
+  return rel.length > 0 && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
 /** Parse a positive integer flag value. Fail loud otherwise. */

@@ -138,13 +138,16 @@ export class WorkspaceMirror {
     const events = await this.handle.history();
     if (events.length === 0) return;
     const head = events[events.length - 1].version + 1;
-    if ((await this.sink.appliedVersion(this.workspaceId)) >= head) return; // already current
-    const state = foldWorkspace(events, this.registry);
     const scope = this.sink.subtreeRootId;
+    const current = (await this.sink.appliedVersion(this.workspaceId)) >= head;
+    // An already-current mirror still folds once after boot, so its status can name its subtree.
+    if (current && (scope === undefined || this.subtreeTitle !== undefined)) return;
+    const state = foldWorkspace(events, this.registry);
     if (scope !== undefined) {
       const root = state.pages.get(scope as PageId);
       if (root !== undefined) this.subtreeTitle = root.title;
     }
+    if (current) return;
     const docs = renderAffectedDocs(state, pagesInScope(state, scope), this.registry, {
       onRenderError: (pageId, err) =>
         this.logger.warn("render: page failed to render (mirrored with empty body)", {

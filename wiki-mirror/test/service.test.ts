@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { IWiki, IWorkspaceHandle } from "wiki";
 import { startTestServer, wikiOn } from "wiki/testing";
+import { tocPageTypes } from "wiki-models/toc";
 
 import { silentLogger } from "../src/logger.js";
 import { HealthPortInUseError } from "../src/health.js";
@@ -162,6 +163,45 @@ describe("wiki-mirror — the service", () => {
 
     // Nothing was written: the guard has to run BEFORE the emitters touch the root.
     expect(await readdir(secondRoot)).toEqual([]);
+  });
+
+  it("runs two subtree emitters on one workspace, through a restart", async () => {
+    const tocWiki = wikiOn(url, tocPageTypes, { namespace: "test" });
+    cleanup.push(() => tocWiki.close());
+    const studio = await tocWiki.createWorkspace({ name: "Studio" });
+    const ball = (await studio.createPage("toc", { title: "Ballgame", parentId: null })).value;
+    const war = (await studio.createPage("toc", { title: "War", parentId: null })).value;
+    await studio.createPage("toc", { title: "Rules", parentId: ball });
+    const rootBall = await freshRoot();
+    const rootWar = await freshRoot();
+
+    const running = await startMirror(
+      {
+        streamBaseUrl: url,
+        namespace: "test",
+        models: ["wiki-models/toc"],
+        emitters: [
+          { workspaceId: studio.id, root: rootBall, subtreeRootId: ball },
+          { workspaceId: studio.id, root: rootWar, subtreeRootId: war },
+        ],
+        healthHost: "127.0.0.1",
+        healthPort: 0,
+      },
+      silentLogger,
+    );
+    cleanup.push(() => running.close());
+    expect(running.mirrors).toHaveLength(2);
+    expect((await readdir(rootBall)).sort()).toEqual([".wiki-md-manifest.json", "index.md", "rules.md"]);
+    expect((await readdir(rootWar)).sort()).toEqual([".wiki-md-manifest.json", "index.md"]);
+
+    await running.restart("test");
+    const body = (await (await fetch(`${running.health.url}/_mirror/status`)).json()) as {
+      workspaces: { root: string; subtreeRootId: string | null; subtreeTitle?: string; connected: boolean }[];
+    };
+    expect(body.workspaces.map((w) => [w.root, w.subtreeRootId, w.subtreeTitle, w.connected])).toEqual([
+      [rootBall, ball, "Ballgame", true],
+      [rootWar, war, "War", true],
+    ]);
   });
 
   it("serves a config path and a pid so a client edits the right file and sees the right process", async () => {

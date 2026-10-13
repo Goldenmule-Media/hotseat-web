@@ -118,6 +118,59 @@ describe("wiki-mirror config resolution", () => {
     expect(() => resolveConfig([], env, dir)).toThrow(/same root/);
   });
 
+  it("accepts one workspace several times with distinct subtrees, beside a whole-workspace entry", () => {
+    writeConfig({
+      emitters: [
+        { workspaceId: "ws:a", root: "/games/ball/wiki-mirror", subtreeRootId: "toc:ball" },
+        { workspaceId: "ws:a", root: "/games/war/wiki-mirror", subtreeRootId: "toc:war" },
+        { workspaceId: "ws:a", root: "/studio/wiki-mirror" },
+      ],
+    });
+    expect(resolveConfig([], env, dir).emitters).toEqual([
+      { workspaceId: "ws:a", root: "/games/ball/wiki-mirror", subtreeRootId: "toc:ball" },
+      { workspaceId: "ws:a", root: "/games/war/wiki-mirror", subtreeRootId: "toc:war" },
+      { workspaceId: "ws:a", root: "/studio/wiki-mirror" },
+    ]);
+  });
+
+  it("throws on a duplicate workspace + subtree pair", () => {
+    writeConfig({
+      emitters: [
+        { workspaceId: "ws:a", root: "/x", subtreeRootId: "toc:ball" },
+        { workspaceId: "ws:a", root: "/y", subtreeRootId: "toc:ball" },
+      ],
+    });
+    expect(() => resolveConfig([], env, dir)).toThrow(/duplicate emitter for page toc:ball/);
+  });
+
+  it("throws on nested roots", () => {
+    writeConfig({ emitters: [{ workspaceId: "ws:a", root: "/repo" }, { workspaceId: "ws:b", root: "/repo/wiki-mirror" }] });
+    expect(() => resolveConfig([], env, dir)).toThrow(/nested/);
+  });
+
+  it("does not mistake a sibling with a shared prefix for a nested root", () => {
+    writeConfig({ emitters: [{ workspaceId: "ws:a", root: "/repo/wiki" }, { workspaceId: "ws:b", root: "/repo/wiki-mirror" }] });
+    expect(resolveConfig([], env, dir).emitters).toHaveLength(2);
+  });
+
+  it("throws on an empty or non-string subtreeRootId", () => {
+    writeConfig({ emitters: [{ workspaceId: "ws:a", root: "/x", subtreeRootId: "" }] });
+    expect(() => resolveConfig([], env, dir)).toThrow(/invalid subtreeRootId/);
+    writeConfig({ emitters: [{ workspaceId: "ws:a", root: "/x", subtreeRootId: 7 }] });
+    expect(() => resolveConfig([], env, dir)).toThrow(/invalid subtreeRootId/);
+  });
+
+  it("pairs --subtree / WIKI_MIRROR_SUBTREE with the flag emitter, and rejects it alone", () => {
+    expect(resolveConfig(["--workspace", "ws:b", "--root", "/out", "--subtree", "toc:war"], env, dir).emitters).toEqual([
+      { workspaceId: "ws:b", root: "/out", subtreeRootId: "toc:war" },
+    ]);
+    expect(
+      resolveConfig([], { ...env, WIKI_MIRROR_WORKSPACE: "ws:b", WIKI_MIRROR_ROOT: "/out", WIKI_MIRROR_SUBTREE: "toc:war" }, dir)
+        .emitters[0].subtreeRootId,
+    ).toBe("toc:war");
+    expect(() => resolveConfig(["--subtree", "toc:war"], env, dir)).toThrow(/needs --workspace and --root/);
+  });
+
   it("throws on an empty root", () => {
     writeConfig({ emitters: [{ workspaceId: "ws:a", root: "" }] });
     expect(() => resolveConfig([], env, dir)).toThrow(/non-empty root/);

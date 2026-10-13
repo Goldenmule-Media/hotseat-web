@@ -244,9 +244,10 @@ export class MirrorService implements RunningMirror {
   /** One supervisor per configured emitter; a failure to start is recorded, never thrown. */
   private async startEmitters(): Promise<void> {
     const supervisors = this.config.emitters.map((entry) => {
+      const scope = entry.subtreeRootId !== undefined ? { subtreeRootId: entry.subtreeRootId } : {};
       const sink = new MarkdownDiskProjector(
-        { enabled: true, root: entry.root, workspaces: [entry.workspaceId], layout: "tree" },
-        this.logger.child?.({ subsystem: "markdown-disk", workspace: entry.workspaceId, root: entry.root }) ??
+        { enabled: true, root: entry.root, workspaces: [entry.workspaceId], layout: "tree", ...scope },
+        this.logger.child?.({ subsystem: "markdown-disk", workspace: entry.workspaceId, root: entry.root, ...scope }) ??
           this.logger,
         this.engine.attachments,
       );
