@@ -87,7 +87,9 @@ describe("wiki-mirror — emitter supervisor", () => {
         fn();
         for (let i = 0; i < 500; i++) {
           await new Promise((r) => setTimeout(r, 2));
-          if ((await supervisor.status()).attempts !== before) return;
+          // `attempts` bumps when an attempt STARTS; it has settled once it rescheduled or connected.
+          const s = await supervisor.status();
+          if (s.attempts !== before && (scheduled !== undefined || s.connected)) return;
         }
         throw new Error("fire: the retry never completed");
       },

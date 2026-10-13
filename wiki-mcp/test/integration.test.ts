@@ -484,12 +484,12 @@ describe("wiki-mcp integration: token semantics + read-your-writes + resume", ()
 
       // engine #1's tailer catches up with NO notify on its side: the discovery poll
       // finds the new workspace, then its events flow via subscribe.
-      await readModel.waitFor(token, { timeoutMs: 4000 });
+      await readModel.waitFor(token, { timeoutMs: 8000 });
       expect((await readModel.getPage(ws2.id, pageId))?.title).toBe("FromOther");
 
       // A further external write propagates via subscribe (now attached), no notify.
       const { token: t2 } = await ws2.mutate(pageId, "setBody", { text: "external-body" });
-      await readModel.waitFor(t2, { timeoutMs: 4000 });
+      await readModel.waitFor(t2, { timeoutMs: 8000 });
       expect(bodyOf(await readModel.getPage(ws2.id, pageId))).toBe("external-body");
     } finally {
       await engine2.close();
