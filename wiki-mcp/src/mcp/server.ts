@@ -35,6 +35,7 @@ import {
   type ReadResourceResult,
 } from "@modelcontextprotocol/sdk/types.js";
 import { PageMovedError, WikiError, decodeToken, type ISearchIndex, type WorkspaceId } from "wiki";
+import type { BlobCopier } from "wiki/admin";
 
 import { asWorkspaceId, type EmbeddedEngine } from "../engine.js";
 import type { ModelRegistry } from "../models/registry.js";
@@ -65,6 +66,8 @@ export interface McpServerDeps {
    * this to `ProjectionService.notify` to project THIS process's writes promptly.
    */
   readonly onWrite?: (workspace: WorkspaceId) => void;
+  /** Copies attachments between workspaces' stores for `movePages` (the host owns the store). */
+  readonly copyBlob?: BlobCopier;
   /**
    * Host-injected auth (HTTP transport only). When set, every HTTP request must
    * authenticate (else 401), workspace-scoped tools/resources are gated per user,
@@ -192,7 +195,12 @@ export class WikiMcpServer {
    */
   private afterWrite(data: unknown): void {
     if (this.deps.onWrite === undefined) return;
-    const d = data as { token?: unknown; workspaceId?: unknown } | undefined;
+    const d = data as { token?: unknown; tokens?: unknown; workspaceId?: unknown } | undefined;
+    // A write that spans workspaces (a move) echoes one token per workspace it wrote.
+    if (Array.isArray(d?.tokens)) {
+      for (const t of d.tokens) if (typeof t === "string") this.deps.onWrite(asWorkspaceId(decodeToken(t).workspaceId));
+      return;
+    }
     let ws: string | undefined;
     if (typeof d?.token === "string") ws = decodeToken(d.token).workspaceId;
     else if (typeof d?.workspaceId === "string") ws = d.workspaceId;
@@ -251,6 +259,7 @@ export class WikiMcpServer {
         tokens: this.tokens,
         sessionId: extra.sessionId,
         ...(access !== undefined ? { access } : {}),
+        ...(this.deps.copyBlob !== undefined ? { copyBlob: this.deps.copyBlob } : {}),
       };
       try {
         const args = request.params.arguments ?? {};

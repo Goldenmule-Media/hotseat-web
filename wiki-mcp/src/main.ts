@@ -17,7 +17,7 @@
  */
 import { consoleLogger, type Logger } from "./logger.js";
 import { resolveConfig, type WikiMcpConfig } from "./config.js";
-import { EmbeddedEngine, type EngineConfig } from "./engine.js";
+import { asWorkspaceId, EmbeddedEngine, type EngineConfig } from "./engine.js";
 import { openStore, type ReadModelStore } from "./readmodel/store.js";
 import { SqlReadModel } from "./readmodel/readmodel.js";
 import { ProjectionService } from "./tail/projection.js";
@@ -26,6 +26,7 @@ import { ModelRegistry } from "./models/registry.js";
 import type { McpAuth } from "./mcp/auth.js";
 import { WikiMcpServer, type McpTransport } from "./mcp/server.js";
 import { SqlSearchIndex, migrateSearchToLatest, type ISearchIndex, type WikiSearchDatabase } from "wiki";
+import { resumePageMove, type BlobCopier } from "wiki/admin";
 import type { Kysely } from "kysely";
 
 export type { Logger } from "./logger.js";
@@ -71,6 +72,8 @@ export interface CreateWikiMcpOptions {
    * user, and `createWorkspace` attributes ownership. Absent → trusted (unchanged).
    */
   readonly auth?: McpAuth;
+  /** Copies attachments between workspaces' stores, for cross-workspace page moves. */
+  readonly copyBlob?: BlobCopier;
 }
 
 /** A running wiki-mcp instance — its parts, plus a `close()` that tears everything down. */
@@ -85,6 +88,8 @@ export interface WikiMcp {
   readonly server: WikiMcpServer;
   /** Drain the projection once now (await read-your-writes before a read in tests). */
   drainOnce(): Promise<void>;
+  /** Finish every page move the read model shows as pending (runs once at boot); returns how many finished. */
+  recoverMoves(): Promise<number>;
   /** Stop the tailer + MCP server and close the engine + store. */
   close(): Promise<void>;
 }
@@ -198,8 +203,37 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
     // write tool's workspace to the tailer for prompt read-your-writes.
     onWrite: (workspace) => projection.notify(workspace),
     ...(options.auth !== undefined ? { auth: options.auth } : {}),
+    ...(options.copyBlob !== undefined ? { copyBlob: options.copyBlob } : {}),
   });
   await server.start(transport);
+
+  // A move this process (or another) left half done is finished from the source's journal.
+  const moveLogger = logger.child?.({ subsystem: "moves" }) ?? logger;
+  const recoverMoves = async (): Promise<number> => {
+    let finished = 0;
+    for (const row of await readModel.pendingMoves()) {
+      try {
+        await resumePageMove({
+          open: (id) => engine.open(id),
+          from: asWorkspaceId(row.workspace_id),
+          moveId: row.move_id,
+          ...(options.copyBlob !== undefined ? { copyBlob: options.copyBlob } : {}),
+        });
+        finished += 1;
+        moveLogger.info("finished an interrupted page move", { workspace: row.workspace_id, moveId: row.move_id });
+      } catch (err) {
+        moveLogger.warn("could not finish a page move", {
+          workspace: row.workspace_id,
+          moveId: row.move_id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      projection.notify(asWorkspaceId(row.workspace_id));
+      projection.notify(asWorkspaceId(row.to_workspace_id));
+    }
+    return finished;
+  };
+  void recoverMoves();
 
   return {
     engine,
@@ -209,6 +243,7 @@ export async function createWikiMcp(options: CreateWikiMcpOptions): Promise<Wiki
     models,
     server,
     drainOnce,
+    recoverMoves,
     async close(): Promise<void> {
       stopTail();
       await server.stop();

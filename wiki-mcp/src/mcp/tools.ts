@@ -35,7 +35,7 @@ import {
   type JsonSchema,
   type WorkspaceId,
 } from "wiki";
-
+import { movePages, type BlobCopier } from "wiki/admin";
 
 import { asPageId, asWorkspaceId, type EmbeddedEngine } from "../engine.js";
 import type { SqlReadModel } from "../readmodel/readmodel.js";
@@ -90,6 +90,8 @@ export interface WikiToolContext {
    * for `createWorkspace` to attribute ownership.
    */
   readonly access?: AccessView;
+  /** Copies attachments between workspaces' stores (`movePages`); absent → pages with attachments can't move. */
+  readonly copyBlob?: BlobCopier;
 }
 
 /** One MCP tool: a name, a description, a JSON-Schema input, and a handler. */
@@ -428,6 +430,68 @@ const reparentTool: WikiTool = {
     );
     ctx.tokens.recordWrite(ctx.sessionId, token);
     return { text: "Reparented.", data: { token } };
+  },
+};
+
+const movePagesTool: WikiTool = {
+  name: "movePages",
+  description:
+    "Move pages, each with its whole subtree, to ANOTHER workspace (use reparent within one). You need " +
+    "access to both. Page ids, statuses and content are kept; serial numbers (e.g. ADR-N) are re-numbered " +
+    "after the target's own; refs and links that leave the moved pages point back across workspaces; " +
+    "attachments are copied. The source keeps a forward per page, so old refs and ids still resolve and a " +
+    "read of a moved page fails with PAGE_MOVED naming its new workspace. Pass dryRun:true to check the " +
+    "move and see what it would do without writing. Calling it again on the same pages finishes a move " +
+    "that was interrupted.",
+  inputSchema: obj(
+    {
+      workspaceId: str("The workspace the pages are in now."),
+      pageIds: { type: "array", items: STR, minItems: 1, description: "The subtree roots to move." },
+      toWorkspaceId: str("The workspace to move them to."),
+      parentId: nullableStr("Where the roots land in the target, or null for top level."),
+      position: { type: "integer", minimum: 0, description: "Optional insertion index among the new siblings." },
+      dryRun: { type: "boolean", description: "Check and report the move without writing anything." },
+    },
+    ["workspaceId", "pageIds", "toWorkspaceId", "parentId"],
+  ),
+  workspaceArgs: ["workspaceId", "toWorkspaceId"],
+  write: true,
+  async handle(args, ctx) {
+    const from = asWorkspaceId(reqStr(args, "workspaceId"));
+    const to = asWorkspaceId(reqStr(args, "toWorkspaceId"));
+    const raw = args["pageIds"];
+    if (!Array.isArray(raw) || raw.length === 0 || raw.some((v) => typeof v !== "string")) {
+      throw new Error('invalid "pageIds" (expected a non-empty array of page ids)');
+    }
+    const parentId = optStrOrNull(args, "parentId");
+    const report = await movePages({
+      open: (id) => ctx.engine.open(id),
+      from,
+      to,
+      pageIds: (raw as string[]).map(asPageId),
+      parentId: parentId === null ? null : asPageId(parentId),
+      ...(typeof args["position"] === "number" ? { position: args["position"] } : {}),
+      ...(ctx.copyBlob !== undefined ? { copyBlob: ctx.copyBlob } : {}),
+      dryRun: args["dryRun"] === true,
+    });
+    const tokens = [report.sourceToken, report.targetToken].filter((t): t is ConsistencyToken => t !== undefined);
+    for (const token of tokens) ctx.tokens.recordWrite(ctx.sessionId, token);
+    const n = report.movedPageIds.length;
+    const text = report.dryRun
+      ? `Dry run: would move ${n} page(s) to ${to}${report.blobs.length > 0 ? `, copying ${report.blobs.length} attachment(s)` : ""}.`
+      : `Moved ${n} page(s) to ${to}${report.resumed ? " (finished an interrupted move)" : ""}.`;
+    return {
+      text,
+      data: {
+        ...(report.moveId !== undefined ? { moveId: report.moveId } : {}),
+        dryRun: report.dryRun,
+        movedPageIds: report.movedPageIds,
+        forwards: report.forwards,
+        serials: report.serials,
+        blobs: report.blobs,
+        ...(tokens.length > 0 ? { tokens, token: report.targetToken } : {}),
+      },
+    };
   },
 };
 
@@ -1576,6 +1640,7 @@ export function wikiTools(): readonly WikiTool[] {
     assignSerialsTool,
     createPageTool,
     reparentTool,
+    movePagesTool,
     setPageTitleTool,
     archivePageTool,
     unarchivePageTool,

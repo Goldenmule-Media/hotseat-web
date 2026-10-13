@@ -185,6 +185,59 @@ describe("page moves over MCP", () => {
     expect(md).toContain(`[Kit](wiki://${dst}/${kit})`);
   });
 
+  it("movePages: a dry run reports the plan and writes nothing", async () => {
+    const page = await createNote(alice, src, "Dry");
+    const before = (await mcp.readModel.events(src as WorkspaceId)).length;
+    const res = await call(alice, "movePages", { workspaceId: src, pageIds: [page], toWorkspaceId: dst, parentId: null, dryRun: true });
+    expect(res.isError ?? false).toBe(false);
+    expect(textOf(res)).toContain("Dry run: would move 1 page(s)");
+    expect(dataOf(res)).toMatchObject({ dryRun: true, movedPageIds: [page] });
+    await mcp.drainOnce();
+    expect((await mcp.readModel.events(src as WorkspaceId)).length).toBe(before);
+  });
+
+  it("movePages moves a subtree and reports where each page went", async () => {
+    const top = await createNote(alice, src, "Signals");
+    const child = await createNote(alice, src, "Signal bus", top);
+    const res = await call(alice, "movePages", { workspaceId: src, pageIds: [top], toWorkspaceId: dst, parentId: kit });
+    expect(res.isError ?? false).toBe(false);
+    expect(dataOf(res)).toMatchObject({
+      dryRun: false,
+      movedPageIds: [top, child],
+      forwards: [
+        { pageId: top, workspaceId: dst },
+        { pageId: child, workspaceId: dst },
+      ],
+    });
+    const tree = textOf(await call(alice, "tree", { workspaceId: dst }));
+    expect(tree).toContain("Signal bus");
+    const gone = await call(alice, "getPage", { workspaceId: src, pageId: child });
+    expect(dataOf(gone)).toMatchObject({ code: "PAGE_MOVED", workspaceId: dst });
+  });
+
+  it("movePages needs access to both workspaces", async () => {
+    const bobs = await createWs(bob, "Bob's");
+    const page = await createNote(alice, src, "Mine");
+    const intoBobs = await call(alice, "movePages", { workspaceId: src, pageIds: [page], toWorkspaceId: bobs, parentId: null });
+    expect(intoBobs.isError).toBe(true);
+    expect(textOf(intoBobs)).toContain("ACCESS_DENIED");
+    const outOfAlices = await call(bob, "movePages", { workspaceId: src, pageIds: [page], toWorkspaceId: bobs, parentId: null });
+    expect(outOfAlices.isError).toBe(true);
+    expect(textOf(outOfAlices)).toContain("ACCESS_DENIED");
+  });
+
+  it("finishes a move left half done when the host recovers", async () => {
+    const page = await createNote(alice, src, "Interrupted");
+    const handle = await open(src as WorkspaceId);
+    await handle.beginPageMove({ to: dst as WorkspaceId, roots: [page as PageId], toParentId: null });
+    await mcp.drainOnce();
+    expect(await mcp.recoverMoves()).toBe(1);
+    await mcp.drainOnce();
+    expect(await mcp.readModel.pendingMoves()).toEqual([]);
+    expect(await mcp.readModel.getPage(dst as WorkspaceId, page)).toMatchObject({ title: "Interrupted" });
+    expect(await mcp.readModel.forwardOf(src as WorkspaceId, page)).toMatchObject({ to_workspace_id: dst });
+  });
+
   it("a ref left behind counts as a backlink of the page in its new home", async () => {
     const res = await call(alice, "backlinks", { workspaceId: dst, pageId: kit });
     expect(dataOf(res)).toEqual(
