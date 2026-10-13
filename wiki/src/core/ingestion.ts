@@ -481,6 +481,11 @@ function validateRequiredInAuthored(page: IPageNode, def: IPageTypeDef): void {
  * (so generated structural commands can't bypass them). Pure. Runs only on the write-side
  * dry-run — never on projection/fold — so already-committed history is never rejected.
  */
+/** Field grammar and ref integrity only: what an imported page must satisfy in its new home. */
+export function validatePageContent(state: IWorkspaceState, page: IPageNode): void {
+  for (const section of page.sections) validateSection(state, page, section);
+}
+
 export function validatePage(state: IWorkspaceState, page: IPageNode, registry: Registry): void {
   for (const section of page.sections) validateSection(state, page, section);
   if (!registry.has(page.type)) return;

@@ -188,6 +188,16 @@ export class CommandBus {
     return this.commit(projection, decide, { actor: req.actor, commandId: req.commandId });
   }
 
+  /** Decide a structural command against the current state and return its result, writing nothing. */
+  previewStructural(projection: BusProjection, req: StructuralRequest): CommitOutcome {
+    const handler = structuralHandler(req.handler);
+    if (handler === undefined) {
+      throw new MutationNotAllowedError("workspace", projection.state.status, req.handler, [...Object.keys(MOVE_HANDLERS)]);
+    }
+    const { result } = this.decideStructural(handler, projection.state, req);
+    return { result, committedVersion: projection.state.version };
+  }
+
   /** Pure structural decision: workspace must be active, then run the handler. The sole
    *  exception is `unarchive`, which by definition runs ON an archived workspace (the way back). */
   private decideStructural(
@@ -1112,6 +1122,13 @@ export class CommandBus {
       ...(meta.command !== undefined ? { command: meta.command } : {}),
     };
 
+    // Pages this commit itself brings in (an import), whose content ops follow in the batch.
+    const arriving = new Map<PageId, string>();
+    for (const ev of raw) {
+      if (ev.type !== "PagesImported") continue;
+      for (const rec of (ev.payload as { pages: { id: PageId; type: string }[] }).pages) arriving.set(rec.id, rec.type);
+    }
+
     return raw.map((ev, i): IEventEnvelope => {
       // A content event that omits `pageId` defaults to the command's target
       // page; structural/workspace events keep their own (possibly absent) pageId.
@@ -1123,7 +1140,7 @@ export class CommandBus {
         ...(pageId !== undefined ? { pageId } : {}),
         version: expectedVersion + i,
         type: ev.type,
-        schemaVersion: this.schemaVersionFor(state, ev, pageId),
+        schemaVersion: this.schemaVersionFor(state, ev, pageId, arriving),
         payload: ev.payload,
         meta: eventMeta,
       };
@@ -1139,13 +1156,18 @@ export class CommandBus {
    * node does not exist yet — from the event payload's `type`. Unknown types fall
    * back to `0` (the reducer's upcaster handles the rest).
    */
-  private schemaVersionFor(state: IWorkspaceState, ev: DomainEvent, pageId?: PageId): number {
+  private schemaVersionFor(
+    state: IWorkspaceState,
+    ev: DomainEvent,
+    pageId?: PageId,
+    arriving?: ReadonlyMap<PageId, string>,
+  ): number {
     // Structural / workspace events (incl. PageCreated, which carries a pageId)
     // are not content events — they never carry a page-type schema version.
     if (isStructuralEvent(ev.type)) return 0;
     const targetPage = ev.pageId ?? pageId;
     if (targetPage === undefined) return 0;
-    const pageType: string | undefined = state.pages.get(targetPage)?.type;
+    const pageType: string | undefined = state.pages.get(targetPage)?.type ?? arriving?.get(targetPage);
     if (pageType === undefined || !this.registry.has(pageType)) return 0;
     return this.registry.page(pageType).version;
   }

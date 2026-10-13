@@ -7,10 +7,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { adrPageTypes } from "wiki-models/adr";
 import { documentPageTypes } from "wiki-models/document";
 import { tocPageTypes } from "wiki-models/toc";
-import type { IWorkspaceHandle, PageId } from "../src/api";
+import type { IEventEnvelope, IPageMoveExport, IWorkspaceHandle, PageId } from "../src/api";
 import { Registry } from "../src/core/registry";
 import { deserializeState, serializeState } from "../src/core/snapshot";
 import { foldWorkspace } from "../src/core/workspace";
+import { renderPage } from "../src/render/read-model";
 import { createTestWiki, type ITestWiki } from "../src/testing";
 
 const TYPES = [...tocPageTypes, ...adrPageTypes, ...documentPageTypes];
@@ -97,5 +98,150 @@ describe("page move journal", () => {
     const round = deserializeState(JSON.parse(JSON.stringify(serializeState(state))));
     expect(round.forwards).toEqual(state.forwards);
     expect(round.pendingMoves.size).toBe(0);
+  });
+});
+
+const BLOB = "a".repeat(64);
+
+async function acceptedAdr(ws: IWorkspaceHandle, parent: PageId, title: string): Promise<PageId> {
+  const id = (await ws.createPage("decision-record", { title, parentId: parent })).value;
+  await ws.mutate(id, "setDate", { date: "2026-06-05" });
+  await ws.mutate(id, "setContext", { text: `Why ${title}.` });
+  await ws.mutate(id, "addDecisionBlock", { text: `We will ${title}.` });
+  await ws.mutate(id, "addConsequence", { text: `${title} has consequences.` });
+  await ws.mutate(id, "accept", {});
+  return id;
+}
+
+describe("page move export and import", () => {
+  let harness: ITestWiki;
+  let src: IWorkspaceHandle;
+  let dst: IWorkspaceHandle;
+  let coreTech: PageId;
+  let kit: PageId;
+  let usage: PageId;
+  let notes: PageId;
+  let adr: PageId;
+  let outside: PageId;
+
+  beforeAll(async () => {
+    harness = await createTestWiki(TYPES);
+    src = await harness.wiki.createWorkspace({ name: "Godot Addons" });
+    dst = await harness.wiki.createWorkspace({ name: "Sovereign Axe" });
+    coreTech = (await dst.createPage("toc", { title: "Core Tech", parentId: null })).value;
+    await acceptedAdr(dst, coreTech, "Use Godot");
+
+    kit = (await src.createPage("toc", { title: "UI Kit", parentId: null })).value;
+    notes = (await src.createPage("document", { title: "Notes", parentId: kit })).value;
+    usage = (await src.createPage("document", { title: "Usage", parentId: kit })).value;
+    adr = await acceptedAdr(src, kit, "Use signals");
+    outside = (await src.createPage("document", { title: "Outside", parentId: null })).value;
+    await src.mutate(usage, "addParagraph", { inlines: ["See ", { ref: notes }, " and ", { ref: outside }, "."] });
+    await src.mutate(usage, "addImage", { ref: `attachment:${BLOB}`, alt: "A diagram" });
+    await src.link(usage, outside, "uses");
+    await src.link(usage, notes, "extends");
+    await src.link(outside, usage, "documented-by");
+  });
+
+  afterAll(async () => {
+    await harness.stop();
+  });
+
+  const request = () => ({ to: dst.id, roots: [kit], toParentId: coreTech });
+
+  it("exports the subtree in tree order with refs and links leaving it retargeted to the source", async () => {
+    const out = await src.exportPageMove(request());
+    expect(out.pages.map((p) => p.id)).toEqual([kit, notes, usage, adr]);
+    expect(out.pages[0]!.parentId).toBeNull();
+    expect(out.pages[1]!.parentId).toBe(kit);
+    expect(out.blobs).toEqual([BLOB]);
+    const body = JSON.stringify(out.pages.find((p) => p.id === usage)!.sections);
+    expect(body).toContain(JSON.stringify({ kind: "page", id: outside, workspace: src.id, title: "Outside" }));
+    expect(body).toContain(JSON.stringify({ kind: "page", id: notes }));
+    expect(out.links).toEqual([
+      { from: usage, to: outside, role: "uses", workspace: src.id, title: "Outside" },
+      { from: usage, to: notes, role: "extends" },
+    ]);
+  });
+
+  it("a dry-run import checks the payload and writes nothing", async () => {
+    const before = (await dst.history()).length;
+    const { value } = await dst.importPages({ ...(await src.exportPageMove(request())), moveId: "move:preview" }, { dryRun: true });
+    expect(value.alreadyImported).toBe(false);
+    expect(value.serials[adr]).toEqual({ meta: { number: { from: 1, to: 2 } } });
+    expect((await dst.history()).length).toBe(before);
+  });
+
+  it("refuses an import whose root title clashes with a sibling", async () => {
+    const clash = (await dst.createPage("toc", { title: "UI Kit", parentId: coreTech })).value;
+    await expect(
+      dst.importPages({ ...(await src.exportPageMove(request())), moveId: "move:clash" }, { dryRun: true }),
+    ).rejects.toMatchObject({ code: "DUPLICATE_TITLE" });
+    await dst.setPageTitle(clash, "UI Kit (old)");
+  });
+
+  it("moves the pages: ids, statuses and content kept, serials re-minted, links and refs retargeted", async () => {
+    const { value: move } = await src.beginPageMove(request());
+    const payload = await src.exportPageMove(move.moveId);
+    const { value: imported, token } = await dst.importPages(payload);
+    expect(imported.pageIds).toEqual([kit, notes, usage, adr]);
+    await src.completePageMove(move.moveId);
+
+    const tree = await dst.tree({ consistentWith: token });
+    const core = tree.children.find((c) => c.id === coreTech)!;
+    expect(core.children.map((c) => c.title)).toEqual(["Use Godot", "UI Kit (old)", "UI Kit"]);
+    expect(core.children[2]!.children.map((c) => c.id)).toEqual([notes, usage, adr]);
+
+    const adrMd = await dst.toMarkdown(adr);
+    expect(adrMd).toMatch(/\*\*Status:\*\* accepted/);
+    expect(adrMd).toContain("ADR-2");
+
+    const usageMd = await dst.toMarkdown(usage);
+    expect(usageMd).toContain(`See Notes and [Outside](wiki://${src.id}/${outside}).`);
+    expect(usageMd).toContain(`uses → [Outside](wiki://${src.id}/${outside})`);
+    expect(usageMd).toContain(`extends → [Notes](${notes})`);
+    expect(usageMd).toContain(`attachment:${BLOB}`);
+
+    const history = await dst.history();
+    const imported_ = history.find((e) => e.type === "PagesImported")!;
+    const records = (imported_.payload as { pages: { id: string; originalSerials?: unknown }[] }).pages;
+    expect(records.find((r) => r.id === adr)!.originalSerials).toEqual({ meta: { number: 1 } });
+    // Content arrives stamped at the type's current schema version, so upcasters don't re-run on it.
+    const registry = new Registry(TYPES);
+    const types = new Map<string, string>([[kit, "toc"], [notes, "document"], [usage, "document"], [adr, "decision-record"]]);
+    const content = history.filter((e) => e.version > imported_.version && e.version <= imported_.version + 4);
+    expect(content.map((e) => e.pageId)).toEqual([kit, notes, usage, adr]);
+    for (const e of content) expect(e.schemaVersion).toBe(registry.page(types.get(e.pageId!)!).version);
+
+    // The source keeps a forward, and the page that stayed links out to the moved one.
+    expect(await src.forwardOf(usage)).toMatchObject({ workspace: dst.id, title: "Usage" });
+    expect(await src.toMarkdown(outside)).toContain(`documented-by → [Usage](wiki://${dst.id}/${usage})`);
+  });
+
+  it("is idempotent: importing or completing the same move again writes nothing", async () => {
+    const move = (await dst.history()).find((e) => e.type === "PagesImported")!;
+    const { moveId } = move.payload as { moveId: string };
+    const before = (await dst.history()).length;
+    const again = await dst.importPages({ moveId, to: dst.id } as IPageMoveExport);
+    expect(again.value.alreadyImported).toBe(true);
+    expect((await dst.history()).length).toBe(before);
+    await src.completePageMove(moveId);
+  });
+
+  it("replays to the same render from history alone", async () => {
+    const registry = new Registry(TYPES);
+    const events: readonly IEventEnvelope[] = await dst.history();
+    const folded = foldWorkspace(events, registry);
+    for (const id of [kit, usage, adr]) expect(renderPage(folded, id, registry)).toBe(await dst.toMarkdown(id));
+  });
+
+  it("moves back: the round trip clears the forward on the original side", async () => {
+    const { value: move } = await dst.beginPageMove({ to: src.id, roots: [kit], toParentId: null });
+    await src.importPages(await dst.exportPageMove(move.moveId));
+    const { token } = await dst.completePageMove(move.moveId);
+    expect(await src.forwardOf(kit)).toBeUndefined();
+    expect(await dst.forwardOf(kit, { consistentWith: token })).toMatchObject({ workspace: src.id });
+    // The ref that pointed back home is local again.
+    expect(await src.toMarkdown(usage)).toContain("See Notes and Outside.");
   });
 });

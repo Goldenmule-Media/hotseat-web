@@ -83,7 +83,7 @@ function assertPageActive(node: IPageNode): void {
 }
 
 /** The `(section, field)` pairs declared `kind: "serial"` on a page type (top-level sections). */
-function serialFieldsOf(def: IPageTypeDef): { section: string; field: string }[] {
+export function serialFieldsOf(def: IPageTypeDef): { section: string; field: string }[] {
   const out: { section: string; field: string }[] = [];
   for (const [section, sd] of Object.entries(def.sections)) {
     for (const [field, fd] of Object.entries(sd.fields)) {
@@ -100,7 +100,7 @@ function serialValueOf(node: IPageNode, section: string, field: string): number 
 }
 
 /** The highest assigned value of `(type, section, field)` across the workspace (0 if none). */
-function maxSerial(state: IWorkspaceState, type: string, section: string, field: string): number {
+export function maxSerial(state: IWorkspaceState, type: string, section: string, field: string): number {
   let max = 0;
   for (const node of state.pages.values()) {
     if (node.type !== type) continue;

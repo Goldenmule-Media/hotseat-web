@@ -24,7 +24,9 @@ import type {
   IItem,
   IMutationDescriptor,
   IPageForward,
+  IPageMoveExport,
   IPageMoveRequest,
+  IPagesImportResult,
   IPageNode,
   IPageView,
   IPendingMove,
@@ -51,7 +53,8 @@ import { ROOT } from "../api";
 import { displayTitle, renderPage, renderPageElement, renderWorkspace } from "../render/read-model";
 import { EventLog } from "../stores/event-log";
 import { CommandBus, type BusProjection, type CommandBusConfig, type CommitOutcome } from "./command-bus";
-import { PageNotFoundError, WorkspaceNotFoundError } from "./errors";
+import { InvariantViolationError, PageNotFoundError, WorkspaceNotFoundError } from "./errors";
+import { exportMove, planMove } from "./move";
 import { unauthoredRequiredInFields } from "./ingestion";
 import { encodeToken, InMemoryReadModel } from "./readmodel";
 import { Registry } from "./registry";
@@ -647,6 +650,23 @@ class WorkspaceHandle implements IWorkspaceHandle {
 
   beginPageMove(request: IPageMoveRequest): Promise<Committed<IPendingMove>> {
     return this.structural("beginPageMove", request) as Promise<Committed<IPendingMove>>;
+  }
+
+  async exportPageMove(move: string | IPageMoveRequest, opts?: IReadOpts): Promise<IPageMoveExport> {
+    await this.awaitConsistency(opts);
+    const state = this.projection.state;
+    if (typeof move !== "string") return exportMove(state, { moveId: "", ...move, ...planMove(state, move) });
+    const pending = state.pendingMoves.get(move);
+    if (pending === undefined) throw new InvariantViolationError(`No pending move "${move}".`);
+    return exportMove(state, pending);
+  }
+
+  importPages(payload: IPageMoveExport, opts?: { readonly dryRun?: boolean }): Promise<Committed<IPagesImportResult>> {
+    if (opts?.dryRun !== true) return this.structural("importPages", payload) as Promise<Committed<IPagesImportResult>>;
+    return this.mutex.run(async () => {
+      const outcome = this.bus.previewStructural(this.projection, { handler: "importPages", args: payload });
+      return { value: outcome.result, token: encodeToken(this.id, outcome.committedVersion) };
+    }) as Promise<Committed<IPagesImportResult>>;
   }
 
   completePageMove(moveId: string): Promise<Committed<void>> {

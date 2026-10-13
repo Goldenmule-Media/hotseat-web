@@ -636,6 +636,11 @@ export interface IWorkspaceHandle {
   // ── cross-workspace moves (the steps the `wiki/admin` movePages saga drives) ──
   /** Freeze the requested subtrees for a move out of this workspace. */
   beginPageMove(request: IPageMoveRequest): Promise<Committed<IPendingMove>>;
+  /** Build the import payload for a pending move, or (given a request) preview one. */
+  exportPageMove(move: string | IPageMoveRequest, opts?: IReadOpts): Promise<IPageMoveExport>;
+  /** Import a move into this workspace in one commit. Repeating it is a no-op; a dry run
+   *  checks it against the current state and writes nothing. */
+  importPages(payload: IPageMoveExport, opts?: { readonly dryRun?: boolean }): Promise<Committed<IPagesImportResult>>;
   /** Finish a move out: drop the pages and leave forwards behind. */
   completePageMove(moveId: string): Promise<Committed<void>>;
   /** Unfreeze a move that the target refused. */
