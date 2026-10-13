@@ -69,9 +69,9 @@ Auth against a gated server, by precedence (`resolveAuthorization` in `wiki/auth
 - Compiled and run as Node: relative imports use `.js` extensions (unlike the source-consumed wiki / wiki-models).
 - A configured emitter always appears in the health payload, even when it never started: an omitted entry is indistinguishable from an unconfigured one, and every field a client checks (notably `lastReconcileError`) is present rather than undefined.
 - One mirror process per health port: a second instance finding the port taken exits 0 with a clear message rather than crashing or running a second writer against the same roots.
-- Emitter config (a workspaceId and an optional subtreeRootId, mapped to an absolute root) is per-machine local state in a file, never stored on the shared server. Each workspace and subtree pair appears once.
 - One writer per root. Config rejects two entries on the same root and any root nested inside another, because a mirror sweeps every file it owns but no longer expects.
 - A missing subtree root never sweeps. The reconcile fails, the files and the manifest stay as they are, and the entry reports the error until the page returns.
+- Emitter config (a workspaceId and an optional subtreeRootId, mapped to an absolute root) is per-machine local state in a file, never stored on the shared server. The same workspace or subtree may be mirrored into several roots, so the root alone identifies an entry.
 
 ## Synced commit
 5b70600

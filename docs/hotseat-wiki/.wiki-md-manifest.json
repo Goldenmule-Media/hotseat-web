@@ -1,6 +1,6 @@
 {
   "ws:mpzncs2z-0001-2wgv51": {
-    "version": 2508,
+    "version": 2510,
     "files": {
       "architecture/index.md": "5213acdc1038077e77d636e752170d48a0efdbf3a8639b6e6d795f4fde277015",
       "feature-specs/index.md": "f39d08db07e0ed57f225cb9f5c595b09681c1f99fbc6753333f70742a6cb5dad",
@@ -104,7 +104,7 @@
       ".archived/implementation-plan--mq9yvq8d-00kr-qdpkzg.md": "ba86e4ecac182637b86422a8bbe17dafcedc09ab11c2d5ac7cec3aec3141f929",
       ".archived/testing-plan--mq9yvq8d-00ks-7dkr41.md": "009d7b58baef4f1860da55f7a31776189254c24d8eb6139d37e38767d05e6632",
       ".archived/feature-spec--mq9yvq8d-00kt-chirbk.md": "541082b78b2c56956cd21211b06e7382cf989d0299d34f41bcbdcec6944c2125",
-      "architecture/wiki-mirror/index.md": "b5595ac28ee30fd18a0520165932b294c33ccdcfa0752d72d037bccdfd4f2943",
+      "architecture/wiki-mirror/index.md": "cd91962d877de2ebdce30c09a664da7c0eb2f4fe6a48de52f7ab79ab1d8d9494",
       "decision-records/markdown-emission-is-a-local-stream-client-not-a-host-responsibility.md": "bd8cc3f538fa81ced83c2c94fb10c53e2a06930c29d6f0862ec97635a24bd0a6",
       "decision-records/github-auth-at-the-host-edge-an-auth-gateway-per-surface-injected-enforcement.md": "fc78724b0b1e2b846a2bc5fb31ffb4fc5944d5bcf3400545966cb4885fd3759c",
       ".archived/feature-brief--mqb9074t-001e-7brxvi.md": "62e38aa0af741c8721689e63d7938fa6264f64425f42b0abaa1e33bdc38726e1",
