@@ -49,7 +49,20 @@ export type ConnectionState = "connecting" | "live" | "reconnecting" | "error";
  *   build's bundled page types can't fold it. Not a connection problem.
  * - `unsupported` — this browser lacks SharedWorker; the engine never started (tab-side only).
  */
-export type LoadErrorKind = "connection" | "unauthorized" | "forbidden" | "unknown-page-type" | "engine" | "unsupported";
+export type LoadErrorKind =
+  | "connection"
+  | "unauthorized"
+  | "forbidden"
+  | "unknown-page-type"
+  | "engine"
+  | "unsupported"
+  | "moved";
+
+/** Where a page that moved to another workspace lives now. */
+export interface MovedTo {
+  readonly workspaceId: WorkspaceId;
+  readonly pageId: PageId;
+}
 
 export interface LoadError {
   readonly kind: LoadErrorKind;
@@ -57,6 +70,8 @@ export interface LoadError {
   readonly message: string;
   /** For `unknown-page-type`: the page/event types the engine could not resolve. */
   readonly unknownTypes: readonly string[];
+  /** For `moved`: the page's new home. */
+  readonly movedTo?: MovedTo;
 }
 
 /**
@@ -87,9 +102,19 @@ export type SnapshotCallback = (snapshot: WorkspaceSnapshot) => void;
  * value with no string `code` (a `fetch` rejection) is a transport/connection failure.
  */
 export function classifyError(e: unknown): LoadError {
-  const err = e as { code?: unknown; types?: unknown; message?: unknown; status?: unknown } | null;
+  const err = e as
+    | { code?: unknown; types?: unknown; message?: unknown; status?: unknown; workspaceId?: unknown; pageId?: unknown }
+    | null;
   const code = typeof err?.code === "string" ? err.code : undefined;
   const message = e instanceof Error ? e.message : typeof err?.message === "string" ? err.message : String(e);
+  if (code === "PAGE_MOVED" && typeof err?.workspaceId === "string" && typeof err.pageId === "string") {
+    return {
+      kind: "moved",
+      message,
+      unknownTypes: [],
+      movedTo: { workspaceId: err.workspaceId as WorkspaceId, pageId: err.pageId as PageId },
+    };
+  }
   if (code === "UNKNOWN_PAGE_TYPE") {
     const types = Array.isArray(err?.types) ? (err.types as string[]) : [];
     return { kind: "unknown-page-type", message, unknownTypes: types };
@@ -249,15 +274,28 @@ export interface WikiErrorDTO {
   readonly issues?: unknown;
   /** `PreconditionUnmetError.unmet` — the unmet precondition text. */
   readonly unmet?: string;
+  /** `PageMovedError` — where the page lives now. */
+  readonly workspaceId?: string;
+  readonly pageId?: string;
 }
 
 /** Read the engine's typed fields off a live error instance and marshal a plain DTO. Run
  *  worker-side, where the prototype + own-props are intact. Accepts any thrown value. */
 export function toWikiErrorDTO(e: unknown): WikiErrorDTO {
   const err = e as
-    | { code?: unknown; status?: unknown; message?: unknown; types?: unknown; issues?: unknown; unmet?: unknown }
+    | {
+        code?: unknown;
+        status?: unknown;
+        message?: unknown;
+        types?: unknown;
+        issues?: unknown;
+        unmet?: unknown;
+        workspaceId?: unknown;
+        pageId?: unknown;
+      }
     | null;
   const code = typeof err?.code === "string" ? err.code : undefined;
+  const moved = code === "PAGE_MOVED" && typeof err?.workspaceId === "string" && typeof err.pageId === "string";
   return {
     __wikiError: true,
     ...(code !== undefined ? { code } : {}),
@@ -266,6 +304,7 @@ export function toWikiErrorDTO(e: unknown): WikiErrorDTO {
     ...(Array.isArray(err?.types) ? { types: err.types as readonly string[] } : {}),
     ...(err?.issues !== undefined ? { issues: err.issues } : {}),
     ...(typeof err?.unmet === "string" ? { unmet: err.unmet } : {}),
+    ...(moved ? { workspaceId: err.workspaceId as string, pageId: err.pageId as string } : {}),
   };
 }
 

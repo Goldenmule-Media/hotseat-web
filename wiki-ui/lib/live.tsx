@@ -25,7 +25,7 @@ import { notifyUnauthorized, serverBaseUrl } from "./auth";
 import { useAuth } from "./auth-context";
 import { getHost, UnsupportedBrowserError, type WikiHost } from "./host-client";
 import { ELEMENTS_PENDING, foldSectionElements, type SectionElements } from "./section-elements";
-import { classifyError, type LoadError, type RenderedElement, type WorkspaceSnapshot } from "./wiki-host-api";
+import { classifyError, type LoadError, type MovedTo, type RenderedElement, type WorkspaceSnapshot } from "./wiki-host-api";
 
 // Re-exported so existing consumers (LiveIndicator, WorkspaceError) keep importing from here.
 export type { ConnectionState, LoadError, LoadErrorKind, RenderedElement, SectionElementSummary } from "./wiki-host-api";
@@ -147,6 +147,8 @@ export interface PageContent {
   readonly error: string | null;
   /** The server has a page type this build's bundle does not know. */
   readonly unknownType: boolean;
+  /** The page moved to another workspace; this is where it lives now. */
+  readonly movedTo?: MovedTo;
   /**
    * The page `markdown` was rendered FOR. During a navigation this LAGS the requested page:
    * the previous page's body is deliberately kept on screen while the next one loads, and this
@@ -180,6 +182,7 @@ export function usePage(workspaceId: WorkspaceId, pageId: PageId): PageContent {
           loading: false,
           error: err.message,
           unknownType: err.kind === "unknown-page-type",
+          ...(err.movedTo !== undefined ? { movedTo: err.movedTo } : {}),
           pageId,
         });
       });

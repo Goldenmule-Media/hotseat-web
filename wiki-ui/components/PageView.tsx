@@ -69,7 +69,11 @@ export function PageView({
   const [copied, setCopied] = useState(false);
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const ws = useLiveWorkspace(workspaceId);
-  const { markdown, loading, error, unknownType, pageId: contentPageId } = usePage(workspaceId, pageId);
+  const { markdown, loading, error, unknownType, movedTo, pageId: contentPageId } = usePage(workspaceId, pageId);
+  // A page that moved to another workspace opens there, replacing this history entry.
+  useEffect(() => {
+    if (movedTo !== undefined) router.replace(pageHref(movedTo.workspaceId, movedTo.pageId));
+  }, [movedTo, router]);
   const { descriptors } = usePageMutations(workspaceId, pageId);
   const structural = useStructuralMutator(workspaceId);
 
@@ -234,6 +238,14 @@ export function PageView({
       e.preventDefault();
       router.push(href);
     }
+  }
+
+  if (movedTo !== undefined) {
+    return (
+      <div className="page">
+        <p className="muted">This page moved to another workspace. Opening it there…</p>
+      </div>
+    );
   }
 
   if (error !== null) {

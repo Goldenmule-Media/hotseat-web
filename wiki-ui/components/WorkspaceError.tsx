@@ -40,6 +40,8 @@ function describe(error: LoadError): { title: string; detail: string } {
         title: "Unsupported browser",
         detail: "wiki-ui needs a module SharedWorker (Chrome/Edge, Firefox 114+, or Safari 16+).",
       };
+    case "moved":
+      return { title: "Page moved", detail: error.message };
   }
 }
 
