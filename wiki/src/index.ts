@@ -79,6 +79,14 @@ export type {
   IWorkspaceState,
   IWorkspaceLink,
   IExternalLinkTarget,
+  // cross-workspace moves
+  IPageMoveRequest,
+  IPendingMove,
+  IPageForward,
+  IPageImport,
+  IExportedPage,
+  IPageMoveExport,
+  IPagesImportResult,
   PageState,
   // content tree
   SectionId,
@@ -184,6 +192,8 @@ export {
   StaleEditError,
   BatchCommandError,
   BatchCommandsError,
+  PageMovedError,
+  PageMoveInProgressError,
 } from "./core/errors";
 export type { SchemaIssue, BatchFailure } from "./core/errors";
 

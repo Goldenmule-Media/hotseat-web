@@ -41,6 +41,9 @@ const stateOf = (
   children: new Map(),
   links: links.map((l) => ({ from: l.from as PageId, to: l.to as PageId, role: l.role })),
   retired: new Set(),
+  pendingMoves: new Map(),
+  forwards: new Map(),
+  imports: new Map(),
   version,
 });
 

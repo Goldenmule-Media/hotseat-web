@@ -45,6 +45,9 @@ export function serializeState(state: IWorkspaceState): SerializedWorkspaceState
     children,
     links,
     retired: [...state.retired] as string[],
+    pendingMoves: [...state.pendingMoves.values()],
+    forwards: [...state.forwards],
+    imports: [...state.imports],
   };
 }
 
@@ -78,6 +81,9 @@ export function deserializeState(ser: SerializedWorkspaceState): IWorkspaceState
     links,
     // A pre-`retired` snapshot lacks the field — start empty (the tail re-skips as it folds).
     retired: new Set((ser.retired ?? []) as PageId[]),
+    pendingMoves: new Map((ser.pendingMoves ?? []).map((m) => [m.moveId, m])),
+    forwards: new Map(ser.forwards ?? []),
+    imports: new Map(ser.imports ?? []),
   };
 }
 

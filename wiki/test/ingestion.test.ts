@@ -20,6 +20,9 @@ function workspaceWith(node: IPageNode): IWorkspaceState {
     children: new Map(),
     links: [],
     retired: new Set(),
+    pendingMoves: new Map(),
+    forwards: new Map(),
+    imports: new Map(),
     version: 1,
   };
 }

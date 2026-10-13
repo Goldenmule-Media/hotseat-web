@@ -23,8 +23,11 @@ import type {
   IEventEnvelope,
   IItem,
   IMutationDescriptor,
+  IPageForward,
+  IPageMoveRequest,
   IPageNode,
   IPageView,
+  IPendingMove,
   IExternalLinkTarget,
   IReadOpts,
   IRelatedReader,
@@ -456,6 +459,9 @@ function seedEmptyProjection(id: WorkspaceId): BusProjection {
     children: new Map([[ROOT, []]]),
     links: [],
     retired: new Set(),
+    pendingMoves: new Map(),
+    forwards: new Map(),
+    imports: new Map(),
     version: 0,
   };
   return {
@@ -635,6 +641,30 @@ class WorkspaceHandle implements IWorkspaceHandle {
 
   assignSerials(): Promise<Committed<void>> {
     return this.structural("assignSerials", {}) as Promise<Committed<void>>;
+  }
+
+  // ── cross-workspace moves ───────────────────────────────────────────────────
+
+  beginPageMove(request: IPageMoveRequest): Promise<Committed<IPendingMove>> {
+    return this.structural("beginPageMove", request) as Promise<Committed<IPendingMove>>;
+  }
+
+  completePageMove(moveId: string): Promise<Committed<void>> {
+    return this.structural("completePageMove", { moveId }) as Promise<Committed<void>>;
+  }
+
+  abortPageMove(moveId: string, reason: string): Promise<Committed<void>> {
+    return this.structural("abortPageMove", { moveId, reason }) as Promise<Committed<void>>;
+  }
+
+  async pendingMoves(opts?: IReadOpts): Promise<readonly IPendingMove[]> {
+    await this.awaitConsistency(opts);
+    return [...this.projection.state.pendingMoves.values()];
+  }
+
+  async forwardOf(pageId: PageId, opts?: IReadOpts): Promise<IPageForward | undefined> {
+    await this.awaitConsistency(opts);
+    return this.projection.state.forwards.get(pageId);
   }
 
   /** Mirror a rename/archive/unarchive into the namespace catalog (the secondary index

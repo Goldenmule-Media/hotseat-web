@@ -14,6 +14,7 @@ import type {
   IWorkspaceLink,
   IEventEnvelope,
   IPageNode,
+  IPendingMove,
   ISection,
   IWorkspaceState,
   PageId,
@@ -46,6 +47,10 @@ export const STRUCTURAL_EVENT_TYPES = [
   "WorkspaceRenamed",
   "WorkspaceArchived",
   "WorkspaceUnarchived",
+  "PageMoveStarted",
+  "PageMoveCompleted",
+  "PageMoveAborted",
+  "PagesImported",
 ] as const;
 
 /** The single engine content event type — its payload is an ordered `SectionOp[]`. */
@@ -107,6 +112,32 @@ interface LinkPayload {
   readonly workspace?: WorkspaceId;
   readonly title?: string;
 }
+interface PageMoveCompletedPayload {
+  readonly moveId: string;
+}
+/** One imported page's node fields; its content follows as a `SectionOpsApplied`. */
+export interface ImportedPageRecord {
+  readonly id: PageId;
+  readonly type: string;
+  /** Its parent inside the move, or `null` for a root (which lands under the payload's `parentId`). */
+  readonly parentId: PageId | null;
+  readonly title: string;
+  readonly status: string;
+  readonly archived?: boolean;
+  readonly pinned?: boolean;
+  readonly createdAt: string;
+  /** Serial values as they were in the source, where the import re-minted them. */
+  readonly originalSerials?: Record<string, Record<string, number>>;
+}
+export interface PagesImportedPayload {
+  readonly moveId: string;
+  readonly from: WorkspaceId;
+  readonly fromVersion: number;
+  readonly parentId: PageId | null;
+  readonly position?: number;
+  readonly pages: readonly ImportedPageRecord[];
+  readonly links: readonly IWorkspaceLink[];
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // PageState view (shared-reference window onto an IPageNode)
@@ -164,6 +195,9 @@ export function emptyWorkspace(created: IEventEnvelope): IWorkspaceState {
     children,
     links: [],
     retired: new Set<PageId>(),
+    pendingMoves: new Map(),
+    forwards: new Map(),
+    imports: new Map(),
     version: created.version + 1,
   };
 }
@@ -438,11 +472,108 @@ function applyStructural(
       return state;
     }
 
+    case "PageMoveStarted": {
+      const p = event.payload as IPendingMove;
+      state.pendingMoves.set(p.moveId, p);
+      return state;
+    }
+
+    case "PageMoveCompleted": {
+      completeMove(state, (event.payload as PageMoveCompletedPayload).moveId);
+      return state;
+    }
+
+    case "PageMoveAborted": {
+      state.pendingMoves.delete((event.payload as PageMoveCompletedPayload).moveId);
+      return state;
+    }
+
+    case "PagesImported": {
+      importPages(state, event.payload as PagesImportedPayload, event.meta.occurredAt, registry, skipped);
+      return state;
+    }
+
     default: {
       // Exhaustiveness guard — should be unreachable given isStructuralEvent().
       throw new UnknownPageTypeError([event.type]);
     }
   }
+}
+
+/**
+ * Drop a finished move's pages, leaving a forward for each. Edges out of the moved pages go
+ * with them; edges into them from pages that stay become cross-workspace edges.
+ */
+function completeMove(state: IWorkspaceState, moveId: string): void {
+  const move = state.pendingMoves.get(moveId);
+  if (move === undefined) return;
+  const moved = new Set(move.pageIds);
+  for (const id of move.pageIds) {
+    const node = state.pages.get(id);
+    if (node === undefined) continue;
+    state.forwards.set(id, { workspace: move.to, title: node.title, moveId });
+    removeFromChildren(state, node.parentId ?? ROOT, id);
+    state.children.delete(id);
+    state.pages.delete(id);
+  }
+  state.links = state.links
+    .filter((l) => !moved.has(l.from))
+    .map((l) =>
+      l.workspace === undefined && moved.has(l.to)
+        ? { from: l.from, to: l.to, role: l.role, workspace: move.to, title: state.forwards.get(l.to)?.title ?? l.to }
+        : l,
+    );
+  state.pendingMoves.delete(moveId);
+}
+
+/** Add a move's pages (content arrives in the same commit as `SectionOpsApplied`). */
+function importPages(
+  state: IWorkspaceState,
+  p: PagesImportedPayload,
+  occurredAt: string,
+  registry: Registry,
+  skipped: Set<PageId>,
+): void {
+  if (state.imports.has(p.moveId)) return;
+  let rootIndex = p.position;
+  for (const rec of p.pages) {
+    if (!registry.has(rec.type)) {
+      if (isRetiredType(registry, rec.type)) {
+        skipped.add(rec.id);
+        continue;
+      }
+      throw new UnknownPageTypeError([rec.type]);
+    }
+    const parentId = rec.parentId ?? p.parentId;
+    state.pages.set(rec.id, {
+      id: rec.id,
+      type: rec.type,
+      parentId,
+      title: rec.title,
+      status: rec.status,
+      sections: [],
+      pinned: rec.pinned === true ? true : undefined,
+      archived: rec.archived === true ? true : undefined,
+      createdAt: rec.createdAt,
+      updatedAt: occurredAt,
+    });
+    state.forwards.delete(rec.id);
+    const siblings = childList(state, parentId ?? ROOT);
+    if (siblings.includes(rec.id)) continue;
+    if (rec.parentId === null && rootIndex !== undefined && rootIndex >= 0 && rootIndex <= siblings.length) {
+      siblings.splice(rootIndex, 0, rec.id);
+      rootIndex += 1;
+    } else {
+      siblings.push(rec.id);
+    }
+  }
+  for (const link of p.links) {
+    if (skipped.has(link.from) || (link.workspace === undefined && skipped.has(link.to))) continue;
+    const edge = { from: link.from, to: link.to, role: link.role, workspace: link.workspace, title: link.title };
+    if (state.links.some((l) => sameEdge(l, edge))) continue;
+    state.links.push(link.workspace === undefined ? { from: link.from, to: link.to, role: link.role } : { ...link });
+  }
+  state.imports.set(p.moveId, { from: p.from, fromVersion: p.fromVersion, pageIds: p.pages.map((rec) => rec.id) });
 }
 
 function applyContent(
@@ -504,6 +635,11 @@ export function foldWorkspace(
   // be a single accumulating instance, so materialize it before any apply.
   if (state !== undefined && (state.retired as Set<PageId> | undefined) === undefined) {
     state.retired = new Set<PageId>();
+  }
+  if (state !== undefined) {
+    state.pendingMoves ??= new Map();
+    state.forwards ??= new Map();
+    state.imports ??= new Map();
   }
   const fromVersion = from?.fromVersion ?? -1;
 

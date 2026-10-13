@@ -402,3 +402,25 @@ export class SearchIndexUnavailableError extends WikiError {
     this.version = version;
   }
 }
+
+/** The page moved to another workspace; `workspaceId` + `pageId` name where it lives now. */
+export class PageMovedError extends WikiError {
+  readonly pageId: string;
+  readonly workspaceId: string;
+  constructor(pageId: string, workspaceId: string) {
+    super("PAGE_MOVED", `Page "${pageId}" moved to workspace "${workspaceId}".`);
+    this.pageId = pageId;
+    this.workspaceId = workspaceId;
+  }
+}
+
+/** The page is part of a cross-workspace move that hasn't finished; it can't change until then. */
+export class PageMoveInProgressError extends WikiError {
+  readonly pageId: string;
+  readonly moveId: string;
+  constructor(pageId: string, moveId: string) {
+    super("PAGE_MOVE_IN_PROGRESS", `Page "${pageId}" is being moved (${moveId}); retry once the move finishes.`);
+    this.pageId = pageId;
+    this.moveId = moveId;
+  }
+}

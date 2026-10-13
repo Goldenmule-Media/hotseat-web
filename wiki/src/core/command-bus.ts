@@ -56,12 +56,18 @@ import { applyOps, normalizeFieldValue } from "./operations";
 import type { GeneratedCommand, Registry } from "./registry";
 import { writeSnapshot } from "./snapshot";
 import { STRUCTURAL_HANDLERS, type StructureHandler } from "./structure";
+import { assertNotMoving, MOVE_FINISHERS, MOVE_HANDLERS, requireLivePage, structuralTargets } from "./move";
 import { isStaleAppend, type IEventLog, type ProjectionEntry, type Services } from "./types";
 import { validatePage } from "./ingestion";
 import { applyWorkspace, isStructuralEvent, pageStateView, SECTION_OPS_EVENT } from "./workspace";
 
 /** Max rebase attempts before surfacing {@link ConcurrencyError}. */
 const MAX_REBASE_ATTEMPTS = 5;
+
+/** Read per call: the engine registers its internal `__workspaceCreated__` handler at load. */
+function structuralHandler(name: string): StructureHandler | undefined {
+  return STRUCTURAL_HANDLERS[name] ?? MOVE_HANDLERS[name];
+}
 
 /**
  * The section a `SectionOp` EDITS THE CONTENT OF, or `undefined` if the op is not a
@@ -170,11 +176,12 @@ export class CommandBus {
    * Resolves to a {@link CommitOutcome} (result + committed-head version, §8.6).
    */
   async runStructural(projection: BusProjection, req: StructuralRequest): Promise<CommitOutcome> {
-    const handler = STRUCTURAL_HANDLERS[req.handler];
+    const handler = structuralHandler(req.handler);
     if (handler === undefined) {
       // Unknown structural verb — treat as a forbidden mutation rather than a crash.
       throw new MutationNotAllowedError("workspace", projection.state.status, req.handler, [
         ...Object.keys(STRUCTURAL_HANDLERS),
+        ...Object.keys(MOVE_HANDLERS),
       ]);
     }
     const decide = (state: IWorkspaceState) => this.decideStructural(handler, state, req);
@@ -189,9 +196,10 @@ export class CommandBus {
     req: StructuralRequest,
   ): { events: DomainEvent[]; result: unknown } {
     const isUnarchive = req.handler === "unarchive" || req.handler === "unarchiveWorkspace";
-    if (state.status === "archived" && !isUnarchive) {
+    if (state.status === "archived" && !isUnarchive && !MOVE_FINISHERS.has(req.handler)) {
       throw new WorkspaceArchivedError(state.id);
     }
+    assertNotMoving(state, structuralTargets(req.handler, req.args));
     const { events, result } = handler(state, req.args, this.services, this.registry);
     return { events, result };
   }
@@ -373,11 +381,13 @@ export class CommandBus {
       throw new WorkspaceArchivedError(state.id);
     }
 
+    requireLivePage(state, req.pageId);
     const node = state.pages.get(req.pageId);
     if (node === undefined) throw new PageNotFoundError(req.pageId);
     if (node.archived === true) {
       throw new InvariantViolationError(`Page "${req.pageId}" is archived; mutation is blocked.`);
     }
+    assertNotMoving(state, [req.pageId]);
 
     const def = this.registry.page(node.type);
     const guard = this.registry.pageGuard(node.type);

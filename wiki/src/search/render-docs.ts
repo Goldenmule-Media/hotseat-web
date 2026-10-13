@@ -126,11 +126,23 @@ export function affectedPageIds(
         addPageId(touched, p["from"]);
         if (p["workspace"] === undefined) addPageId(touched, p["to"]);
         break;
+      case "PagesImported":
+        for (const page of (p["pages"] as { id: string }[] | undefined) ?? []) addPageId(touched, page.id);
+        structural = true;
+        break;
+      case "PageMoveCompleted":
+        // The moved pages leave, and any page that linked or referred to one now labels it
+        // as a cross-workspace link. Moves are rare, so re-render the whole workspace.
+        for (const id of (p["pageIds"] as string[] | undefined) ?? []) addPageId(touched, id);
+        for (const id of state.pages.keys()) touched.add(id);
+        break;
       case "WorkspaceCreated":
       case "WorkspaceRenamed":
       case "WorkspaceArchived":
       case "WorkspaceUnarchived":
-        break; // workspace-level events have no page render impact
+      case "PageMoveStarted":
+      case "PageMoveAborted":
+        break; // no page render impact
       default: {
         const _exhaustive: never = t; // a new structural type lands here → TS2322
         void _exhaustive;
@@ -175,6 +187,8 @@ export function isStructuralCommit(newEvents: readonly IEventEnvelope[]): boolea
       case "PageTitleSet":
       case "PageArchived":
       case "PageUnarchived":
+      case "PagesImported":
+      case "PageMoveCompleted":
         return true;
       case "WorkspaceRenamed":
         // No page renders change, but a path-mapping sink derives the WORKSPACE directory from
@@ -188,6 +202,8 @@ export function isStructuralCommit(newEvents: readonly IEventEnvelope[]): boolea
       case "LinkAdded":
       case "LinkRemoved":
       case "WorkspaceCreated":
+      case "PageMoveStarted":
+      case "PageMoveAborted":
         break; // no effect on a page's title / existence / tree position
       default: {
         const _exhaustive: never = t; // a new structural type lands here → TS2322

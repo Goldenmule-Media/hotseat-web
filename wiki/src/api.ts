@@ -307,8 +307,87 @@ export interface IWorkspaceState {
    * (e.g. the Markdown-disk mirror sweeping orphan files) must treat them as existing.
    */
   retired: Set<PageId>;
+  /** Moves out of this workspace that have begun and not finished; their pages are frozen. */
+  pendingMoves: Map<string, IPendingMove>;
+  /** Pages that moved to another workspace, by id. Refs and titles still resolve through them. */
+  forwards: Map<PageId, IPageForward>;
+  /** Moves this workspace has imported, by move id (a repeated import is a no-op). */
+  imports: Map<string, IPageImport>;
   /** per-workspace, == stream length (event count). */
   version: number;
+}
+
+/** Where a cross-workspace move sends a set of subtrees. */
+export interface IPageMoveRequest {
+  readonly to: WorkspaceId;
+  /** The subtree roots; every descendant moves with its root. */
+  readonly roots: readonly PageId[];
+  /** Where the roots land in the target (`null` = top level). */
+  readonly toParentId: PageId | null;
+  readonly position?: number;
+}
+
+/** A move out of this workspace that has begun and not finished. */
+export interface IPendingMove extends IPageMoveRequest {
+  readonly moveId: string;
+  /** Every page that moves, roots and descendants, in tree order. */
+  readonly pageIds: readonly PageId[];
+}
+
+/** Where a page went when it moved to another workspace. */
+export interface IPageForward {
+  readonly workspace: WorkspaceId;
+  /** The page's title when it left. */
+  readonly title: string;
+  readonly moveId: string;
+}
+
+/** A move a workspace has imported. */
+export interface IPageImport {
+  readonly from: WorkspaceId;
+  /** The source's version when the pages were exported. */
+  readonly fromVersion: number;
+  readonly pageIds: readonly PageId[];
+}
+
+/** One page of a move export: its node fields and its content, refs already rewritten. */
+export interface IExportedPage {
+  readonly id: PageId;
+  readonly type: string;
+  /** Its parent inside the move, or `null` for a root. */
+  readonly parentId: PageId | null;
+  readonly title: string;
+  readonly status: string;
+  readonly archived?: boolean;
+  readonly pinned?: boolean;
+  readonly createdAt: string;
+  readonly sections: readonly ISection[];
+}
+
+/** Everything a target needs to import a move. Built from the frozen source state. */
+export interface IPageMoveExport {
+  readonly moveId: string;
+  readonly from: WorkspaceId;
+  readonly fromVersion: number;
+  readonly to: WorkspaceId;
+  readonly toParentId: PageId | null;
+  readonly position?: number;
+  /** In tree order: a parent always precedes its children. */
+  readonly pages: readonly IExportedPage[];
+  /** Graph edges out of the moved pages, retargeted for the destination. */
+  readonly links: readonly IWorkspaceLink[];
+  /** Attachment ids (`<sha256>`) the moved content references; the host copies them first. */
+  readonly blobs: readonly string[];
+}
+
+/** What an import did (or, for a dry run, would do). */
+export interface IPagesImportResult {
+  readonly moveId: string;
+  readonly pageIds: readonly PageId[];
+  /** `true` when this move was already imported, so nothing was written. */
+  readonly alreadyImported: boolean;
+  /** Re-minted serial numbers, by page: `section → field → { from, to }`. */
+  readonly serials: Readonly<Record<string, Record<string, Record<string, { from: number; to: number }>>>>;
 }
 
 /**
@@ -553,6 +632,17 @@ export interface IWorkspaceHandle {
    * pages whose serial is already set are left untouched. Idempotent — safe to re-run.
    */
   assignSerials(): Promise<Committed<void>>;
+
+  // ── cross-workspace moves (the steps the `wiki/admin` movePages saga drives) ──
+  /** Freeze the requested subtrees for a move out of this workspace. */
+  beginPageMove(request: IPageMoveRequest): Promise<Committed<IPendingMove>>;
+  /** Finish a move out: drop the pages and leave forwards behind. */
+  completePageMove(moveId: string): Promise<Committed<void>>;
+  /** Unfreeze a move that the target refused. */
+  abortPageMove(moveId: string, reason: string): Promise<Committed<void>>;
+  pendingMoves(opts?: IReadOpts): Promise<readonly IPendingMove[]>;
+  /** Where a page that moved out of this workspace went. */
+  forwardOf(pageId: PageId, opts?: IReadOpts): Promise<IPageForward | undefined>;
 
   // ── page-scoped content/status command ──
   mutate<K extends PageTypeName, C extends CommandName<K>>(

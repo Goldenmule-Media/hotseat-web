@@ -11,8 +11,12 @@
  */
 import type {
   IEventEnvelope,
+  IPageForward,
+  IPageImport,
   IPageNode,
+  IPendingMove,
   IWorkspaceState,
+  PageId,
   Unsubscribe,
   WorkspaceId,
   WorkspaceStatus,
@@ -46,6 +50,10 @@ export interface SerializedWorkspaceState {
   readonly links: { from: string; to: string; role: string; workspace?: string; title?: string }[];
   /** Pages skipped as retired-type during the fold; optional — absent in older snapshots. */
   readonly retired?: string[];
+  /** Cross-workspace move bookkeeping; absent in snapshots from before moves existed. */
+  readonly pendingMoves?: IPendingMove[];
+  readonly forwards?: [PageId, IPageForward][];
+  readonly imports?: [string, IPageImport][];
 }
 
 export type PageOrRootKey = string; // PageId | "@root"
