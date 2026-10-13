@@ -44,9 +44,19 @@ struct MirrorStatus: Decodable {
         let stuck: Bool?
         let nextRetryAt: Double?
         let attempts: Int?
+        /// Set when this entry mirrors one page's subtree rather than the whole workspace.
+        let subtreeRootId: String?
+        let subtreeTitle: String?
 
-        var id: String { workspaceId }
-        var displayName: String { name ?? workspaceId }
+        /// The root, not the workspace: several entries may mirror subtrees of one workspace,
+        /// and every entry owns a distinct root.
+        var id: String { root }
+
+        var displayName: String {
+            let workspace = name ?? workspaceId
+            guard let subtree = subtreeTitle ?? subtreeRootId else { return workspace }
+            return "\(workspace) › \(subtree)"
+        }
     }
 }
 
@@ -60,6 +70,19 @@ struct CatalogWorkspace: Decodable, Identifiable, Hashable {
 
 private struct CatalogResponse: Decodable {
     let workspaces: [CatalogWorkspace]
+}
+
+/// One page from `GET /_mirror/workspaces/{id}/tree`: a candidate subtree root, depth-first.
+struct PageTreeNode: Decodable, Identifiable, Hashable {
+    let id: String
+    let title: String
+    let type: String
+    let depth: Int
+    let archived: Bool
+}
+
+private struct PageTreeResponse: Decodable {
+    let pages: [PageTreeNode]
 }
 
 enum MirrorClientError: LocalizedError {
@@ -95,8 +118,26 @@ struct MirrorClient {
         try await get("/_mirror/workspaces", as: CatalogResponse.self).workspaces
     }
 
+    /// The pages a mirror can be scoped to. 503 while the mirror can't open the workspace.
+    func pageTree(workspaceId: String) async throws -> [PageTreeNode] {
+        let encoded = workspaceId.addingPercentEncoding(withAllowedCharacters: Self.pathSegment) ?? workspaceId
+        return try await get("/_mirror/workspaces/\(encoded)/tree", as: PageTreeResponse.self).pages
+    }
+
+    /// Unreserved characters plus `:`, which workspace ids carry and a path segment allows.
+    private static let pathSegment: CharacterSet = {
+        var set = CharacterSet.alphanumerics
+        set.insert(charactersIn: "-_.~:")
+        return set
+    }()
+
     private func get<T: Decodable>(_ path: String, as: T.Type) async throws -> T {
-        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+        // Joined as text: `appendingPathComponent` would re-encode an already-encoded segment.
+        let base = baseURL.absoluteString.hasSuffix("/") ? String(baseURL.absoluteString.dropLast()) : baseURL.absoluteString
+        guard let url = URL(string: base + path) else {
+            throw MirrorClientError.unreachable("bad URL for \(path)")
+        }
+        var request = URLRequest(url: url)
         // Short: this is a loopback poll behind a 5s timer, and a hung request would stall the
         // whole menu rather than showing the mirror as unreachable.
         request.timeoutInterval = 4

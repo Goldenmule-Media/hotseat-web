@@ -178,6 +178,11 @@ final class MirrorStore {
         }
     }
 
+    /// The pages of one workspace, for scoping a mirror to a subtree.
+    func pageTree(workspaceId: String) async throws -> [PageTreeNode] {
+        try await client.pageTree(workspaceId: workspaceId)
+    }
+
     // ── actions ──────────────────────────────────────────────────────────────
 
     func restart() async {

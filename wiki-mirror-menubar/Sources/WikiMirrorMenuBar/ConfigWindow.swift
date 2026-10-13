@@ -76,7 +76,8 @@ struct ConfigWindow: View {
                                 EmitterRow(
                                     emitter: $emitter,
                                     catalog: store.catalog,
-                                    taken: Set(config.emitters.map(\.workspaceId))
+                                    taken: Set(config.emitters.filter { $0.id != emitter.id }.map(\.pairKey)),
+                                    loadPages: store.pageTree(workspaceId:)
                                 ) {
                                     config.emitters.removeAll { $0.id == emitter.id }
                                 }
@@ -177,7 +178,7 @@ struct ConfigWindow: View {
     }
 }
 
-/// One emitter: which workspace, and the folder it is written to.
+/// One emitter: which workspace (and optionally which page's subtree), and the folder it is written to.
 ///
 /// The workspace is chosen by NAME — the id is machine detail that tells a person nothing, and
 /// the picker is the only thing that can produce a valid one anyway. It only ever appears as a
@@ -186,9 +187,13 @@ struct ConfigWindow: View {
 private struct EmitterRow: View {
     @Binding var emitter: EmitterEntry
     let catalog: [CatalogWorkspace]
-    /// Workspace ids already claimed by another emitter — offered but not selectable.
+    /// `pairKey`s already claimed by another emitter — offered but not selectable.
     let taken: Set<String>
+    let loadPages: (String) async throws -> [PageTreeNode]
     let onDelete: () -> Void
+
+    @State private var pages: [PageTreeNode] = []
+    @State private var pagesError: String?
 
     @AppStorage(EmitterRow.clientBaseURLKey) private var clientBaseURL = EmitterRow.defaultClientBaseURL
 
@@ -202,6 +207,10 @@ private struct EmitterRow: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 4) {
                 picker
+                if !emitter.workspaceId.isEmpty {
+                    Text("›").foregroundStyle(.secondary)
+                    pagePicker
+                }
                 Spacer()
                 Button { openInWiki() } label: { Image(systemName: "globe") }
                     .buttonStyle(.borderless)
@@ -213,10 +222,10 @@ private struct EmitterRow: View {
                     .disabled(!folderExists)
                 Button(role: .destructive, action: onDelete) { Image(systemName: "trash") }
                     .buttonStyle(.borderless)
-                    .help("Stop mirroring this workspace")
+                    .help("Stop this mirror")
             }
             HStack(spacing: 8) {
-                TextField("/absolute/path/to/checkout/docs", text: $emitter.root)
+                TextField("/absolute/path/to/repo/\(Self.mirrorFolder)", text: $emitter.root)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.caption, design: .monospaced))
                 Button("Choose…") { chooseFolder() }
@@ -225,7 +234,11 @@ private struct EmitterRow: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
+        .task(id: emitter.workspaceId) { await reloadPages() }
     }
+
+    /// The conventional mirror folder inside a repo checkout.
+    static let mirrorFolder = "wiki-mirror"
 
     /// The workspace's name, or the bare id when nothing can resolve it.
     private var title: String {
@@ -239,9 +252,14 @@ private struct EmitterRow: View {
                 Text("Start the mirror to list workspaces")
             } else {
                 ForEach(catalog) { workspace in
-                    Button(workspace.name) { emitter.workspaceId = workspace.id }
-                        // One workspace, one emitter: the mirror rejects a duplicate anyway.
-                        .disabled(taken.contains(workspace.id) && workspace.id != emitter.workspaceId)
+                    Button(workspace.name) {
+                        guard workspace.id != emitter.workspaceId else { return }
+                        emitter.workspaceId = workspace.id
+                        // A page id from another workspace means nothing here.
+                        emitter.subtreeRootId = nil
+                    }
+                    // Its whole-workspace mirror is already claimed; the mirror rejects a duplicate.
+                    .disabled(taken.contains(Self.pairKey(workspace.id, nil)) && workspace.id != emitter.workspaceId)
                 }
             }
         } label: {
@@ -249,6 +267,53 @@ private struct EmitterRow: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
+    }
+
+    /// The subtree's title, the bare id when the tree can't be loaded, or "Whole workspace".
+    private var pageTitle: String {
+        guard let subtree = emitter.normalizedSubtreeRootId else { return "Whole workspace" }
+        return pages.first(where: { $0.id == subtree })?.title ?? subtree
+    }
+
+    private var pagePicker: some View {
+        Menu {
+            Button("Whole workspace") { emitter.subtreeRootId = nil }
+                .disabled(taken.contains(Self.pairKey(emitter.workspaceId, nil)))
+            Divider()
+            if pages.isEmpty {
+                Text(pagesError == nil ? "No pages" : "Start the mirror to list pages")
+            } else {
+                ForEach(pages) { page in
+                    Button(String(repeating: "    ", count: page.depth) + page.title + (page.archived ? " (archived)" : "")) {
+                        emitter.subtreeRootId = page.id
+                    }
+                    .disabled(taken.contains(Self.pairKey(emitter.workspaceId, page.id)))
+                }
+            }
+        } label: {
+            Text(pageTitle).font(.headline).foregroundStyle(emitter.subtreeRootId == nil ? .secondary : .primary)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Mirror the whole workspace, or just one page and everything under it")
+    }
+
+    private static func pairKey(_ workspaceId: String, _ subtreeRootId: String?) -> String {
+        EmitterEntry(workspaceId: workspaceId, subtreeRootId: subtreeRootId).pairKey
+    }
+
+    private func reloadPages() async {
+        guard !emitter.workspaceId.isEmpty else {
+            pages = []
+            return
+        }
+        do {
+            pages = try await loadPages(emitter.workspaceId)
+            pagesError = nil
+        } catch {
+            pages = []
+            pagesError = error.localizedDescription
+        }
     }
 
     private var folderExists: Bool {
@@ -282,12 +347,15 @@ private struct EmitterRow: View {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
-        panel.prompt = "Mirror here"
+        panel.prompt = "Mirror into this repo"
+        panel.message = "Pick the repo checkout; the mirror writes to its \(Self.mirrorFolder) folder."
         if !emitter.root.isEmpty {
             panel.directoryURL = URL(fileURLWithPath: emitter.root)
         }
         if panel.runModal() == .OK, let url = panel.url {
-            emitter.root = url.path
+            emitter.root = url.lastPathComponent == Self.mirrorFolder
+                ? url.path
+                : url.appendingPathComponent(Self.mirrorFolder).path
         }
     }
 }

@@ -141,6 +141,52 @@ final class MirrorConfigTests: XCTestCase {
         XCTAssertThrowsError(try config.save(to: path))
     }
 
+    func testRoundTripsASubtreeRootAndOmitsItWhenUnset() throws {
+        try write(#"{"emitters":[{"workspaceId":"ws:a","root":"/tmp/a","subtreeRootId":"toc:war"}]}"#)
+        var config = try MirrorConfigFile.load(from: path)
+        XCTAssertEqual(config.emitters.first?.subtreeRootId, "toc:war")
+
+        config.emitters.append(EmitterEntry(workspaceId: "ws:a", root: "/tmp/b"))
+        config.emitters.append(EmitterEntry(workspaceId: "ws:c", root: "/tmp/c", subtreeRootId: "  "))
+        try config.save(to: path)
+
+        let emitters = try XCTUnwrap(try reread()["emitters"] as? [[String: Any]])
+        XCTAssertEqual(emitters[0]["subtreeRootId"] as? String, "toc:war")
+        // Absent, not null or blank: an older mirror treats any present value as a filter.
+        XCTAssertNil(emitters[1]["subtreeRootId"])
+        XCTAssertNil(emitters[2]["subtreeRootId"])
+    }
+
+    func testOneWorkspaceMayBeMirroredOncePerSubtree() {
+        var config = MirrorConfigFile()
+        config.emitters = [
+            EmitterEntry(workspaceId: "ws:a", root: "/tmp/whole"),
+            EmitterEntry(workspaceId: "ws:a", root: "/tmp/war", subtreeRootId: "toc:war"),
+            EmitterEntry(workspaceId: "ws:a", root: "/tmp/ballgame", subtreeRootId: "toc:ballgame"),
+        ]
+        XCTAssertEqual(config.validate(), [])
+
+        config.emitters.append(EmitterEntry(workspaceId: "ws:a", root: "/tmp/war2", subtreeRootId: "toc:war"))
+        XCTAssertEqual(config.validate(), ["ws:a › toc:war is listed twice."])
+
+        config.emitters.removeLast()
+        config.emitters.append(EmitterEntry(workspaceId: "ws:a", root: "/tmp/whole2", subtreeRootId: " "))
+        XCTAssertEqual(config.validate(), ["ws:a is listed twice."])
+    }
+
+    func testRejectsNestedRootsButNotSiblingsWithACommonPrefix() {
+        var config = MirrorConfigFile()
+        config.emitters = [
+            EmitterEntry(workspaceId: "ws:a", root: "/repo/wiki-mirror"),
+            EmitterEntry(workspaceId: "ws:b", root: "/repo/wiki-mirror-2"),
+        ]
+        XCTAssertEqual(config.validate(), [])
+
+        config.emitters.append(EmitterEntry(workspaceId: "ws:c", root: "/repo/wiki-mirror/inner/"))
+        XCTAssertEqual(config.validate().count, 1)
+        XCTAssertTrue(config.validate()[0].contains("can't nest"))
+    }
+
     func testValidatesTheServerUrlAndNamespace() throws {
         var config = MirrorConfigFile()
         config.streamBaseUrl = "not-a-url"

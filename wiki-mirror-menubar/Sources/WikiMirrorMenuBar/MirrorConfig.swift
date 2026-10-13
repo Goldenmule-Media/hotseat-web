@@ -1,30 +1,49 @@
 import Foundation
 
-/// One mirrored workspace: a workspace id and the absolute directory it is written to.
+/// One mirror: a workspace (or one page subtree of it) and the absolute directory it is written to.
 struct EmitterEntry: Identifiable, Hashable {
     var id = UUID()
     var workspaceId: String = ""
     var root: String = ""
+    /// The page whose subtree this entry mirrors; nil mirrors the whole workspace.
+    var subtreeRootId: String?
     /// Per-entry keys this app doesn't model, written back verbatim — a newer mirror's filter
     /// dropped on save would widen the mirror into a repo that never asked for it.
     var extra: [String: Any] = [:]
 
-    static let modeledKeys = ["workspaceId", "root"]
+    static let modeledKeys = ["workspaceId", "root", "subtreeRootId"]
 
-    init(workspaceId: String = "", root: String = "", extra: [String: Any] = [:]) {
+    init(workspaceId: String = "", root: String = "", subtreeRootId: String? = nil, extra: [String: Any] = [:]) {
         self.workspaceId = workspaceId
         self.root = root
+        self.subtreeRootId = subtreeRootId
         self.extra = extra
     }
 
     init(json: [String: Any]) {
         var extra = json
         for key in Self.modeledKeys { extra.removeValue(forKey: key) }
-        self.init(workspaceId: json["workspaceId"] as? String ?? "", root: json["root"] as? String ?? "", extra: extra)
+        self.init(
+            workspaceId: json["workspaceId"] as? String ?? "",
+            root: json["root"] as? String ?? "",
+            subtreeRootId: json["subtreeRootId"] as? String,
+            extra: extra)
+    }
+
+    /// The trimmed subtree id, with blank meaning "whole workspace".
+    var normalizedSubtreeRootId: String? {
+        guard let value = subtreeRootId?.trimmingCharacters(in: .whitespaces), !value.isEmpty else { return nil }
+        return value
+    }
+
+    /// What makes two entries the same mirror: the workspace plus the subtree, if any.
+    var pairKey: String {
+        "\(workspaceId.trimmingCharacters(in: .whitespaces))\u{0}\(normalizedSubtreeRootId ?? "")"
     }
 
     static func == (lhs: EmitterEntry, rhs: EmitterEntry) -> Bool {
         lhs.id == rhs.id && lhs.workspaceId == rhs.workspaceId && lhs.root == rhs.root
+            && lhs.subtreeRootId == rhs.subtreeRootId
             && NSDictionary(dictionary: lhs.extra).isEqual(to: rhs.extra)
     }
 
@@ -32,6 +51,7 @@ struct EmitterEntry: Identifiable, Hashable {
         hasher.combine(id)
         hasher.combine(workspaceId)
         hasher.combine(root)
+        hasher.combine(subtreeRootId)
     }
 }
 
@@ -96,15 +116,19 @@ struct MirrorConfigFile {
     /// Everything wrong with this config, in the words the mirror itself would use.
     func validate() -> [String] {
         var problems: [String] = []
-        var seenWorkspaces = Set<String>()
+        var seenPairs = Set<String>()
         var seenRoots = Set<String>()
         for emitter in emitters {
             let workspace = emitter.workspaceId.trimmingCharacters(in: .whitespaces)
             let root = emitter.root.trimmingCharacters(in: .whitespaces)
             if workspace.isEmpty {
                 problems.append("Every mirror needs a workspace.")
-            } else if !seenWorkspaces.insert(workspace).inserted {
-                problems.append("\(workspace) is listed twice.")
+            } else if !seenPairs.insert(emitter.pairKey).inserted {
+                if let subtree = emitter.normalizedSubtreeRootId {
+                    problems.append("\(workspace) › \(subtree) is listed twice.")
+                } else {
+                    problems.append("\(workspace) is listed twice.")
+                }
             }
             if root.isEmpty {
                 problems.append("\(workspace.isEmpty ? "A mirror" : workspace) needs a folder.")
@@ -115,6 +139,13 @@ struct MirrorConfigFile {
                 problems.append("Two workspaces both write to \(root) — give each its own folder.")
             }
         }
+        let roots = seenRoots.sorted()
+        for outer in roots {
+            for inner in roots where Self.isInside(inner, outer) {
+                // A mirror sweeps its whole root, so a nested root gets swept by its parent.
+                problems.append("\(inner) is inside \(outer) — mirror folders can't nest.")
+            }
+        }
         if URL(string: streamBaseUrl)?.scheme == nil {
             problems.append("The server URL needs a scheme, e.g. https://…")
         }
@@ -122,6 +153,13 @@ struct MirrorConfigFile {
             problems.append("The namespace can't be empty.")
         }
         return problems
+    }
+
+    /// Whether `path` lies strictly below `ancestor`, comparing whole path components.
+    static func isInside(_ path: String, _ ancestor: String) -> Bool {
+        let parent = ancestor.hasSuffix("/") ? ancestor : ancestor + "/"
+        let child = path.hasSuffix("/") ? path : path + "/"
+        return child != parent && child.hasPrefix(parent)
     }
 
     /// Serialize with a stable, human-readable key order — the CLI and a person both read this file.
@@ -141,6 +179,9 @@ struct MirrorConfigFile {
                 "\(Self.quote("workspaceId")): \(Self.quote(workspace))",
                 "\(Self.quote("root")): \(Self.quote(root))",
             ]
+            if let subtree = emitter.normalizedSubtreeRootId {
+                fields.append("\(Self.quote("subtreeRootId")): \(Self.quote(subtree))")
+            }
             for key in emitter.extra.keys.sorted() where !EmitterEntry.modeledKeys.contains(key) {
                 if let value = Self.jsonText(emitter.extra[key]!, indent: "      ") {
                     fields.append("\(Self.quote(key)): \(value)")

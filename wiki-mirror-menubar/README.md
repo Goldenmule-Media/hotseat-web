@@ -60,6 +60,19 @@ panel):
 Process-wide problems outrank per-workspace ones: an expired grant is one line saying so, not
 seven red workspaces pointing at the network.
 
+## Mirroring part of a workspace
+
+Each mirror card picks a workspace, then a **page**: "Whole workspace", or any page from the
+mirror's `GET /_mirror/workspaces/{id}/tree` (that page and everything under it). The choice is
+saved as the entry's `subtreeRootId`, keyed by page id so renames don't break it, and left out of
+the file entirely for a whole-workspace mirror. One workspace may appear on several cards as long
+as each `(workspace, page)` pair is distinct, and no mirror folder may sit inside another. The
+panel names a subtree mirror "Workspace › Page"; when the mirror isn't running to resolve titles,
+the stored page id stands in.
+
+**Choose…** takes the repo checkout and points the mirror at its `wiki-mirror/` folder, the
+conventional root in every repo.
+
 ## Updating itself
 
 The app checks the repo's GitHub releases on launch and daily, and offers a one-click update: it
@@ -86,17 +99,17 @@ release", so a release for anything else in the same repo cannot hijack the upda
 
 | File | Role |
 |---|---|
-| `MirrorClient.swift` | decodes `/_mirror/status` + `/_mirror/workspaces` |
+| `MirrorClient.swift` | decodes `/_mirror/status`, `/_mirror/workspaces`, and a workspace's page tree |
 | `MirrorStore.swift` | the 5s poll, the launchd state, and the one-word health verdict |
 | `LaunchAgent.swift` | reads the installed plist; install / restart / uninstall / sign in |
-| `MirrorConfig.swift` | reads and rewrites the config file, preserving unknown keys |
+| `MirrorConfig.swift` | reads and rewrites the config file, preserving unknown keys (top-level and per entry) |
 | `ConfigWindow.swift` → `AccountRow` | who the mirror is signed in as, and sign in / sign out |
 | `UpdateChecker.swift` | finds, verifies and unpacks a newer release |
 | `UpdateController.swift` | when to check, and the hand-off to `install.sh` |
 | `AppVersion.swift` | dotted-version parsing and ordering |
 | `Tests/` | round-trip + plist-inference tests (`swift test`) |
 | `MenuContent.swift` | the panel |
-| `ConfigWindow.swift` | the emitter editor and the Service tab |
+| `ConfigWindow.swift` | the emitter editor (workspace + page pickers) and the Service tab |
 
 Two details worth keeping:
 
