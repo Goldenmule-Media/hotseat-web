@@ -131,6 +131,10 @@ export interface XrefIndexTable {
   target_section: string | null;
   target_block: string | null;
   target_name: string | null;
+  /** Equals `workspace_id` for a local ref. */
+  target_workspace_id: string;
+  /** The title snapshot of a cross-workspace ref; null for a local one. */
+  target_title: string | null;
 }
 
 /** `tree_edges(workspace_id, parent_id, child_id, ord)` — ordered children. */

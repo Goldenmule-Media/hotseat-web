@@ -11,6 +11,7 @@ import * as sections from "./002-sections.js";
 import * as symbols from "./003-symbols.js";
 import * as archived from "./004-archived.js";
 import * as crossWorkspaceLinks from "./005-cross-workspace-links.js";
+import * as crossWorkspaceRefs from "./006-cross-workspace-refs.js";
 
 /** All read-model migrations, keyed by name (Kysely sorts by key, ascending). */
 const MIGRATIONS: Record<string, Migration> = {
@@ -19,6 +20,7 @@ const MIGRATIONS: Record<string, Migration> = {
   "003-symbols": { up: symbols.up, down: symbols.down },
   "004-archived": { up: archived.up, down: archived.down },
   "005-cross-workspace-links": { up: crossWorkspaceLinks.up, down: crossWorkspaceLinks.down },
+  "006-cross-workspace-refs": { up: crossWorkspaceRefs.up, down: crossWorkspaceRefs.down },
 };
 
 /** A provider that returns the bundled {@link MIGRATIONS}. */

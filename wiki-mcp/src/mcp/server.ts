@@ -44,6 +44,7 @@ import { bindAccess, type AccessView, type AuthUser, type McpAuth } from "./auth
 import { listResources, readResource, type WikiResourceContext } from "./resources.js";
 import { SessionTokenManager } from "./tokens.js";
 import { wikiTools, type WikiTool, type WikiToolContext } from "./tools.js";
+import { stampCrossWorkspaceRefs } from "./cross-workspace.js";
 
 /** Server identity advertised in the MCP `initialize` handshake. */
 const SERVER_INFO = { name: "wiki-mcp", version: "0.1.0" } as const;
@@ -252,7 +253,9 @@ export class WikiMcpServer {
         ...(access !== undefined ? { access } : {}),
       };
       try {
-        const result = await tool.handle(request.params.arguments ?? {}, ctx);
+        const args = request.params.arguments ?? {};
+        if (tool.write) await stampCrossWorkspaceRefs(args, ctx);
+        const result = await tool.handle(args, ctx);
         if (tool.write) this.afterWrite(result.data);
         return successResult(result.text, result.data);
       } catch (err) {

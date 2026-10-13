@@ -21,13 +21,16 @@ const Note = definePageType({
   statusTransitions: [t("draft", "publish", "published")],
   sections: {
     body: { name: "Body", required: true, mutableIn: ["draft"], fields: { text: { kind: "prose" } } },
+    rel: { name: "Related", required: true, mutableIn: ["draft"], fields: { see: { kind: "ref" } } },
   },
   commands: {
     setBody: { args: zodSchema(z.object({ text: z.string() })), target: { section: "body", field: "text" }, set: { text: arg("text") } },
+    setSee: { args: zodSchema(z.object({ see: z.any() })), target: { section: "rel", field: "see" }, set: { see: arg("see") } },
   },
   render: {
     sections: [
       { section: "body", heading: "Body", field: "text", as: "block" },
+      { section: "rel", heading: "Related", field: "see", as: "inline" },
       { section: "@references", heading: "References" },
     ],
   },
@@ -181,7 +184,7 @@ describe("cross-workspace links over MCP", () => {
 
   it("backlinks lists inbound edges from every workspace the caller can access", async () => {
     const res = await call(alice, "backlinks", { workspaceId: there, pageId: target });
-    expect(dataOf(res)).toEqual([{ workspace_id: here, from_id: source, role: "uses", from_title: "Source" }]);
+    expect(dataOf(res)).toEqual([{ workspace_id: here, from_id: source, from_title: "Source", via: "link", role: "uses" }]);
     expect(textOf(res)).toContain(`Source (${source}) in ${here} —uses→`);
   });
 
@@ -203,5 +206,32 @@ describe("cross-workspace links over MCP", () => {
     expect(res.isError ?? false).toBe(false);
     const md = textOf(await call(alice, "renderPage", { workspaceId: here, pageId: source }));
     expect(md).not.toContain(`wiki://${there}/`);
+  });
+
+  const setSee = (client: Client, pageId: string, see: unknown) =>
+    call(client, "mutatePage", { workspaceId: here, pageId, command: "setSee", args: { see } });
+
+  it("stamps a content ref into another workspace with the target's current title", async () => {
+    const page = await createNote(alice, here, "Ref holder");
+    const res = await setSee(alice, page, {
+      kind: "ref",
+      target: { kind: "page", id: target, workspace: there, title: "stale label" },
+    });
+    expect(res.isError ?? false).toBe(false);
+    const md = textOf(await call(alice, "renderPage", { workspaceId: here, pageId: page }));
+    expect(md).toContain(`[Target v2](wiki://${there}/${target})`);
+
+    const back = dataOf(await call(alice, "backlinks", { workspaceId: there, pageId: target }));
+    expect(back).toContainEqual({ workspace_id: here, from_id: page, from_title: "Ref holder", via: "ref", role: "see" });
+  });
+
+  it("denies a content ref into an inaccessible workspace and rejects a missing target", async () => {
+    const page = await createNote(alice, here, "Bad refs");
+    const denied = await setSee(alice, page, { kind: "ref", target: { kind: "page", id: bobPage, workspace: bobs } });
+    expect(denied.isError).toBe(true);
+    expect(textOf(denied)).toContain("ACCESS_DENIED");
+    const missing = await setSee(alice, page, { kind: "ref", target: { kind: "page", id: "note:gone", workspace: there } });
+    expect(missing.isError).toBe(true);
+    expect(textOf(missing)).toContain("LINK_TARGET_NOT_FOUND");
   });
 });

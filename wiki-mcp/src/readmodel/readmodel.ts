@@ -42,11 +42,13 @@ export type WorkspaceRow = Selectable<WorkspacesTable>;
 export type PageRow = Selectable<PagesTable>;
 export type TreeEdgeRow = Selectable<TreeEdgesTable>;
 export type LinkRow = Selectable<LinksTable>;
-export interface InboundLinkRow {
+/** One edge into a page: a graph link (`role` = its role) or a content ref (`role` = the field it sits in). */
+export interface InboundRow {
   workspace_id: string;
   from_id: string;
-  role: string;
   from_title: string | null;
+  via: "link" | "ref";
+  role: string;
 }
 export type EventRow = Selectable<EventsTable>;
 export type OutlineRow = Selectable<OutlineTable>;
@@ -166,11 +168,12 @@ export class SqlReadModel implements IReadModel {
   }
 
   /**
-   * Edges INTO a page, from this workspace and from any other, with each source page's
-   * title. Callers filter the result by the reader's access to each source workspace.
+   * Graph links and content refs INTO a page, from this workspace and from any other, with
+   * each source page's title. Callers filter the result by the reader's access to each
+   * source workspace.
    */
-  async inboundLinks(workspace: WorkspaceId, pageId: string): Promise<InboundLinkRow[]> {
-    return this.db
+  async inbound(workspace: WorkspaceId, pageId: string): Promise<InboundRow[]> {
+    const links = await this.db
       .selectFrom("links")
       .leftJoin("pages", (join) =>
         join.onRef("pages.workspace_id", "=", "links.workspace_id").onRef("pages.id", "=", "links.from_id"),
@@ -178,10 +181,37 @@ export class SqlReadModel implements IReadModel {
       .select(["links.workspace_id", "links.from_id", "links.role", "pages.title as from_title"])
       .where("links.to_workspace_id", "=", workspace)
       .where("links.to_id", "=", pageId)
-      .orderBy("links.workspace_id")
-      .orderBy("links.from_id")
-      .orderBy("links.role")
       .execute();
+    const refs = await this.db
+      .selectFrom("xref_index")
+      .leftJoin("pages", (join) =>
+        join.onRef("pages.workspace_id", "=", "xref_index.workspace_id").onRef("pages.id", "=", "xref_index.from_page"),
+      )
+      .select(["xref_index.workspace_id", "xref_index.from_page", "xref_index.from_field", "pages.title as from_title"])
+      .where("xref_index.target_workspace_id", "=", workspace)
+      .where("xref_index.target_page", "=", pageId)
+      .execute();
+    const rows: InboundRow[] = [
+      ...links.map((l) => ({ workspace_id: l.workspace_id, from_id: l.from_id, from_title: l.from_title, via: "link" as const, role: l.role })),
+      ...refs.map((r) => ({ workspace_id: r.workspace_id, from_id: r.from_page, from_title: r.from_title, via: "ref" as const, role: r.from_field })),
+    ];
+    const seen = new Set<string>();
+    return rows
+      .filter((r) => {
+        const key = `${r.workspace_id}\u0000${r.from_id}\u0000${r.via}\u0000${r.role}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((a, b) =>
+        a.workspace_id !== b.workspace_id
+          ? a.workspace_id < b.workspace_id ? -1 : 1
+          : a.from_id !== b.from_id
+            ? a.from_id < b.from_id ? -1 : 1
+            : a.via !== b.via
+              ? a.via < b.via ? -1 : 1
+              : a.role < b.role ? -1 : a.role > b.role ? 1 : 0,
+      );
   }
 
   /** The event log for a workspace, in version order. */

@@ -217,6 +217,8 @@ function xrefRows(state: IWorkspaceState): XrefInsert[] {
       target_section: target.kind === "section" ? target.id : "section" in target ? target.section : null,
       target_block: target.kind === "block" ? target.block : null,
       target_name: target.kind === "symbol" ? target.name : target.kind === "element" ? target.element : null,
+      target_workspace_id: target.workspace ?? state.id,
+      target_title: target.workspace !== undefined && target.workspace !== state.id ? (target.title ?? null) : null,
     });
   };
   const walkInlines = (node: IPageNode, sec: ISection, field: string, inlines: IInline[]): void => {

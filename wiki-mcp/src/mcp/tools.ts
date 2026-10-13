@@ -645,13 +645,21 @@ const assignSerialsTool: WikiTool = {
 // Page-scoped mutation (engine-validated args) + describeMutations
 // ────────────────────────────────────────────────────────────────────────────
 
+/** Appended to the authoring tools so agents learn the one shape every model shares. */
+const CROSS_WORKSPACE_REFS =
+  " Cross-workspace refs: wherever a command takes a page ref, add \"workspace\": \"<workspaceId>\" to point " +
+  "into another workspace ({\"ref\": pageId, \"workspace\"} as an inline run, or a RefTarget such as " +
+  "{\"kind\": \"page\", \"id\", \"workspace\"}; other kinds also need \"page\"). The write needs access to " +
+  "that workspace and an existing target; the server stamps \"title\" from the target, and the ref " +
+  "renders as [title](wiki://<workspaceId>/<pageId>).";
+
 const mutatePageTool: WikiTool = {
   name: "mutatePage",
   description:
     "Run a page-scoped content/status command on a page. The command name and its " +
     "args come from describeMutations(pageId) — the engine validates `args` against " +
     "the command's schema and the page's current status, returning a structured error " +
-    "(with the legal command set) if the call is illegal.",
+    "(with the legal command set) if the call is illegal." + CROSS_WORKSPACE_REFS,
   inputSchema: obj(
     {
       workspaceId: STR,
@@ -688,7 +696,7 @@ const mutatePageBatchTool: WikiTool = {
     "the error names the failing index + command + reason (with the legal set), so fix that " +
     "command and resubmit. Command names/args come from describePageType / describeMutations. " +
     "To cross-reference an element you add in the same batch, pass its `id` explicitly in the " +
-    "add command's args and reuse it.",
+    "add command's args and reuse it." + CROSS_WORKSPACE_REFS,
   inputSchema: obj(
     {
       workspaceId: STR,
@@ -779,7 +787,7 @@ const describeMutationsTool: WikiTool = {
   description:
     "List the commands a page can run right now: each with its JSON-Schema args and " +
     "whether it is currently legal in the page's status. Use this to discover the exact " +
-    "input schema before calling mutatePage.",
+    "input schema before calling mutatePage." + CROSS_WORKSPACE_REFS,
   inputSchema: obj({ workspaceId: STR, pageId: STR }, ["workspaceId", "pageId"]),
   write: false,
   async handle(args, ctx) {
@@ -821,7 +829,7 @@ const describePageTypeTool: WikiTool = {
     "target section/field, and the FSM event they fire; generated structural commands carry " +
     "their target. Omit `type` to list the loaded page types. Use this before createPage / " +
     "mutatePage to learn exact command names + args. (Whether a command is legal right now, " +
-    "and unmet preconditions, are instance-specific — use describeMutations for that.)",
+    "and unmet preconditions, are instance-specific — use describeMutations for that.)" + CROSS_WORKSPACE_REFS,
   inputSchema: obj(
     { type: nullableStr('The page-type tag (e.g. "feature-brief"). Omit/null to list all loaded types.') },
     [],
@@ -1270,20 +1278,21 @@ const symbolsTool: WikiTool = {
 const backlinksTool: WikiTool = {
   name: "backlinks",
   description:
-    "Pages that link TO a page, from its own workspace and from other workspaces you can access. " +
-    "Token-gated for read-your-writes.",
+    "Pages that link or refer TO a page (graph links and refs inside content), from its own " +
+    "workspace and from other workspaces you can access. Token-gated for read-your-writes.",
   inputSchema: obj({ workspaceId: STR, pageId: str("The page being linked to.") }, ["workspaceId", "pageId"]),
   write: false,
   async handle(args, ctx) {
     const ws = asWorkspaceId(reqStr(args, "workspaceId"));
     const pageId = reqStr(args, "pageId");
     await awaitAllConsistency(ctx);
-    const rows = (await ctx.readModel.inboundLinks(ws, pageId)).filter(
+    const rows = (await ctx.readModel.inbound(ws, pageId)).filter(
       (r) => r.workspace_id === ws || ctx.access === undefined || ctx.access.canAccess(r.workspace_id),
     );
     const lines = rows.map((r) => {
       const where = r.workspace_id === ws ? "" : ` in ${r.workspace_id}`;
-      return `- ${r.from_title ?? r.from_id} (${r.from_id})${where} —${r.role}→`;
+      const how = r.via === "link" ? `—${r.role}→` : `(ref in ${r.role})`;
+      return `- ${r.from_title ?? r.from_id} (${r.from_id})${where} ${how}`;
     });
     return { text: rows.length === 0 ? `Nothing links to ${pageId}.` : lines.join("\n"), data: rows };
   },
