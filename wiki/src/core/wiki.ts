@@ -167,6 +167,7 @@ export function createWiki(config: IWikiConfig): IWiki {
 class Wiki implements IWiki {
   /** Open handles, keyed by workspace id (so re-opening reuses the projection). */
   private readonly open = new Map<string, WorkspaceHandle>();
+  private readonly opening = new Map<string, Promise<IWorkspaceHandle>>();
 
   constructor(
     private readonly config: IWikiConfig,
@@ -212,7 +213,15 @@ class Wiki implements IWiki {
   async openWorkspace(id: WorkspaceId): Promise<IWorkspaceHandle> {
     const existing = this.open.get(id);
     if (existing !== undefined) return existing;
+    // Concurrent opens share one attach; otherwise each would start its own tail and orphan all but the last.
+    const inFlight = this.opening.get(id);
+    if (inFlight !== undefined) return inFlight;
+    const opening = this.load(id).finally(() => this.opening.delete(id));
+    this.opening.set(id, opening);
+    return opening;
+  }
 
+  private async load(id: WorkspaceId): Promise<IWorkspaceHandle> {
     if (!(await this.eventLog.exists(id))) {
       throw new WorkspaceNotFoundError(id);
     }
