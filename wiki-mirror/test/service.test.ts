@@ -202,6 +202,14 @@ describe("wiki-mirror — the service", () => {
       [rootBall, ball, "Ballgame", true],
       [rootWar, war, "War", true],
     ]);
+
+    const tree = await fetch(`${running.health.url}/_mirror/workspaces/${encodeURIComponent(studio.id)}/tree`);
+    expect(tree.status).toBe(200);
+    expect(((await tree.json()) as { pages: { title: string; depth: number }[] }).pages.map((p) => [p.title, p.depth])).toEqual([
+      ["Ballgame", 0],
+      ["Rules", 1],
+      ["War", 0],
+    ]);
   });
 
   it("serves a config path and a pid so a client edits the right file and sees the right process", async () => {

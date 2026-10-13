@@ -18,7 +18,7 @@
  *    credentials) without dropping the health listener a client is watching.
  */
 import { createWiki } from "wiki";
-import type { IWiki, IWorkspaceSummary, WorkspaceId } from "wiki";
+import type { ITreeNode, IWiki, IWorkspaceSummary, WorkspaceId } from "wiki";
 import { AttachmentClient } from "wiki/attachments";
 import { CredentialsStore, defaultCredentialsPath, loginLoopback, resolveAuthorization } from "wiki/auth-client";
 import { Registry } from "wiki/registry";
@@ -33,10 +33,14 @@ import { MarkdownDiskProjector } from "./markdown-projection.js";
 import { WorkspaceMirror } from "./mirror.js";
 import { ServerProbe } from "./server-probe.js";
 import { EmitterSupervisor } from "./supervisor.js";
-import { startHealthServer, HealthPortInUseError, type HealthServer } from "./health.js";
+import { startHealthServer, HealthPortInUseError, type HealthServer, type MirrorTreePage } from "./health.js";
 
 /** How long the service refuses to auto-restart again after restarting. */
 const MIN_RESTART_INTERVAL_MS = 60_000;
+
+/** How deep, and how patiently, `GET /_mirror/workspaces/{id}/tree` walks a workspace. */
+const TREE_MAX_DEPTH = 3;
+const TREE_TIMEOUT_MS = 15_000;
 
 /** A running mirror: the engine, every supervised emitter, the health endpoint, and a `close()`. */
 export interface RunningMirror {
@@ -119,6 +123,7 @@ export class MirrorService implements RunningMirror {
       probe: (id) => this.probe?.workspace(id),
       nameOf: (id) => this.catalog.nameOf(id),
       catalog: () => this.catalog.get(),
+      tree: (id) => this.pageTree(id),
       logger: this.logger,
     });
     this.logger.info("wiki-mirror: health endpoint listening", { url: this.healthServer.url });
@@ -266,6 +271,35 @@ export class MirrorService implements RunningMirror {
     const supervisors = this.supervisorList;
     this.supervisorList = [];
     await Promise.all(supervisors.map((s) => s.stop()));
+  }
+
+  /**
+   * A workspace's pages to depth {@link TREE_MAX_DEPTH}, for picking a subtree root. Opening a
+   * workspace this machine doesn't mirror leaves its tail running until the next engine
+   * rebuild: the engine has no way to close a single handle.
+   */
+  private async pageTree(workspaceId: string): Promise<MirrorTreePage[]> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`timed out opening workspace ${workspaceId}`)), TREE_TIMEOUT_MS);
+      timer.unref();
+    });
+    try {
+      const handle = await Promise.race([this.engine.wiki.openWorkspace(workspaceId as WorkspaceId), timeout]);
+      const root = await handle.tree();
+      const pages: MirrorTreePage[] = [];
+      const walk = (nodes: readonly ITreeNode[], depth: number): void => {
+        if (depth > TREE_MAX_DEPTH) return;
+        for (const node of nodes) {
+          pages.push({ id: node.id, title: node.title, type: node.type ?? "", depth, archived: node.archived === true });
+          walk(node.children, depth + 1);
+        }
+      };
+      walk(root.children, 0);
+      return pages;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private authStatus(): AuthStatus {

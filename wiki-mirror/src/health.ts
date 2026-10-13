@@ -9,6 +9,7 @@
  * | `GET /_mirror/health` | liveness — always `200 {status:"ok"}` while the process is up |
  * | `GET /_mirror/status` | the full snapshot: process, auth, host reachability, per-workspace |
  * | `GET /_mirror/workspaces` | the namespace catalog + which entries this machine mirrors |
+ * | `GET /_mirror/workspaces/{id}/tree` | a workspace's top pages, flattened, for picking a subtree root |
  *
  * Every response carries permissive CORS: wiki-ui runs at a *different* origin
  * (`localhost:3000`) and reads this cross-origin, exactly as it already reads the Durable
@@ -51,8 +52,19 @@ export interface CatalogWorkspaceEntry {
   readonly id: string;
   readonly name: string;
   readonly status: string;
-  /** The absolute root this machine mirrors it to, or null when it is not configured here. */
+  /** The root this machine mirrors the WHOLE workspace to, or null when no entry covers all of it. */
   readonly mirroredRoot: string | null;
+  /** Every entry mirroring this workspace here, whole or by subtree. */
+  readonly mirrors: readonly { readonly root: string; readonly subtreeRootId: string | null }[];
+}
+
+/** One page of `GET /_mirror/workspaces/{id}/tree`: depth 0 is a top-level page. */
+export interface MirrorTreePage {
+  readonly id: string;
+  readonly title: string;
+  readonly type: string;
+  readonly depth: number;
+  readonly archived: boolean;
 }
 
 /** What {@link startHealthServer} needs to answer the probes. */
@@ -76,6 +88,8 @@ export interface HealthServerOptions {
   readonly nameOf?: (workspaceId: string) => string | undefined;
   /** Backs `GET /_mirror/workspaces`; absent → the route answers 503. */
   readonly catalog?: () => Promise<readonly IWorkspaceSummary[]>;
+  /** Backs `GET /_mirror/workspaces/{id}/tree`; absent or failing → the route answers 503. */
+  readonly tree?: (workspaceId: string) => Promise<readonly MirrorTreePage[]>;
   readonly configPath?: string | null;
   /** Process start time (ms epoch) for `uptimeMs`; defaults to "now". */
   readonly startedAt?: number;
@@ -158,22 +172,33 @@ export function startHealthServer(options: HealthServerOptions): Promise<HealthS
     const load = options.catalog;
     if (load === undefined) throw new Error("this mirror has no catalog source");
     const entries = await load();
-    const roots = new Map<string, string>();
+    const mirrors = new Map<string, { root: string; subtreeRootId: string | null }[]>();
     for (const ws of await Promise.all(sourcesOf().map((s) => s.status()))) {
-      roots.set(ws.workspaceId, ws.root);
+      const list = mirrors.get(ws.workspaceId) ?? [];
+      list.push({ root: ws.root, subtreeRootId: ws.subtreeRootId });
+      mirrors.set(ws.workspaceId, list);
     }
-    return entries.map((e) => ({
-      id: e.id,
-      name: e.name,
-      status: e.status,
-      mirroredRoot: roots.get(e.id) ?? null,
-    }));
+    return entries.map((e) => {
+      const mine = mirrors.get(e.id) ?? [];
+      return {
+        id: e.id,
+        name: e.name,
+        status: e.status,
+        mirroredRoot: mine.find((m) => m.subtreeRootId === null)?.root ?? null,
+        mirrors: mine,
+      };
+    });
+  };
+
+  const buildTree = async (workspaceId: string): Promise<readonly MirrorTreePage[]> => {
+    if (options.tree === undefined) throw new Error("this mirror has no tree source");
+    return options.tree(workspaceId);
   };
 
   const server: Server = createServer((req, res) => {
     // A rejection here would be an unhandled rejection, i.e. a dead SERVICE — infinitely worse
     // than a 500 on one poll.
-    handle(req, res, buildStatus, buildCatalog).catch((err: unknown) => {
+    handle(req, res, buildStatus, buildCatalog, buildTree).catch((err: unknown) => {
       options.logger?.error("wiki-mirror: health request failed", {
         path: req.url,
         error: err instanceof Error ? err.message : String(err),
@@ -233,6 +258,7 @@ async function handle(
   res: ServerResponse,
   buildStatus: () => Promise<MirrorStatusResponse>,
   buildCatalog: () => Promise<readonly CatalogWorkspaceEntry[]>,
+  buildTree: (workspaceId: string) => Promise<readonly MirrorTreePage[]>,
 ): Promise<void> {
   const path = (req.url ?? "/").split("?")[0];
 
@@ -260,6 +286,22 @@ async function handle(
       // Unlike /status, this route has no useful degraded body: a client asking for the catalog
       // needs to know it did NOT get one.
       sendJson(res, 503, { error: "catalog_unavailable", message: err instanceof Error ? err.message : String(err) });
+    }
+    return;
+  }
+  const treeMatch = /^\/_mirror\/workspaces\/([^/]+)\/tree$/.exec(path);
+  if (treeMatch !== null) {
+    let workspaceId: string;
+    try {
+      workspaceId = decodeURIComponent(treeMatch[1]);
+    } catch {
+      sendJson(res, 400, { error: "bad_workspace_id", path });
+      return;
+    }
+    try {
+      sendJson(res, 200, { pages: await buildTree(workspaceId) });
+    } catch (err) {
+      sendJson(res, 503, { error: "tree_unavailable", message: err instanceof Error ? err.message : String(err) });
     }
     return;
   }

@@ -150,7 +150,7 @@ export class ServerProbe {
 
   /** One probe round: HEAD every mirrored workspace, then re-derive reachability + pace. */
   async round(): Promise<void> {
-    const workspaces = await this.options.snapshot();
+    const workspaces = perWorkspace(await this.options.snapshot());
     const roundAt = this.now();
     if (workspaces.length === 0) {
       // Nothing configured: probe the catalog instead, so "is the server up?" still has an answer.
@@ -259,6 +259,31 @@ export class ServerProbe {
       return { kind: "unreachable", error: err instanceof Error ? err.message : String(err) };
     }
   }
+}
+
+/**
+ * One entry per workspace, merging the entries that mirror its subtrees: they share a stream,
+ * so they share one HEAD. It is connected if any entry is, and only as current as the
+ * least-recently reconciled connected entry.
+ */
+function perWorkspace(entries: readonly MirrorWorkspaceStatus[]): MirrorWorkspaceStatus[] {
+  const byId = new Map<string, MirrorWorkspaceStatus>();
+  for (const ws of entries) {
+    const prev = byId.get(ws.workspaceId);
+    if (prev === undefined) {
+      byId.set(ws.workspaceId, ws);
+      continue;
+    }
+    const live = [prev, ws].filter((w) => w.connected);
+    const lastReconcileAt =
+      live.length === 0
+        ? null
+        : live.some((w) => w.lastReconcileAt === null)
+          ? null
+          : Math.min(...live.map((w) => w.lastReconcileAt as number));
+    byId.set(ws.workspaceId, { ...prev, connected: live.length > 0, lastReconcileAt });
+  }
+  return [...byId.values()];
 }
 
 /** Transitions the service reacts to: a host that came back, or a tail that stopped keeping pace. */

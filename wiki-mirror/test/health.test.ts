@@ -16,10 +16,11 @@ import { Registry } from "wiki/registry";
 import { startTestServer, wikiOn } from "wiki/testing";
 
 import { silentLogger } from "../src/logger.js";
-import { startHealthServer } from "../src/health.js";
+import { startHealthServer, type MirrorTreePage } from "../src/health.js";
 import { startMirror } from "../src/main.js";
 import { MarkdownDiskProjector } from "../src/markdown-projection.js";
 import { WorkspaceMirror } from "../src/mirror.js";
+import type { IWorkspaceStatusSource } from "../src/supervisor.js";
 
 const Note = definePageType({
   type: "note",
@@ -96,7 +97,11 @@ describe("wiki-mirror — local health endpoint", () => {
   /** Start a health server over `mirrors` on an ephemeral port; registered for teardown. */
   async function makeHealth(
     mirrors: readonly WorkspaceMirror[],
-    extra: { catalog?: () => Promise<readonly IWorkspaceSummary[]>; nameOf?: (id: string) => string | undefined } = {},
+    extra: {
+      catalog?: () => Promise<readonly IWorkspaceSummary[]>;
+      nameOf?: (id: string) => string | undefined;
+      tree?: (id: string) => Promise<readonly MirrorTreePage[]>;
+    } = {},
   ): Promise<{ url: string }> {
     const health = await startHealthServer({
       host: "127.0.0.1",
@@ -251,10 +256,76 @@ describe("wiki-mirror — local health endpoint", () => {
     const body = await res.json();
     expect(body.workspaces).toEqual(
       expect.arrayContaining([
-        { id: writer.id, name: "Docs", status: "active", mirroredRoot: root },
-        { id: other.id, name: "Other", status: "active", mirroredRoot: null },
+        { id: writer.id, name: "Docs", status: "active", mirroredRoot: root, mirrors: [{ root, subtreeRootId: null }] },
+        { id: other.id, name: "Other", status: "active", mirroredRoot: null, mirrors: [] },
       ]),
     );
+  });
+
+  it("GET /_mirror/workspaces lists subtree entries, and only a whole-workspace entry sets mirroredRoot", async () => {
+    const fixed = (root: string, subtreeRootId: string | null): IWorkspaceStatusSource => ({
+      status: async () => ({
+        workspaceId: writer.id,
+        root,
+        subtreeRootId,
+        appliedVersion: 1,
+        lastReconcileAt: null,
+        lastReconcileError: null,
+        connected: true,
+      }),
+    });
+    const wiki = catalogWiki();
+    const health = await startHealthServer({
+      host: "127.0.0.1",
+      port: 0,
+      namespace: "test",
+      streamBaseUrl: url,
+      sources: [fixed("/games/ball", "toc:ball"), fixed("/games/war", "toc:war")],
+      catalog: () => wiki.listWorkspaces(),
+      logger: silentLogger,
+    });
+    cleanup.push(() => health.stop());
+
+    const body = await (await fetch(`${health.url}/_mirror/workspaces`)).json();
+    expect(body.workspaces.find((w: { id: string }) => w.id === writer.id)).toEqual({
+      id: writer.id,
+      name: "Docs",
+      status: "active",
+      mirroredRoot: null,
+      mirrors: [
+        { root: "/games/ball", subtreeRootId: "toc:ball" },
+        { root: "/games/war", subtreeRootId: "toc:war" },
+      ],
+    });
+  });
+
+  it("GET /_mirror/workspaces/{id}/tree decodes the id and serves the pages", async () => {
+    const asked: string[] = [];
+    const pages: MirrorTreePage[] = [{ id: "toc:a", title: "A", type: "toc", depth: 0, archived: false }];
+    const health = await makeHealth([], {
+      tree: async (id) => {
+        asked.push(id);
+        return pages;
+      },
+    });
+    const res = await fetch(`${health.url}/_mirror/workspaces/ws:abc%2Fdef/tree`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ pages });
+    expect(asked).toEqual(["ws:abc/def"]);
+  });
+
+  it("GET /_mirror/workspaces/{id}/tree answers 503 when the tree can't be read", async () => {
+    const failing = await makeHealth([], {
+      tree: async () => {
+        throw new Error("host down");
+      },
+    });
+    const res = await fetch(`${failing.url}/_mirror/workspaces/ws:x/tree`);
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: "tree_unavailable", message: "host down" });
+
+    const none = await makeHealth([]);
+    expect((await fetch(`${none.url}/_mirror/workspaces/ws:x/tree`)).status).toBe(503);
   });
 
   it("GET /_mirror/workspaces answers 503 when there is no catalog source", async () => {

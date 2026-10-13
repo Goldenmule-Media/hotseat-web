@@ -167,6 +167,49 @@ describe("wiki-mirror — server probe", () => {
     expect(events).toContainEqual({ type: "wedged", workspaceId: WS, behindSince: 1_000_000 });
   });
 
+  it("HEADs a workspace once however many subtree entries mirror it", async () => {
+    const { impl, urls } = fakeFetch([okAt("1")]);
+    const probe = new ServerProbe({
+      baseUrl: "http://host",
+      namespace: "ns",
+      snapshot: async () => [
+        statusOf({ root: "/a", subtreeRootId: "toc:a" }),
+        statusOf({ root: "/b", subtreeRootId: "toc:b" }),
+      ],
+      logger: silentLogger,
+      fetchImpl: impl,
+    });
+    await probe.round();
+    expect(urls).toEqual([`http://host/ns/workspace/${encodeURIComponent(WS)}`]);
+  });
+
+  it("judges a shared workspace's pace by its least-recently reconciled entry", async () => {
+    let now = 1_000_000;
+    const events: ProbeEvent[] = [];
+    const { impl } = fakeFetch([okAt("10"), okAt("11"), okAt("11")]);
+    const probe = new ServerProbe({
+      baseUrl: "http://host",
+      namespace: "ns",
+      // One entry keeps up; the other stopped applying long ago.
+      snapshot: async () => [
+        statusOf({ root: "/a", subtreeRootId: "toc:a", lastReconcileAt: now }),
+        statusOf({ root: "/b", subtreeRootId: "toc:b", lastReconcileAt: 500_000 }),
+      ],
+      logger: silentLogger,
+      fetchImpl: impl,
+      stuckAfterMs: 60_000,
+      now: () => now,
+    });
+    probe.on((e) => events.push(e));
+
+    await probe.round();
+    await probe.round();
+    now += 61_000;
+    await probe.round();
+    expect(probe.workspace(WS)?.stuck).toBe(true);
+    expect(events).toContainEqual({ type: "wedged", workspaceId: WS, behindSince: 1_000_000 });
+  });
+
   it("does NOT call a mirror wedged for a commit it already reconciled between rounds", async () => {
     // The real ordering: the tail reconciles milliseconds after the append, and the probe only
     // finds out on its NEXT round. Stamping "behind" at the moment the probe noticed would make
