@@ -18,6 +18,11 @@ describe("renderMarkdown", () => {
     expect(html).toContain('href="/ws%3Aother/document%3Axyz"');
   });
 
+  it("routes a cross-workspace ref inside content, e.g. a table cell", () => {
+    const html = renderMarkdown("| Dep |\n| --- |\n| See [Addon](wiki://ws:other/document:xyz) |", "ws:1");
+    expect(html).toContain('<a href="/ws%3Aother/document%3Axyz">Addon</a>');
+  });
+
   it("leaves an MCP resource URI alone", () => {
     const html = renderMarkdown("[Res](wiki://default/page/ws:other/document:xyz)", "ws:1");
     expect(html).toContain('href="wiki://default/page/ws:other/document:xyz"');
