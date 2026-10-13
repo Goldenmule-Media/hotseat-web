@@ -13,6 +13,16 @@ describe("renderMarkdown", () => {
     expect(html).toContain("/ws%3A1/document%3Aabc-123");
   });
 
+  it("points a cross-workspace link at the other workspace's route", () => {
+    const html = renderMarkdown("- uses → [Addon](wiki://ws:other/document:xyz)", "ws:1");
+    expect(html).toContain('href="/ws%3Aother/document%3Axyz"');
+  });
+
+  it("leaves an MCP resource URI alone", () => {
+    const html = renderMarkdown("[Res](wiki://default/page/ws:other/document:xyz)", "ws:1");
+    expect(html).toContain('href="wiki://default/page/ws:other/document:xyz"');
+  });
+
   it("leaves an attachment link alone so the DOM pass can resolve it", () => {
     // `attachment:<sha>` matches PAGE_ID_RE, so without an explicit guard a PDF link
     // would navigate into the wiki instead of downloading.

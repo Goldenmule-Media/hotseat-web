@@ -7,11 +7,14 @@ export function crossWorkspaceHref(workspace: WorkspaceId, page: PageId): string
   return `${SCHEME}${workspace}/${page}`;
 }
 
-/** The inverse of {@link crossWorkspaceHref}; `undefined` for any other href. */
+/**
+ * The inverse of {@link crossWorkspaceHref}; `undefined` for any other href, including the
+ * MCP resource URIs (`wiki://{ns}/page/{ws}/{page}`), whose page part would contain a slash.
+ */
 export function parseCrossWorkspaceHref(href: string): { workspace: WorkspaceId; page: PageId } | undefined {
   if (!href.startsWith(SCHEME)) return undefined;
   const rest = href.slice(SCHEME.length);
   const slash = rest.indexOf("/");
-  if (slash <= 0 || slash === rest.length - 1) return undefined;
+  if (slash <= 0 || slash === rest.length - 1 || rest.indexOf("/", slash + 1) !== -1) return undefined;
   return { workspace: rest.slice(0, slash) as WorkspaceId, page: rest.slice(slash + 1) as PageId };
 }

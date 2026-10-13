@@ -108,5 +108,6 @@ describe("cross-workspace links", () => {
     expect(parseCrossWorkspaceHref(href)).toEqual({ workspace: other.id, page: remote });
     expect(parseCrossWorkspaceHref(remote)).toBeUndefined();
     expect(parseCrossWorkspaceHref("wiki://ws-only")).toBeUndefined();
+    expect(parseCrossWorkspaceHref(`wiki://default/page/${other.id}/${remote}`)).toBeUndefined();
   });
 });

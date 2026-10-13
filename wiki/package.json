@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./attachments": "./src/attachments.ts",
+    "./links": "./src/render/cross-workspace-href.ts",
     "./admin": "./src/admin.ts",
     "./auth-client": "./src/auth-client.ts",
     "./authoring": "./src/authoring.ts",
